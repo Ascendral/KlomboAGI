@@ -11,7 +11,11 @@ class PolicyEngine:
         "echo",
         "rg",
         "find",
+        "grep",
         "python3",
+        "head",
+        "tail",
+        "wc",
     }
     BLOCKED_TOKENS = {"rm", "sudo", "mv", "chmod", "chown", "git", "curl", "wget"}
     BLOCKED_CHARS = {";", "&", "|", ">", "<", "`", "$("}
