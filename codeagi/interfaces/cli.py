@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_create.add_argument("--action-kind")
     task_create.add_argument("--path")
     task_create.add_argument("--content")
-    task_create.add_argument("--command")
+    task_create.add_argument("--command", dest="task_command_str")
     task_create.add_argument("--expected")
     task_create.add_argument("--replacement")
     task_sub.add_parser("list")
@@ -75,8 +75,8 @@ def main(argv: list[str] | None = None) -> int:
                 action_payload["path"] = args.path
             if args.content is not None:
                 action_payload["content"] = args.content
-            if args.command:
-                action_payload["command"] = args.command
+            if args.task_command_str:
+                action_payload["command"] = args.task_command_str
             if args.expected is not None:
                 action_payload["expected"] = args.expected
             if args.replacement is not None:

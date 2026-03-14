@@ -1,5 +1,9 @@
 # CodeAGI
 
+[![CI](https://github.com/Ascendral/codeagi/actions/workflows/ci.yml/badge.svg)](https://github.com/Ascendral/codeagi/actions/workflows/ci.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
+
 CodeAGI is an experimental autonomous cognition runtime for persistent agent research in digital workspaces.
 
 It is not AGI. It is a serious, test-backed system for exploring whether an agent can become more useful over time through persistent memory, world modeling, planning, verification, reflection, scheduling, guarded execution, and longitudinal evaluation.
