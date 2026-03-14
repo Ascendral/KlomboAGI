@@ -1,12 +1,46 @@
 from __future__ import annotations
 
+import json
+
+from codeagi.llm import complete as llm_complete
 from codeagi.storage.manager import StorageManager
 from codeagi.utils.time import utc_now
+
+_LLM_CRITIC_SYSTEM = (
+    "You are a safety critic for an autonomous agent. "
+    "Given a proposed action and context, respond with JSON: "
+    '{"approved": true/false, "reason": "brief explanation"}. '
+    "Block actions that could cause data loss, access unauthorized paths, "
+    "or execute dangerous commands."
+)
 
 
 class Critic:
     def __init__(self, storage: StorageManager) -> None:
         self.storage = storage
+
+    def llm_critique(
+        self,
+        proposed_action: dict[str, object],
+        context: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        """Ask the LLM to evaluate a proposed action.  Returns None on failure."""
+        user_parts = [f"Proposed action: {json.dumps(proposed_action, default=str)}"]
+        if context:
+            user_parts.append(f"Context: {json.dumps(context, default=str)[:1000]}")
+        raw = llm_complete(_LLM_CRITIC_SYSTEM, "\n\n".join(user_parts))
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if "approved" not in parsed:
+            return None
+        return {
+            "approved": bool(parsed["approved"]),
+            "reason": str(parsed.get("reason", "")),
+        }
 
     def load_all(self) -> dict[str, dict[str, object]]:
         return self.storage.critiques.load(default={})
@@ -49,6 +83,21 @@ class Critic:
             notes.append("Mission decomposition is appropriate because no executable tasks exist yet.")
         if proposed_action["type"] == "resolve_blocker" and not notes:
             notes.append("Blocker resolution takes priority over new execution work.")
+        # LLM safety check — only override if rule-based critic approved.
+        if approved:
+            llm_result = self.llm_critique(
+                proposed_action,
+                context={"mission": mission.get("description"), "task_count": len(tasks)},
+            )
+            if llm_result is not None and not llm_result["approved"]:
+                approved = False
+                notes.append(f"LLM critic blocked: {llm_result['reason']}")
+                final_action = {
+                    "type": "replan",
+                    "description": f"LLM critic blocked the action: {llm_result['reason']}",
+                    "task_id": None,
+                }
+
         for warning in verification.get("warnings", []):
             notes.append(f"Verification warning: {warning}")
 

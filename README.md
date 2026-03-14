@@ -101,6 +101,49 @@ Supported commands:
 - `python3 -m codeagi task list`
 - `python3 -m codeagi eval repo --fixture repo_search|repo_patch`
 
+## LLM Configuration
+
+CodeAGI supports optional LLM integration for smarter planning, safety critique, and reflection. It works with **any OpenAI-compatible API** — Ollama, OpenAI, Groq, DeepSeek, and others. No external Python packages are required; all HTTP calls use the standard library.
+
+When the LLM is unavailable, the system automatically falls back to its built-in keyword and rule-based heuristics.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `CODEAGI_LLM_ENABLED` | `0` | Set to `1` to enable LLM calls |
+| `CODEAGI_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
+| `CODEAGI_LLM_MODEL` | `qwen3:8b` | Model name |
+| `CODEAGI_LLM_API_KEY` | *(empty)* | API key (not needed for Ollama) |
+
+### Examples
+
+**Ollama (default, no API key needed):**
+```bash
+ollama pull qwen3:8b
+export CODEAGI_LLM_ENABLED=1
+export CODEAGI_LLM_BASE_URL=http://localhost:11434/v1
+python3 -m codeagi run
+```
+
+**OpenAI:**
+```bash
+export CODEAGI_LLM_ENABLED=1
+export CODEAGI_LLM_BASE_URL=https://api.openai.com/v1
+export CODEAGI_LLM_MODEL=gpt-4o-mini
+export CODEAGI_LLM_API_KEY=sk-...
+python3 -m codeagi run
+```
+
+**Groq:**
+```bash
+export CODEAGI_LLM_ENABLED=1
+export CODEAGI_LLM_BASE_URL=https://api.groq.com/openai/v1
+export CODEAGI_LLM_MODEL=llama-3.3-70b-versatile
+export CODEAGI_LLM_API_KEY=gsk_...
+python3 -m codeagi run
+```
+
 ## Safety Model
 
 Command execution is intentionally restricted.

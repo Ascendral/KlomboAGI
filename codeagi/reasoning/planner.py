@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import json
+
 from codeagi.core.state import Plan, PlanStep
+from codeagi.llm import complete as llm_complete
 from codeagi.storage.manager import StorageManager
 from codeagi.utils.time import utc_now
+
+_LLM_PLANNER_SYSTEM = (
+    "You are a task planner for an autonomous coding agent. "
+    "Given a mission and current state, propose the next concrete task. "
+    'Respond with JSON: {"action": "search_files|write_file|apply_patch|run_command|read_file", '
+    '"description": "what to do", "args": {"path": "...", "pattern": "...", etc}}'
+)
 
 
 class Planner:
@@ -44,7 +54,46 @@ class Planner:
         plan = Plan(mission_id=str(mission["id"]), summary=summary, steps=steps)
         return self.save(plan.to_dict())
 
+    def llm_plan(
+        self,
+        mission: dict[str, object],
+        tasks: list[dict[str, object]] | None = None,
+        world_state: dict[str, object] | None = None,
+        working_memory: dict[str, object] | None = None,
+    ) -> dict[str, object] | None:
+        """Ask the LLM for a concrete next task.  Returns None on failure."""
+        user_parts = [f"Mission: {mission['description']}"]
+        if tasks:
+            summaries = [f"- [{t.get('status','?')}] {t.get('description','')}" for t in tasks]
+            user_parts.append("Current tasks:\n" + "\n".join(summaries))
+        if world_state:
+            user_parts.append(f"World state snapshot: {json.dumps(world_state, default=str)[:800]}")
+        if working_memory:
+            user_parts.append(f"Working memory: {json.dumps(working_memory, default=str)[:800]}")
+        user_prompt = "\n\n".join(user_parts)
+
+        raw = llm_complete(_LLM_PLANNER_SYSTEM, user_prompt)
+        if not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        action = parsed.get("action")
+        if action not in {"search_files", "write_file", "apply_patch", "run_command", "read_file"}:
+            return None
+        return {
+            "description": str(parsed.get("description", f"LLM-planned: {action}")),
+            "action_kind": action,
+            "action_payload": parsed.get("args") or {},
+        }
+
     def draft_task(self, mission: dict[str, object]) -> dict[str, object]:
+        # Try LLM-based planning first, fall back to keyword heuristics.
+        llm_result = self.llm_plan(mission)
+        if llm_result is not None:
+            return llm_result
+
         description = str(mission["description"])
         lower = description.lower()
         if "search" in lower and "repo" in lower:
