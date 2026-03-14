@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 
 from codeagi.core.loop import RuntimeLoop
 from codeagi.core.mission import MissionManager
@@ -16,7 +17,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init")
     sub.add_parser("status")
-    sub.add_parser("run")
+    run_parser = sub.add_parser("run")
+    run_parser.add_argument("--max-cycles", type=int, default=1, help="Number of cycles to run (0 for infinite)")
+    run_parser.add_argument("--watch", type=int, default=0, help="Seconds to wait between cycles (enables continuous mode)")
     sub.add_parser("doctor")
 
     eval_parser = sub.add_parser("eval")
@@ -46,6 +49,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_continuous(runtime: RuntimeLoop, args: argparse.Namespace) -> dict[str, object]:
+    """Run one or more cycles. Returns the last cycle payload."""
+    max_cycles = args.max_cycles
+    watch_interval = args.watch
+    infinite = max_cycles == 0
+    cycle_number = 0
+    last_payload: dict[str, object] = {}
+
+    while infinite or cycle_number < max_cycles:
+        cycle_number += 1
+        payload = runtime.run_cycle()
+        last_payload = payload
+
+        # Stop on idle (no active missions)
+        if payload.get("status") == "idle":
+            break
+
+        # Stop on budget exhaustion when not in watch mode
+        if not watch_interval and payload.get("cycle_trace", {}).get("stop_reason") == "budget_exhausted":
+            break
+
+        # Check if we've reached the cycle limit
+        if not infinite and cycle_number >= max_cycles:
+            break
+
+        # Wait between cycles in watch/continuous mode
+        if watch_interval and (infinite or cycle_number < max_cycles):
+            time.sleep(watch_interval)
+
+    return last_payload
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -62,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             payload = runtime.status()
         elif args.command == "run":
-            payload = runtime.run_cycle()
+            payload = _run_continuous(runtime, args)
         elif args.command == "eval" and args.eval_command == "repo":
             payload = repo_runner.run_fixture(args.fixture)
         elif args.command == "mission" and args.mission_command == "create":

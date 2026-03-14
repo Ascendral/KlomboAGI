@@ -248,5 +248,6 @@ class CognitionLoopTests(unittest.TestCase):
 
         payload = self.runtime.run_cycle()
 
-        self.assertEqual(payload["cycle_trace"]["step_count"], 1)
+        # Replan recovery retries up to 2 times before giving up (3 steps total)
+        self.assertEqual(payload["cycle_trace"]["step_count"], 3)
         self.assertEqual(payload["cycle_trace"]["stop_reason"], "replan_requested")

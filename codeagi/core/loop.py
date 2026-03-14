@@ -117,6 +117,9 @@ class RuntimeLoop:
         final_procedure = None
         final_semantic_fact = None
         stop_reason = "budget_exhausted"
+        replan_count = 0
+        max_replans = 2
+        failure_count = 0
 
         for step_number in range(1, self.max_cycle_steps + 1):
             tasks = self.missions.list_tasks(mission["id"])
@@ -208,9 +211,29 @@ class RuntimeLoop:
             final_semantic_fact = semantic_fact
 
             if next_action["type"] == "replan":
+                if replan_count < max_replans:
+                    replan_count += 1
+                    self.storage.event_log.append(
+                        "runtime.replan.recovery",
+                        {"mission_id": mission["id"], "replan_count": replan_count},
+                    )
+                    # Refresh tasks and rebuild plan on next iteration
+                    continue
                 stop_reason = "replan_requested"
                 break
             if action_outcome["status"] in {"failed", "blocked"}:
+                failure_count += 1
+                if failure_count < max_replans and replan_count < max_replans:
+                    replan_count += 1
+                    self.storage.event_log.append(
+                        "runtime.failure.replan",
+                        {
+                            "mission_id": mission["id"],
+                            "failure_count": failure_count,
+                            "replan_count": replan_count,
+                        },
+                    )
+                    continue
                 stop_reason = action_outcome["status"]
                 break
             if mission["status"] == "completed" or action_outcome.get("mission_status") == "completed":
