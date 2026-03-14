@@ -3,7 +3,7 @@
 Supports any OpenAI-compatible API: OpenAI, Ollama, Groq, DeepSeek, etc.
 Configuration via environment variables:
   CODEAGI_LLM_BASE_URL  — API base URL (default: http://localhost:11434/v1)
-  CODEAGI_LLM_MODEL     — Model name   (default: qwen3:8b)
+  CODEAGI_LLM_MODEL     — Model name   (default: qwen3:14b)
   CODEAGI_LLM_API_KEY   — API key      (default: empty string, for Ollama)
   CODEAGI_LLM_ENABLED   — Set to "1" to enable LLM calls (default: "0")
 """
@@ -21,7 +21,7 @@ def _base_url() -> str:
 
 
 def _model() -> str:
-    return os.getenv("CODEAGI_LLM_MODEL", "qwen3:8b")
+    return os.getenv("CODEAGI_LLM_MODEL", "qwen3:14b")
 
 
 def _api_key() -> str:

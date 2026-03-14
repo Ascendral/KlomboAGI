@@ -117,14 +117,14 @@ When the LLM is unavailable, the system automatically falls back to its built-in
 |---|---|---|
 | `CODEAGI_LLM_ENABLED` | `0` | Set to `1` to enable LLM calls |
 | `CODEAGI_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
-| `CODEAGI_LLM_MODEL` | `qwen3:8b` | Model name |
+| `CODEAGI_LLM_MODEL` | `qwen3:14b` | Model name |
 | `CODEAGI_LLM_API_KEY` | *(empty)* | API key (not needed for Ollama) |
 
 ### Examples
 
 **Ollama (default, no API key needed):**
 ```bash
-ollama pull qwen3:8b
+ollama pull qwen3:14b
 export CODEAGI_LLM_ENABLED=1
 export CODEAGI_LLM_BASE_URL=http://localhost:11434/v1
 python3 -m codeagi run
