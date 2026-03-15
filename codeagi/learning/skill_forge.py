@@ -52,6 +52,14 @@ class SkillForge:
 
     def __init__(self, storage: StorageManager) -> None:
         self.storage = storage
+        self._evolution: object | None = None
+
+    def _get_evolution(self):
+        """Lazy import to avoid circular dependency."""
+        if self._evolution is None:
+            from codeagi.learning.skill_evolution import SkillEvolution
+            self._evolution = SkillEvolution(self.storage)
+        return self._evolution
 
     def scan_and_promote(self) -> list[dict[str, object]]:
         """Scan all procedures and promote eligible ones to shared skills.
@@ -78,6 +86,19 @@ class SkillForge:
 
             skill = self._convert_to_skill(procedure, skill_name)
             if skill is not None:
+                # Test before promotion — reject structurally invalid skills
+                test_result = self._get_evolution().test_skill(skill)
+                if not test_result.passed:
+                    self.storage.event_log.append(
+                        "skillforge.promotion_rejected",
+                        {
+                            "procedure_id": procedure.get("id"),
+                            "skill_name": skill_name,
+                            "reason": test_result.message,
+                        },
+                    )
+                    continue
+
                 self._write_skill(skill)
                 promoted.append(skill)
                 self.storage.event_log.append(
@@ -111,6 +132,15 @@ class SkillForge:
 
         skill = self._convert_to_skill(procedure, skill_name)
         if skill is not None:
+            # Test even force-promoted skills
+            test_result = self._get_evolution().test_skill(skill)
+            if not test_result.passed:
+                self.storage.event_log.append(
+                    "skillforge.force_promotion_rejected",
+                    {"procedure_id": procedure_id, "reason": test_result.message},
+                )
+                return None
+
             self._write_skill(skill)
             self.storage.event_log.append(
                 "skillforge.force_promoted",
