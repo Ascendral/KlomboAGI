@@ -8,6 +8,8 @@ from codeagi.core.mission import MissionManager
 from codeagi.core.scheduler import Scheduler
 from codeagi.evals.autonomy import AutonomyEvaluator
 from codeagi.learning.consolidation import MemoryConsolidator
+from codeagi.learning.skill_forge import SkillForge
+from codeagi.learning.skill_forge import SkillForge
 from codeagi.learning.reflection import ReflectionEngine
 from codeagi.learning.semantic import SemanticMemory
 from codeagi.memory.working_memory import WorkingMemoryManager
@@ -35,6 +37,8 @@ class RuntimeLoop:
         self.semantic_memory = SemanticMemory(storage)
         self.autonomy = AutonomyEvaluator(storage)
         self.world_model = WorldModel(storage)
+        self.skill_forge = SkillForge(storage)
+        self.skill_forge = SkillForge(storage)
         self.max_cycle_steps = int(load_config()["runtime"]["max_cycle_steps"])
 
     def initialize(self) -> dict[str, object]:
@@ -77,6 +81,8 @@ class RuntimeLoop:
             "latest_reflection": reflections[-1] if reflections else None,
             "latest_autonomy_eval": autonomy_runs[-1] if autonomy_runs else None,
             "autonomy_report": autonomy_report,
+            "promoted_skills": final_promoted_skills,
+            "shared_skills": self.skill_forge.list_shared_skills(),
             "runtime_root": str(self.storage.paths.runtime_root),
             "long_term_root": str(self.storage.paths.long_term_root),
         }
@@ -116,6 +122,8 @@ class RuntimeLoop:
         final_reflection = None
         final_procedure = None
         final_semantic_fact = None
+        final_promoted_skills: list[dict[str, object]] = []
+        final_promoted_skills: list[dict[str, object]] = []
         stop_reason = "budget_exhausted"
         replan_count = 0
         max_replans = 2
@@ -190,6 +198,9 @@ class RuntimeLoop:
                 action_outcome=action_outcome,
             )
 
+            # SkillForge: promote high-confidence procedures to shared skill store
+            promoted_skills = self.skill_forge.scan_and_promote()
+
             step_history.append(
                 {
                     "step_number": step_number,
@@ -209,6 +220,8 @@ class RuntimeLoop:
             final_reflection = reflection
             final_procedure = procedure
             final_semantic_fact = semantic_fact
+            final_promoted_skills = promoted_skills
+            final_promoted_skills = promoted_skills
 
             if next_action["type"] == "replan":
                 if replan_count < max_replans:
