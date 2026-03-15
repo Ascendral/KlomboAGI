@@ -84,6 +84,10 @@ class StoragePaths:
         return self.long_term_root / "world" / "snapshots" / "history.json"
 
     @property
+    def decomposition_strategies_file(self) -> Path:
+        return self.long_term_root / "memory" / "procedural" / "decomposition_strategies.json"
+
+    @property
     def manifest_file(self) -> Path:
         return self.long_term_root / "manifests" / "objects.json"
 

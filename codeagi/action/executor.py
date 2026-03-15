@@ -3,6 +3,7 @@ from __future__ import annotations
 from codeagi.adapters.tool_adapter import ToolAdapter
 from codeagi.core.mission import MissionManager
 from codeagi.core.state import ActionOutcome
+from codeagi.reasoning.goal_refiner import GoalRefiner
 from codeagi.reasoning.planner import Planner
 from codeagi.storage.manager import StorageManager
 
@@ -13,6 +14,7 @@ class ActionExecutor:
         self.missions = MissionManager(storage)
         self.tools = ToolAdapter()
         self.planner = Planner(storage)
+        self.goal_refiner = GoalRefiner(storage)
 
     def execute(self, mission: dict[str, object], action: dict[str, object]) -> dict[str, object]:
         action_type = str(action["type"])
@@ -75,6 +77,21 @@ class ActionExecutor:
         return outcome.to_dict()
 
     def _decompose_mission(self, mission: dict[str, object], action: dict[str, object]) -> dict[str, object]:
+        # Use GoalRefiner for multi-step decomposition
+        nodes = self.goal_refiner.decompose(mission)
+        if len(nodes) > 1:
+            tasks = self.goal_refiner.create_tasks_from_decomposition(mission, nodes)
+            if tasks:
+                outcome = ActionOutcome(
+                    status="generated",
+                    action_type=action["type"],
+                    summary=f"Decomposed mission into {len(tasks)} tasks",
+                    mission_id=str(mission["id"]),
+                    task_description=str(mission["description"]),
+                    details={"task_count": len(tasks), "task_ids": [t.get("id", t.get("id")) for t in tasks]},
+                )
+                return outcome.to_dict()
+        # Fallback to single-task drafting
         drafted = self.planner.draft_task(mission)
         task = self.missions.create_task(
             str(mission["id"]),
