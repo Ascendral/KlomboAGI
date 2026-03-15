@@ -281,7 +281,7 @@ class GoalRefiner:
         """Pattern-match decomposition strategies."""
         lower = description.lower()
 
-        if re.search(r"\b(fix|bug|error|crash|broken|debug)\b", lower):
+        if re.search(r"\b(fix|bug|errors?|crash|broken|debug)\b", lower):
             return [
                 {"description": f"Search for error patterns: {_trunc(description)}", "action_kind": "search_files", "depends_on": []},
                 {"description": "Read and analyze relevant files", "action_kind": "read_file", "depends_on": [0]},
@@ -306,7 +306,7 @@ class GoalRefiner:
                 {"description": "Verify no regressions", "action_kind": "run_command", "depends_on": [2]},
             ]
 
-        if re.search(r"\b(test|spec|coverage)\b", lower):
+        if re.search(r"\b(tests?|spec|coverage)\b", lower):
             return [
                 {"description": f"Analyze code: {_trunc(description)}", "action_kind": "read_file", "depends_on": []},
                 {"description": "Write test cases", "action_kind": "write_file", "depends_on": [0]},

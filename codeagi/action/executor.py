@@ -77,21 +77,9 @@ class ActionExecutor:
         return outcome.to_dict()
 
     def _decompose_mission(self, mission: dict[str, object], action: dict[str, object]) -> dict[str, object]:
-        # Use GoalRefiner for multi-step decomposition
+        # Run GoalRefiner to build a decomposition plan (stored for learning)
         nodes = self.goal_refiner.decompose(mission)
-        if len(nodes) > 1:
-            tasks = self.goal_refiner.create_tasks_from_decomposition(mission, nodes)
-            if tasks:
-                outcome = ActionOutcome(
-                    status="generated",
-                    action_type=action["type"],
-                    summary=f"Decomposed mission into {len(tasks)} tasks",
-                    mission_id=str(mission["id"]),
-                    task_description=str(mission["description"]),
-                    details={"task_count": len(tasks), "task_ids": [t.get("id", t.get("id")) for t in tasks]},
-                )
-                return outcome.to_dict()
-        # Fallback to single-task drafting
+        # Use Planner to draft the next concrete, executable task
         drafted = self.planner.draft_task(mission)
         task = self.missions.create_task(
             str(mission["id"]),
