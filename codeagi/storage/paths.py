@@ -92,6 +92,14 @@ class StoragePaths:
         return self.long_term_root / "memory" / "procedural" / "decomposition_strategies.json"
 
     @property
+    def episodes_file(self) -> Path:
+        return self.runtime_root / "logs" / "episodes.json"
+
+    @property
+    def episode_index_file(self) -> Path:
+        return self.long_term_root / "memory" / "episodic" / "episode_index.json"
+
+    @property
     def manifest_file(self) -> Path:
         return self.long_term_root / "manifests" / "objects.json"
 

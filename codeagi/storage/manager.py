@@ -31,6 +31,8 @@ class StorageManager:
     world_snapshots: JsonStateStore
     execution_telemetry: JsonStateStore
     decomposition_strategies: JsonStateStore
+    episodes: JsonStateStore
+    episode_index: JsonStateStore
     event_log: EpisodicEventLog
 
     @classmethod
@@ -60,5 +62,7 @@ class StorageManager:
             world_snapshots=JsonStateStore(paths.world_snapshots_file, manifest_store, "world.snapshots"),
             execution_telemetry=JsonStateStore(paths.execution_telemetry_file, manifest_store, "runtime.execution_telemetry"),
             decomposition_strategies=JsonStateStore(paths.decomposition_strategies_file, manifest_store, "memory.decomposition_strategies"),
+            episodes=JsonStateStore(paths.episodes_file, manifest_store, "runtime.episodes"),
+            episode_index=JsonStateStore(paths.episode_index_file, manifest_store, "memory.episode_index"),
             event_log=EpisodicEventLog(paths.event_log_file, manifest_store),
         )
