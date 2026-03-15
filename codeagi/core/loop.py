@@ -10,6 +10,7 @@ from codeagi.evals.autonomy import AutonomyEvaluator
 from codeagi.learning.consolidation import MemoryConsolidator
 from codeagi.evals.execution_auditor import ExecutionAuditor, ActionTelemetry
 from codeagi.learning.skill_forge import SkillForge
+from codeagi.learning.episode_indexer import EpisodeIndexer
 from codeagi.learning.reflection import ReflectionEngine
 from codeagi.learning.semantic import SemanticMemory
 from codeagi.memory.working_memory import WorkingMemoryManager
@@ -39,6 +40,7 @@ class RuntimeLoop:
         self.world_model = WorldModel(storage)
         self.execution_auditor = ExecutionAuditor(storage)
         self.skill_forge = SkillForge(storage)
+        self.episode_indexer = EpisodeIndexer(storage)
         self.max_cycle_steps = int(load_config()["runtime"]["max_cycle_steps"])
 
     def initialize(self) -> dict[str, object]:
@@ -312,6 +314,26 @@ class RuntimeLoop:
                 "stop_reason": cycle_trace["stop_reason"],
             },
         )
+
+        # Cross-session learning: record episode after each cycle
+        try:
+            tool_calls = [
+                {"tool": step["next_action"]["type"], "success": step["action_outcome"]["status"] == "completed"}
+                for step in step_history
+                if "next_action" in step and "action_outcome" in step
+            ]
+            episode = self.episode_indexer.build_episode(
+                session_id=str(mission["id"]),
+                project_root=str(self.storage.paths.runtime_root),
+                goal=str(mission.get("description", "")),
+                tool_calls=tool_calls,
+                success=stop_reason == "mission_completed",
+                outcomes=[str(final_outcome.get("status", "unknown"))],
+            )
+            self.episode_indexer.record_episode(episode)
+        except Exception:
+            pass  # Episode recording should never crash the cycle
+
         return payload
 
     def _select_active_task(self, tasks: list[dict[str, object]]) -> dict[str, object] | None:

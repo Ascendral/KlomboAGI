@@ -8,6 +8,7 @@ from codeagi.core.loop import RuntimeLoop
 from codeagi.core.mission import MissionManager
 from codeagi.evals.repo_runner import FIXTURES, RepoEvalRunner
 from codeagi.interfaces.doctor import run_doctor
+from codeagi.core.daemon import CodeAGIDaemon
 from codeagi.storage.manager import StorageManager
 
 
@@ -21,6 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-cycles", type=int, default=1, help="Number of cycles to run (0 for infinite)")
     run_parser.add_argument("--watch", type=int, default=0, help="Seconds to wait between cycles (enables continuous mode)")
     sub.add_parser("doctor")
+
+    daemon_parser = sub.add_parser("daemon")
+    daemon_sub = daemon_parser.add_subparsers(dest="daemon_command", required=True)
+    daemon_sub.add_parser("start")
+    daemon_sub.add_parser("stop")
+    daemon_sub.add_parser("status")
 
     eval_parser = sub.add_parser("eval")
     eval_sub = eval_parser.add_subparsers(dest="eval_command", required=True)
@@ -86,6 +93,23 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         payload = run_doctor()
+    elif args.command == "daemon":
+        storage = StorageManager.bootstrap()
+        daemon = CodeAGIDaemon(storage)
+        if args.daemon_command == "start":
+            print("CodeAGI Daemon starting... Press Ctrl+C to stop.")
+            try:
+                daemon.start()
+            except KeyboardInterrupt:
+                daemon.stop()
+            payload = {"status": "stopped"}
+        elif args.daemon_command == "stop":
+            daemon.stop()
+            payload = {"status": "stopped"}
+        elif args.daemon_command == "status":
+            payload = daemon.status()
+        else:
+            raise SystemExit("Unknown daemon command")
     else:
         storage = StorageManager.bootstrap()
         runtime = RuntimeLoop(storage)
