@@ -84,6 +84,10 @@ class StoragePaths:
         return self.long_term_root / "world" / "snapshots" / "history.json"
 
     @property
+    def execution_telemetry_file(self) -> Path:
+        return self.runtime_root / "logs" / "execution_telemetry.json"
+
+    @property
     def decomposition_strategies_file(self) -> Path:
         return self.long_term_root / "memory" / "procedural" / "decomposition_strategies.json"
 

@@ -8,6 +8,7 @@ from codeagi.core.mission import MissionManager
 from codeagi.core.scheduler import Scheduler
 from codeagi.evals.autonomy import AutonomyEvaluator
 from codeagi.learning.consolidation import MemoryConsolidator
+from codeagi.evals.execution_auditor import ExecutionAuditor, ActionTelemetry
 from codeagi.learning.skill_forge import SkillForge
 from codeagi.learning.reflection import ReflectionEngine
 from codeagi.learning.semantic import SemanticMemory
@@ -36,6 +37,7 @@ class RuntimeLoop:
         self.semantic_memory = SemanticMemory(storage)
         self.autonomy = AutonomyEvaluator(storage)
         self.world_model = WorldModel(storage)
+        self.execution_auditor = ExecutionAuditor(storage)
         self.skill_forge = SkillForge(storage)
         self.max_cycle_steps = int(load_config()["runtime"]["max_cycle_steps"])
 

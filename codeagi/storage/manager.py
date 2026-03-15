@@ -29,6 +29,7 @@ class StorageManager:
     world_entities: JsonStateStore
     world_relations: JsonStateStore
     world_snapshots: JsonStateStore
+    execution_telemetry: JsonStateStore
     decomposition_strategies: JsonStateStore
     event_log: EpisodicEventLog
 
@@ -57,6 +58,7 @@ class StorageManager:
             world_entities=JsonStateStore(paths.world_entities_file, manifest_store, "world.entities"),
             world_relations=JsonStateStore(paths.world_relations_file, manifest_store, "world.relations"),
             world_snapshots=JsonStateStore(paths.world_snapshots_file, manifest_store, "world.snapshots"),
+            execution_telemetry=JsonStateStore(paths.execution_telemetry_file, manifest_store, "runtime.execution_telemetry"),
             decomposition_strategies=JsonStateStore(paths.decomposition_strategies_file, manifest_store, "memory.decomposition_strategies"),
             event_log=EpisodicEventLog(paths.event_log_file, manifest_store),
         )
