@@ -47,9 +47,20 @@ def _openai_response(content: str) -> dict:
     }
 
 
+def _claude_response(content: str) -> dict:
+    """Build a minimal Anthropic messages response dict."""
+    return {
+        "content": [{"type": "text", "text": content}],
+    }
+
+
 def _mock_urlopen_factory(content: str):
-    """Return a callable that replaces urlopen and returns *content*."""
+    """Return a callable that replaces urlopen and returns *content*.
+    Auto-detects Claude vs OpenAI format based on request URL."""
     def _mock_urlopen(req, *, timeout=None):
+        url = req.full_url if hasattr(req, 'full_url') else str(req)
+        if '/v1/messages' in url:
+            return _FakeResponse(_claude_response(content))
         return _FakeResponse(_openai_response(content))
     return _mock_urlopen
 
@@ -86,9 +97,9 @@ class TestLLMProvider(unittest.TestCase):
             result = complete("system", "user")
         self.assertEqual(result, expected)
 
-    def test_returns_empty_on_empty_choices(self) -> None:
+    def test_returns_empty_on_empty_content(self) -> None:
         def _mock(req, *, timeout=None):
-            return _FakeResponse({"choices": []})
+            return _FakeResponse({"content": []})
         with patch("codeagi.llm.provider.urllib.request.urlopen", _mock):
             result = complete("system", "user")
         self.assertEqual(result, "")
