@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.core.loop import RuntimeLoop
-from codeagi.core.mission import MissionManager
-from codeagi.storage.manager import StorageManager
+from klomboagi.core.loop import RuntimeLoop
+from klomboagi.core.mission import MissionManager
+from klomboagi.storage.manager import StorageManager
 
 
 class CrossSessionResumptionTests(unittest.TestCase):
@@ -16,14 +16,14 @@ class CrossSessionResumptionTests(unittest.TestCase):
         base = Path(self.temp_dir.name)
         self.runtime_root = str(base / "runtime")
         self.long_term_root = str(base / "long_term")
-        os.environ["CODEAGI_RUNTIME_ROOT"] = self.runtime_root
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = self.long_term_root
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = self.runtime_root
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = self.long_term_root
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         self.temp_dir.cleanup()
 
     def test_new_runtime_resumes_existing_mission(self) -> None:

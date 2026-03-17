@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from codeagi.learning.skill_plugin import SkillPlugin, is_plugin_safe
+from klomboagi.learning.skill_plugin import SkillPlugin, is_plugin_safe
 
 
 @pytest.fixture()
@@ -23,7 +23,7 @@ def mock_storage(tmp_path):
 def skills_dir(tmp_path, monkeypatch):
     d = tmp_path / "skills"
     d.mkdir()
-    monkeypatch.setattr("codeagi.learning.skill_plugin._shared_skills_dir", lambda: d)
+    monkeypatch.setattr("klomboagi.learning.skill_plugin._shared_skills_dir", lambda: d)
     return d
 
 

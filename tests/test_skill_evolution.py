@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from codeagi.learning.skill_evolution import EvolutionReport, SkillEvolution, SkillTestResult
+from klomboagi.learning.skill_evolution import EvolutionReport, SkillEvolution, SkillTestResult
 
 
 @pytest.fixture()
@@ -25,7 +25,7 @@ def skills_dir(tmp_path, monkeypatch):
     d = tmp_path / "skills"
     d.mkdir()
     monkeypatch.setattr(
-        "codeagi.learning.skill_evolution._shared_skills_dir", lambda: d
+        "klomboagi.learning.skill_evolution._shared_skills_dir", lambda: d
     )
     return d
 

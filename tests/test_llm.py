@@ -13,11 +13,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codeagi.llm.provider import complete
-from codeagi.reasoning.planner import Planner
-from codeagi.reasoning.critic import Critic
-from codeagi.learning.reflection import ReflectionEngine
-from codeagi.storage.manager import StorageManager
+from klomboagi.llm.provider import complete
+from klomboagi.reasoning.planner import Planner
+from klomboagi.reasoning.critic import Critic
+from klomboagi.learning.reflection import ReflectionEngine
+from klomboagi.storage.manager import StorageManager
 
 
 # ---------------------------------------------------------------------------
@@ -76,31 +76,31 @@ def _mock_urlopen_error(req, *, timeout=None):
 
 class TestLLMProvider(unittest.TestCase):
     def setUp(self) -> None:
-        os.environ["CODEAGI_LLM_ENABLED"] = "1"
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "1"
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_LLM_ENABLED", None)
+        os.environ.pop("KLOMBOAGI_LLM_ENABLED", None)
 
     def test_returns_empty_string_when_disabled(self) -> None:
-        os.environ["CODEAGI_LLM_ENABLED"] = "0"
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "0"
         result = complete("system", "user")
         self.assertEqual(result, "")
 
     def test_returns_empty_string_when_api_unreachable(self) -> None:
-        with patch("codeagi.llm.provider.urllib.request.urlopen", side_effect=OSError("Connection refused")):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", side_effect=OSError("Connection refused")):
             result = complete("system", "user")
         self.assertEqual(result, "")
 
     def test_returns_content_on_success(self) -> None:
         expected = "Hello from the LLM"
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(expected)):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(expected)):
             result = complete("system", "user")
         self.assertEqual(result, expected)
 
     def test_returns_empty_on_empty_content(self) -> None:
         def _mock(req, *, timeout=None):
             return _FakeResponse({"content": []})
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock):
             result = complete("system", "user")
         self.assertEqual(result, "")
 
@@ -113,26 +113,26 @@ class TestPlannerLLMFallback(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_LLM_ENABLED"] = "1"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "1"
         self.storage = StorageManager.bootstrap()
         self.planner = Planner(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_LLM_ENABLED", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LLM_ENABLED", None)
         self.temp_dir.cleanup()
 
     def test_draft_task_falls_back_when_llm_unavailable(self) -> None:
         mission = {"id": "m1", "description": "search repo for deploy_app"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
             task = self.planner.draft_task(mission)
         self.assertEqual(task["action_kind"], "search_files")
 
     def test_draft_task_falls_back_when_llm_disabled(self) -> None:
-        os.environ["CODEAGI_LLM_ENABLED"] = "0"
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "0"
         mission = {"id": "m1", "description": "search repo for deploy_app"}
         task = self.planner.draft_task(mission)
         self.assertEqual(task["action_kind"], "search_files")
@@ -144,21 +144,21 @@ class TestPlannerLLMFallback(unittest.TestCase):
             "args": {"path": "deploy.sh"},
         })
         mission = {"id": "m1", "description": "inspect deployment"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
             task = self.planner.draft_task(mission)
         self.assertEqual(task["action_kind"], "read_file")
         self.assertEqual(task["action_payload"]["path"], "deploy.sh")
 
     def test_llm_plan_returns_none_on_bad_json(self) -> None:
         mission = {"id": "m1", "description": "do something"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("not json")):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("not json")):
             result = self.planner.llm_plan(mission)
         self.assertIsNone(result)
 
     def test_llm_plan_returns_none_on_invalid_action(self) -> None:
         llm_response = json.dumps({"action": "destroy_everything", "description": "bad"})
         mission = {"id": "m1", "description": "do something"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
             result = self.planner.llm_plan(mission)
         self.assertIsNone(result)
 
@@ -171,16 +171,16 @@ class TestCriticLLMFallback(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_LLM_ENABLED"] = "1"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "1"
         self.storage = StorageManager.bootstrap()
         self.critic = Critic(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_LLM_ENABLED", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LLM_ENABLED", None)
         self.temp_dir.cleanup()
 
     def test_critique_falls_back_to_rules_when_llm_unavailable(self) -> None:
@@ -188,7 +188,7 @@ class TestCriticLLMFallback(unittest.TestCase):
         plan = {"id": "p1", "steps": []}
         action = {"type": "execute_task", "description": "do it", "task_id": "t1"}
         verification = {"valid": True, "warnings": []}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
             result = self.critic.critique(
                 mission=mission, tasks=[], plan=plan,
                 proposed_action=action, verification=verification,
@@ -201,7 +201,7 @@ class TestCriticLLMFallback(unittest.TestCase):
         plan = {"id": "p1", "steps": []}
         action = {"type": "execute_task", "description": "rm -rf /", "task_id": "t1"}
         verification = {"valid": True, "warnings": []}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
             result = self.critic.critique(
                 mission=mission, tasks=[], plan=plan,
                 proposed_action=action, verification=verification,
@@ -210,7 +210,7 @@ class TestCriticLLMFallback(unittest.TestCase):
         self.assertEqual(result["final_action"]["type"], "replan")
 
     def test_llm_critique_returns_none_on_bad_json(self) -> None:
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("nope")):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("nope")):
             result = self.critic.llm_critique({"type": "test"})
         self.assertIsNone(result)
 
@@ -223,16 +223,16 @@ class TestReflectionLLMFallback(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_LLM_ENABLED"] = "1"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_LLM_ENABLED"] = "1"
         self.storage = StorageManager.bootstrap()
         self.reflection = ReflectionEngine(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_LLM_ENABLED", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LLM_ENABLED", None)
         self.temp_dir.cleanup()
 
     def test_reflect_falls_back_to_templates_when_llm_unavailable(self) -> None:
@@ -241,7 +241,7 @@ class TestReflectionLLMFallback(unittest.TestCase):
         memory = {"blockers": [], "current_focus": "test"}
         action = {"type": "execute_task", "description": "do it", "task_id": "t1"}
         outcome = {"summary": "task done", "status": "completed"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", side_effect=OSError):
             result = self.reflection.reflect(mission, tasks, memory, action, outcome)
         self.assertIn("lessons", result)
         self.assertTrue(any("complete" in lesson.lower() for lesson in result["lessons"]))
@@ -257,12 +257,12 @@ class TestReflectionLLMFallback(unittest.TestCase):
         memory = {"blockers": [], "current_focus": "test"}
         action = {"type": "execute_task", "description": "do it", "task_id": "t1"}
         outcome = {"summary": "task done", "status": "completed"}
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory(llm_response)):
             result = self.reflection.reflect(mission, tasks, memory, action, outcome)
         self.assertTrue(any("validate" in lesson.lower() for lesson in result["lessons"]))
 
     def test_llm_reflect_returns_none_on_bad_json(self) -> None:
-        with patch("codeagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("not json")):
+        with patch("klomboagi.llm.provider.urllib.request.urlopen", _mock_urlopen_factory("not json")):
             result = self.reflection.llm_reflect({"summary": "test"})
         self.assertIsNone(result)
 

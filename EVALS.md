@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines how CodeAGI is evaluated.
+This document defines how KlomboAGI is evaluated.
 
 The goal is to prevent us from confusing:
 - fluent output with reasoning

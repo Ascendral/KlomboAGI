@@ -8,20 +8,20 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
-from codeagi.interfaces.cli import main
-from codeagi.interfaces.doctor import run_doctor
+from klomboagi.interfaces.cli import main
+from klomboagi.interfaces.doctor import run_doctor
 
 
 class DoctorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_WORKSPACE_ROOT"] = str(base / "workspace")
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_WORKSPACE_ROOT"] = str(base / "workspace")
 
     def tearDown(self) -> None:
-        for key in ["CODEAGI_RUNTIME_ROOT", "CODEAGI_LONG_TERM_ROOT", "CODEAGI_WORKSPACE_ROOT"]:
+        for key in ["KLOMBOAGI_RUNTIME_ROOT", "KLOMBOAGI_LONG_TERM_ROOT", "KLOMBOAGI_WORKSPACE_ROOT"]:
             os.environ.pop(key, None)
         self.temp_dir.cleanup()
 

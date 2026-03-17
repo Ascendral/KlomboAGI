@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from codeagi.safety.policy import PolicyEngine
+from klomboagi.safety.policy import PolicyEngine
 
 
 class PolicyEngineTests(unittest.TestCase):

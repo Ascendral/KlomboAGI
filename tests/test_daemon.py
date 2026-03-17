@@ -1,4 +1,4 @@
-"""Tests for CodeAGIDaemon persistent daemon mode."""
+"""Tests for KlomboAGIDaemon persistent daemon mode."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from codeagi.core.daemon import CodeAGIDaemon, DaemonJob
+from klomboagi.core.daemon import KlomboAGIDaemon, DaemonJob
 
 
 @pytest.fixture()
@@ -22,7 +22,7 @@ def mock_storage(tmp_path):
 
 @pytest.fixture()
 def daemon(mock_storage):
-    return CodeAGIDaemon(mock_storage, tick_interval=1.0, health_interval=10.0)
+    return KlomboAGIDaemon(mock_storage, tick_interval=1.0, health_interval=10.0)
 
 
 class TestDaemonJob:

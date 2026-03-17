@@ -6,24 +6,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codeagi.reasoning.planner import Planner
-from codeagi.storage.manager import StorageManager
+from klomboagi.reasoning.planner import Planner
+from klomboagi.storage.manager import StorageManager
 
 
 class PlannerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
         self.storage = StorageManager.bootstrap()
         self.planner = Planner(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         self.temp_dir.cleanup()
 
     def test_build_plan_with_tasks_creates_steps_for_each_task(self) -> None:
@@ -77,14 +77,14 @@ class PlannerTests(unittest.TestCase):
 
     def test_draft_task_search_heuristic(self) -> None:
         mission = {"id": "m3", "description": "Search the repo for TODO markers"}
-        with patch("codeagi.reasoning.planner.llm_complete", return_value=None):
+        with patch("klomboagi.reasoning.planner.llm_complete", return_value=None):
             result = self.planner.draft_task(mission)
         self.assertEqual(result["action_kind"], "search_files")
         self.assertIn("TODO", result["action_payload"]["pattern"])
 
     def test_draft_task_write_file_heuristic(self) -> None:
         mission = {"id": "m4", "description": "Write file output.txt with results"}
-        with patch("codeagi.reasoning.planner.llm_complete", return_value=None):
+        with patch("klomboagi.reasoning.planner.llm_complete", return_value=None):
             result = self.planner.draft_task(mission)
         self.assertEqual(result["action_kind"], "write_file")
         self.assertEqual(result["action_payload"]["path"], "output.txt")

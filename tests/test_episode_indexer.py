@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from codeagi.learning.episode_indexer import (
+from klomboagi.learning.episode_indexer import (
     AggregatedPattern,
     Episode,
     EpisodeIndexer,

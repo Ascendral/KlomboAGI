@@ -1,8 +1,8 @@
 # TRUTH.md
 
-## What CodeAGI Is
+## What KlomboAGI Is
 
-CodeAGI is an experimental autonomous cognition system.
+KlomboAGI is an experimental autonomous cognition system.
 
 It is a research platform for building and evaluating:
 - persistent memory
@@ -16,9 +16,9 @@ It is a research platform for building and evaluating:
 
 The aim is to move beyond stateless prompt-response behavior toward a system with continuity, internal state, and adaptive control.
 
-## What CodeAGI Is Not
+## What KlomboAGI Is Not
 
-CodeAGI is not:
+KlomboAGI is not:
 - AGI
 - consciousness
 - sentience
@@ -98,7 +98,7 @@ The project is failing if it becomes mostly:
 
 ## Project Standard
 
-CodeAGI should be judged by one question:
+KlomboAGI should be judged by one question:
 
 Does the system measurably become more capable, more adaptive, and more autonomous over time?
 

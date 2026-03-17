@@ -5,27 +5,27 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.action.executor import ActionExecutor
-from codeagi.core.mission import MissionManager
-from codeagi.storage.manager import StorageManager
+from klomboagi.action.executor import ActionExecutor
+from klomboagi.core.mission import MissionManager
+from klomboagi.storage.manager import StorageManager
 
 
 class ActionExecutorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_WORKSPACE_ROOT"] = str(base / "workspace")
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_WORKSPACE_ROOT"] = str(base / "workspace")
         self.storage = StorageManager.bootstrap()
         self.missions = MissionManager(self.storage)
         self.executor = ActionExecutor(self.storage)
         self.workspace_root = base / "workspace"
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_WORKSPACE_ROOT", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_WORKSPACE_ROOT", None)
         self.temp_dir.cleanup()
 
     def test_execute_task_returns_structured_outcome(self) -> None:

@@ -1,10 +1,10 @@
-# CodeAGI
+# KlomboAGI
 
-[![CI](https://github.com/Ascendral/codeagi/actions/workflows/ci.yml/badge.svg)](https://github.com/Ascendral/codeagi/actions/workflows/ci.yml)
+[![CI](https://github.com/Ascendral/klomboagi/actions/workflows/ci.yml/badge.svg)](https://github.com/Ascendral/klomboagi/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
 
-CodeAGI is an experimental autonomous cognition runtime for persistent agent research in digital workspaces.
+KlomboAGI is an experimental autonomous cognition runtime for persistent agent research in digital workspaces.
 
 It is not AGI. It is a serious, test-backed system for exploring whether an agent can become more useful over time through persistent memory, world modeling, planning, verification, reflection, scheduling, guarded execution, and longitudinal evaluation.
 
@@ -42,7 +42,7 @@ The test suite currently covers:
 Run it locally:
 
 ```bash
-cd codeagi
+cd klomboagi
 python3 -m pip install --user .
 python3 -m unittest discover -s tests -v
 ```
@@ -53,61 +53,61 @@ python3 -m unittest discover -s tests -v
 
 ```bash
 cp .env.example .env
-export CODEAGI_RUNTIME_ROOT="$HOME/CodeAGI/runtime"
-export CODEAGI_LONG_TERM_ROOT="$HOME/CodeAGI/long-term"
-export CODEAGI_WORKSPACE_ROOT="$HOME/CodeAGI/workspace"
+export KLOMBOAGI_RUNTIME_ROOT="$HOME/KlomboAGI/runtime"
+export KLOMBOAGI_LONG_TERM_ROOT="$HOME/KlomboAGI/long-term"
+export KLOMBOAGI_WORKSPACE_ROOT="$HOME/KlomboAGI/workspace"
 ```
 
 If you want long-term memory on the external 4TB drive, override it explicitly:
 
 ```bash
-export CODEAGI_LONG_TERM_ROOT="/Volumes/CodeAGI-4TB/CodeAGI"
+export KLOMBOAGI_LONG_TERM_ROOT="/Volumes/KlomboAGI-4TB/KlomboAGI"
 ```
 
 ### 2. Run diagnostics
 
 ```bash
 python3 -m pip install --user .
-python3 -m codeagi doctor
+python3 -m klomboagi doctor
 ```
 
 ### 3. Initialize and inspect the runtime
 
 ```bash
-python3 -m codeagi init
-python3 -m codeagi status
+python3 -m klomboagi init
+python3 -m klomboagi status
 ```
 
 ### 4. Create and run missions
 
 ```bash
-python3 -m codeagi mission create "search repo for deploy_app and inspect deployment code"
-python3 -m codeagi run
+python3 -m klomboagi mission create "search repo for deploy_app and inspect deployment code"
+python3 -m klomboagi run
 ```
 
 ### 5. Run repeatable repo eval fixtures
 
 ```bash
-python3 -m codeagi eval repo --fixture repo_search
-python3 -m codeagi eval repo --fixture repo_patch
+python3 -m klomboagi eval repo --fixture repo_search
+python3 -m klomboagi eval repo --fixture repo_patch
 ```
 
 ## CLI Surface
 
 Supported commands:
-- `python3 -m codeagi init`
-- `python3 -m codeagi status`
-- `python3 -m codeagi run`
-- `python3 -m codeagi doctor`
-- `python3 -m codeagi mission create "..." [--priority N]`
-- `python3 -m codeagi mission list`
-- `python3 -m codeagi task create <mission_id> "..." [--action-kind ...]`
-- `python3 -m codeagi task list`
-- `python3 -m codeagi eval repo --fixture repo_search|repo_patch`
+- `python3 -m klomboagi init`
+- `python3 -m klomboagi status`
+- `python3 -m klomboagi run`
+- `python3 -m klomboagi doctor`
+- `python3 -m klomboagi mission create "..." [--priority N]`
+- `python3 -m klomboagi mission list`
+- `python3 -m klomboagi task create <mission_id> "..." [--action-kind ...]`
+- `python3 -m klomboagi task list`
+- `python3 -m klomboagi eval repo --fixture repo_search|repo_patch`
 
 ## LLM Configuration
 
-CodeAGI supports optional LLM integration for smarter planning, safety critique, and reflection. It works with **any OpenAI-compatible API** — Ollama, OpenAI, Groq, DeepSeek, and others. No external Python packages are required; all HTTP calls use the standard library.
+KlomboAGI supports optional LLM integration for smarter planning, safety critique, and reflection. It works with **any OpenAI-compatible API** — Ollama, OpenAI, Groq, DeepSeek, and others. No external Python packages are required; all HTTP calls use the standard library.
 
 When the LLM is unavailable, the system automatically falls back to its built-in keyword and rule-based heuristics.
 
@@ -115,37 +115,37 @@ When the LLM is unavailable, the system automatically falls back to its built-in
 
 | Variable | Default | Description |
 |---|---|---|
-| `CODEAGI_LLM_ENABLED` | `0` | Set to `1` to enable LLM calls |
-| `CODEAGI_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
-| `CODEAGI_LLM_MODEL` | `qwen3:14b` | Model name |
-| `CODEAGI_LLM_API_KEY` | *(empty)* | API key (not needed for Ollama) |
+| `KLOMBOAGI_LLM_ENABLED` | `0` | Set to `1` to enable LLM calls |
+| `KLOMBOAGI_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
+| `KLOMBOAGI_LLM_MODEL` | `qwen3:14b` | Model name |
+| `KLOMBOAGI_LLM_API_KEY` | *(empty)* | API key (not needed for Ollama) |
 
 ### Examples
 
 **Ollama (default, no API key needed):**
 ```bash
 ollama pull qwen3:14b
-export CODEAGI_LLM_ENABLED=1
-export CODEAGI_LLM_BASE_URL=http://localhost:11434/v1
-python3 -m codeagi run
+export KLOMBOAGI_LLM_ENABLED=1
+export KLOMBOAGI_LLM_BASE_URL=http://localhost:11434/v1
+python3 -m klomboagi run
 ```
 
 **OpenAI:**
 ```bash
-export CODEAGI_LLM_ENABLED=1
-export CODEAGI_LLM_BASE_URL=https://api.openai.com/v1
-export CODEAGI_LLM_MODEL=gpt-4o-mini
-export CODEAGI_LLM_API_KEY=sk-...
-python3 -m codeagi run
+export KLOMBOAGI_LLM_ENABLED=1
+export KLOMBOAGI_LLM_BASE_URL=https://api.openai.com/v1
+export KLOMBOAGI_LLM_MODEL=gpt-4o-mini
+export KLOMBOAGI_LLM_API_KEY=sk-...
+python3 -m klomboagi run
 ```
 
 **Groq:**
 ```bash
-export CODEAGI_LLM_ENABLED=1
-export CODEAGI_LLM_BASE_URL=https://api.groq.com/openai/v1
-export CODEAGI_LLM_MODEL=llama-3.3-70b-versatile
-export CODEAGI_LLM_API_KEY=gsk_...
-python3 -m codeagi run
+export KLOMBOAGI_LLM_ENABLED=1
+export KLOMBOAGI_LLM_BASE_URL=https://api.groq.com/openai/v1
+export KLOMBOAGI_LLM_MODEL=llama-3.3-70b-versatile
+export KLOMBOAGI_LLM_API_KEY=gsk_...
+python3 -m klomboagi run
 ```
 
 ## Safety Model
@@ -165,7 +165,7 @@ Commands containing dangerous tokens or shell metacharacters are blocked by poli
 
 ## Truth Boundary
 
-CodeAGI does not currently claim:
+KlomboAGI does not currently claim:
 - human-level intelligence
 - AGI
 - open-ended autonomy

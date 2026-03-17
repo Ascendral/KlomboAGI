@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.safety.policy import PolicyEngine
-from codeagi.reasoning.verifier import Verifier
-from codeagi.storage.manager import StorageManager
+from klomboagi.safety.policy import PolicyEngine
+from klomboagi.reasoning.verifier import Verifier
+from klomboagi.storage.manager import StorageManager
 
 
 class ExtendedPolicyTests(unittest.TestCase):
@@ -64,16 +64,16 @@ class VerifierTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
         self.storage = StorageManager.bootstrap()
         self.verifier = Verifier(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         self.temp_dir.cleanup()
 
     def test_verify_valid_plan(self) -> None:

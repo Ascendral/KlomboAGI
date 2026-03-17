@@ -6,17 +6,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.learning.skill_forge import SkillForge
-from codeagi.storage.manager import StorageManager
+from klomboagi.learning.skill_forge import SkillForge
+from klomboagi.storage.manager import StorageManager
 
 
 class SkillForgeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
         # Point CODEBOT_HOME to temp dir so skills go to a test location
         self.codebot_home = str(base / "codebot_home")
         os.environ["CODEBOT_HOME"] = self.codebot_home
@@ -24,9 +24,9 @@ class SkillForgeTests(unittest.TestCase):
         self.forge = SkillForge(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         os.environ.pop("CODEBOT_HOME", None)
         self.temp_dir.cleanup()
 
@@ -79,11 +79,11 @@ class SkillForgeTests(unittest.TestCase):
         self.assertEqual(len(promoted), 1)
 
         skill = promoted[0]
-        self.assertEqual(skill["author"], "codeagi")
+        self.assertEqual(skill["author"], "klomboagi")
         self.assertEqual(skill["origin"], "promoted")
         self.assertEqual(skill["confidence"], 0.9)
         self.assertEqual(skill["use_count"], 5)
-        self.assertIn("codeagi_", skill["name"])
+        self.assertIn("klomboagi_", skill["name"])
 
     def test_promoted_skill_written_to_shared_store(self) -> None:
         self._seed_procedure()
@@ -95,7 +95,7 @@ class SkillForgeTests(unittest.TestCase):
         self.assertTrue(skill_path.exists())
 
         data = json.loads(skill_path.read_text())
-        self.assertEqual(data["author"], "codeagi")
+        self.assertEqual(data["author"], "klomboagi")
         self.assertIsInstance(data["steps"], list)
         self.assertGreater(len(data["steps"]), 0)
 
@@ -133,7 +133,7 @@ class SkillForgeTests(unittest.TestCase):
         proc = self._seed_procedure(confidence=0.3, use_count=1)
         promoted = self.forge.promote_one(str(proc["id"]))
         self.assertIsNotNone(promoted)
-        self.assertEqual(promoted["author"], "codeagi")
+        self.assertEqual(promoted["author"], "klomboagi")
 
     def test_promote_one_nonexistent_returns_none(self) -> None:
         result = self.forge.promote_one("nonexistent_id")
@@ -144,12 +144,12 @@ class SkillForgeTests(unittest.TestCase):
         self.forge.scan_and_promote()
         skills = self.forge.list_shared_skills()
         self.assertEqual(len(skills), 1)
-        self.assertEqual(skills[0]["author"], "codeagi")
+        self.assertEqual(skills[0]["author"], "klomboagi")
 
     def test_skill_name_generation(self) -> None:
         proc = self._seed_procedure(title="Search Files Procedure for Debugging")
         name = self.forge._procedure_to_skill_name(proc)
-        self.assertTrue(name.startswith("codeagi_"))
+        self.assertTrue(name.startswith("klomboagi_"))
         self.assertRegex(name, r"^[a-z0-9_]+$")
         self.assertLessEqual(len(name), 64)
 
@@ -200,23 +200,23 @@ class SkillForgeTests(unittest.TestCase):
 
 
 class SkillForgeInteropTests(unittest.TestCase):
-    """Test that CodeAGI-written skills are compatible with CodeBot's format."""
+    """Test that KlomboAGI-written skills are compatible with CodeBot's format."""
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
         self.codebot_home = str(base / "codebot_home")
         os.environ["CODEBOT_HOME"] = self.codebot_home
         self.storage = StorageManager.bootstrap()
         self.forge = SkillForge(self.storage)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         os.environ.pop("CODEBOT_HOME", None)
         self.temp_dir.cleanup()
 
@@ -255,15 +255,15 @@ class SkillForgeInteropTests(unittest.TestCase):
             self.assertIn("args", step)
 
         # Shared metadata
-        self.assertEqual(skill["author"], "codeagi")
+        self.assertEqual(skill["author"], "klomboagi")
         self.assertIn("confidence", skill)
         self.assertIn("use_count", skill)
         self.assertIn("origin", skill)
         self.assertIn("created_at", skill)
         self.assertIn("updated_at", skill)
 
-    def test_codebot_authored_skill_readable_by_codeagi(self) -> None:
-        """Skills written by CodeBot should be readable by CodeAGI."""
+    def test_codebot_authored_skill_readable_by_klomboagi(self) -> None:
+        """Skills written by CodeBot should be readable by KlomboAGI."""
         skills_dir = Path(self.codebot_home) / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
 

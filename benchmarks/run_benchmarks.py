@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Executable benchmarks for CodeAGI core operations.
+"""Executable benchmarks for KlomboAGI core operations.
 
 Times mission creation, task creation, and run_cycle execution.
 Measures memory usage via tracemalloc.
@@ -21,19 +21,19 @@ from pathlib import Path
 # Ensure the project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from codeagi.core.loop import RuntimeLoop
-from codeagi.core.mission import MissionManager
-from codeagi.storage.manager import StorageManager
+from klomboagi.core.loop import RuntimeLoop
+from klomboagi.core.mission import MissionManager
+from klomboagi.storage.manager import StorageManager
 
 
 def _setup_env(base: Path) -> None:
-    os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-    os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-    os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+    os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+    os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+    os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
 
 
 def _teardown_env() -> None:
-    for key in ("CODEAGI_RUNTIME_ROOT", "CODEAGI_LONG_TERM_ROOT", "CODEAGI_MAX_CYCLE_STEPS"):
+    for key in ("KLOMBOAGI_RUNTIME_ROOT", "KLOMBOAGI_LONG_TERM_ROOT", "KLOMBOAGI_MAX_CYCLE_STEPS"):
         os.environ.pop(key, None)
 
 
@@ -94,7 +94,7 @@ def bench_run_cycle(storage: StorageManager) -> dict:
 
 
 def main() -> None:
-    tmpdir = tempfile.mkdtemp(prefix="codeagi_bench_")
+    tmpdir = tempfile.mkdtemp(prefix="klomboagi_bench_")
     base = Path(tmpdir)
     _setup_env(base)
     try:
@@ -120,7 +120,7 @@ def main() -> None:
         results.append(bench_run_cycle(storage2))
 
         report = {
-            "benchmark_suite": "codeagi_v0",
+            "benchmark_suite": "klomboagi_v0",
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "results": results,
         }

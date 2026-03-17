@@ -5,24 +5,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.reasoning.goal_refiner import GoalRefiner, SubtaskNode
-from codeagi.storage.manager import StorageManager
+from klomboagi.reasoning.goal_refiner import GoalRefiner, SubtaskNode
+from klomboagi.storage.manager import StorageManager
 
 
 class GoalRefinerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
         self.storage = StorageManager.bootstrap()
         self.refiner = GoalRefiner(self.storage, max_depth=2)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
-        os.environ.pop("CODEAGI_MAX_CYCLE_STEPS", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_MAX_CYCLE_STEPS", None)
         self.temp_dir.cleanup()
 
     def _mission(self, desc: str = "Fix the login error", mid: str = "m1") -> dict[str, object]:

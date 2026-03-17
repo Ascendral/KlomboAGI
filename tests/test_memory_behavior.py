@@ -11,12 +11,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.core.loop import RuntimeLoop
-from codeagi.core.mission import MissionManager
-from codeagi.learning.consolidation import MemoryConsolidator
-from codeagi.learning.semantic import SemanticMemory
-from codeagi.memory.working_memory import WorkingMemoryManager
-from codeagi.storage.manager import StorageManager
+from klomboagi.core.loop import RuntimeLoop
+from klomboagi.core.mission import MissionManager
+from klomboagi.learning.consolidation import MemoryConsolidator
+from klomboagi.learning.semantic import SemanticMemory
+from klomboagi.memory.working_memory import WorkingMemoryManager
+from klomboagi.storage.manager import StorageManager
 
 
 class TestProcedureInfluencesPlanning(unittest.TestCase):
@@ -27,12 +27,12 @@ class TestProcedureInfluencesPlanning(unittest.TestCase):
         base = Path(self.temp_dir.name)
         self.runtime_root = str(base / "runtime")
         self.long_term_root = str(base / "long_term")
-        os.environ["CODEAGI_RUNTIME_ROOT"] = self.runtime_root
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = self.long_term_root
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = self.runtime_root
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = self.long_term_root
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
 
     def tearDown(self) -> None:
-        for key in ("CODEAGI_RUNTIME_ROOT", "CODEAGI_LONG_TERM_ROOT", "CODEAGI_MAX_CYCLE_STEPS"):
+        for key in ("KLOMBOAGI_RUNTIME_ROOT", "KLOMBOAGI_LONG_TERM_ROOT", "KLOMBOAGI_MAX_CYCLE_STEPS"):
             os.environ.pop(key, None)
         self.temp_dir.cleanup()
 
@@ -75,12 +75,12 @@ class TestSemanticFactsCrossycle(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base = Path(self.temp_dir.name)
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(base / "runtime")
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(base / "long_term")
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(base / "runtime")
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(base / "long_term")
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
 
     def tearDown(self) -> None:
-        for key in ("CODEAGI_RUNTIME_ROOT", "CODEAGI_LONG_TERM_ROOT", "CODEAGI_MAX_CYCLE_STEPS"):
+        for key in ("KLOMBOAGI_RUNTIME_ROOT", "KLOMBOAGI_LONG_TERM_ROOT", "KLOMBOAGI_MAX_CYCLE_STEPS"):
             os.environ.pop(key, None)
         self.temp_dir.cleanup()
 
@@ -134,12 +134,12 @@ class TestWorkingMemoryPersistsAcrossRuntimeLoops(unittest.TestCase):
         base = Path(self.temp_dir.name)
         self.runtime_root = str(base / "runtime")
         self.long_term_root = str(base / "long_term")
-        os.environ["CODEAGI_RUNTIME_ROOT"] = self.runtime_root
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = self.long_term_root
-        os.environ["CODEAGI_MAX_CYCLE_STEPS"] = "3"
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = self.runtime_root
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = self.long_term_root
+        os.environ["KLOMBOAGI_MAX_CYCLE_STEPS"] = "3"
 
     def tearDown(self) -> None:
-        for key in ("CODEAGI_RUNTIME_ROOT", "CODEAGI_LONG_TERM_ROOT", "CODEAGI_MAX_CYCLE_STEPS"):
+        for key in ("KLOMBOAGI_RUNTIME_ROOT", "KLOMBOAGI_LONG_TERM_ROOT", "KLOMBOAGI_MAX_CYCLE_STEPS"):
             os.environ.pop(key, None)
         self.temp_dir.cleanup()
 

@@ -2,7 +2,7 @@
 
 ## Storage Model
 
-CodeAGI uses two storage tiers:
+KlomboAGI uses two storage tiers:
 
 1. local runtime storage
 - active state
@@ -26,11 +26,11 @@ CodeAGI uses two storage tiers:
 
 ### Local runtime root
 
-`~/CodeAGI/runtime`
+`~/KlomboAGI/runtime`
 
 ### External long-term root
 
-`/Volumes/<drive>/CodeAGI`
+`/Volumes/<drive>/KlomboAGI`
 
 ## Directory Layout
 

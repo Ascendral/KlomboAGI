@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from codeagi.storage.manager import StorageManager
-from codeagi.storage.paths import resolve_paths
+from klomboagi.storage.manager import StorageManager
+from klomboagi.storage.paths import resolve_paths
 
 
 class StorageFoundationTests(unittest.TestCase):
@@ -16,12 +16,12 @@ class StorageFoundationTests(unittest.TestCase):
         base = Path(self.temp_dir.name)
         self.runtime_root = base / "runtime"
         self.long_term_root = base / "long_term"
-        os.environ["CODEAGI_RUNTIME_ROOT"] = str(self.runtime_root)
-        os.environ["CODEAGI_LONG_TERM_ROOT"] = str(self.long_term_root)
+        os.environ["KLOMBOAGI_RUNTIME_ROOT"] = str(self.runtime_root)
+        os.environ["KLOMBOAGI_LONG_TERM_ROOT"] = str(self.long_term_root)
 
     def tearDown(self) -> None:
-        os.environ.pop("CODEAGI_RUNTIME_ROOT", None)
-        os.environ.pop("CODEAGI_LONG_TERM_ROOT", None)
+        os.environ.pop("KLOMBOAGI_RUNTIME_ROOT", None)
+        os.environ.pop("KLOMBOAGI_LONG_TERM_ROOT", None)
         self.temp_dir.cleanup()
 
     def test_resolve_paths_uses_environment(self) -> None:

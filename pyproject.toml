@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codeagi"
+name = "klomboagi"
 version = "0.1.0"
 description = "Autonomous cognition runtime for persistent agent research"
 readme = "README.md"
@@ -27,16 +27,16 @@ classifiers = [
 dev = ["pytest"]
 
 [project.scripts]
-codeagi = "codeagi.interfaces.cli:main"
+klomboagi = "klomboagi.interfaces.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Ascendral/codeagi"
-Repository = "https://github.com/Ascendral/codeagi"
-Issues = "https://github.com/Ascendral/codeagi/issues"
+Homepage = "https://github.com/Ascendral/klomboagi"
+Repository = "https://github.com/Ascendral/klomboagi"
+Issues = "https://github.com/Ascendral/klomboagi/issues"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["codeagi*"]
+include = ["klomboagi*"]

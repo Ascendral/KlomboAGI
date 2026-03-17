@@ -2,7 +2,7 @@
 
 ## Purpose
 
-CodeAGI is an experimental autonomous cognition system.
+KlomboAGI is an experimental autonomous cognition system.
 
 Its purpose is to test whether a software agent can become more capable over time through:
 - persistent state
@@ -27,7 +27,7 @@ It does not assume one model call is intelligence.
 
 ## Top-Level System
 
-CodeAGI is composed of these layers:
+KlomboAGI is composed of these layers:
 1. Executive Layer
 2. Memory Layer
 3. World Model Layer
