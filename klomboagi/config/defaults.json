@@ -1,10 +1,10 @@
 {
   "storage": {
-    "runtime_root": "~/CodeAGI/runtime",
-    "long_term_root": "~/CodeAGI/long-term"
+    "runtime_root": "~/KlomboAGI/runtime",
+    "long_term_root": "~/KlomboAGI/long-term"
   },
   "workspace": {
-    "root": "~/CodeAGI/workspace"
+    "root": "~/KlomboAGI/workspace"
   },
   "runtime": {
     "max_cycle_steps": 3,

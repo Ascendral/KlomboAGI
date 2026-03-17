@@ -7,7 +7,7 @@ build/
 *.egg
 .env
 *.log
-.codeagi/
+.klomboagi/
 .pytest_cache/
 .mypy_cache/
 .venv/
