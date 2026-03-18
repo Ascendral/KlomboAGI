@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.10 includes:
+This standalone v0.11 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -48,6 +48,7 @@ This standalone v0.10 includes:
 - dependency-hub inference for richer architecture summaries
 - dependency-layer inference for foundation and orchestration zones
 - layer-aware transfer scoring and resume hints for shared hubs
+- dedicated benchmark coverage for layer-aware hint and penalty precision
 - realistic repo-shaped benchmark fixtures
 - benchmark scaffolding for memory-on vs memory-off measurement
 - benchmark history and regression tracking
@@ -92,7 +93,7 @@ Klombo stores all state under a dedicated root:
 
 ```python
 from klombo import BenchmarkHarness, KlomboEngine
-from klombo.fixtures import default_repo_scenarios
+from klombo.fixtures import default_repo_scenarios, layer_guidance_scenarios
 
 engine = KlomboEngine("./memory")
 
@@ -111,16 +112,20 @@ context = engine.get_planning_context(
 resume = engine.resume_context("mission_123")
 engine.maintain_memories()
 scenarios = default_repo_scenarios()
+layer_scenarios = layer_guidance_scenarios()
 
 harness = BenchmarkHarness(
     engine,
     signing_key_env="KLOMBO_BENCHMARK_SIGNING_KEY",
     persist_generated_key=False,
 )
+harness.compare_memory_modes(scenarios)
+harness.benchmark_layer_guidance(layer_scenarios)
 
 # context now includes:
 # - transfer_candidates
 # - transfer_controls
+# - layer_hints
 # - explanations for transfer candidates
 #
 # resume now includes:
@@ -128,6 +133,7 @@ harness = BenchmarkHarness(
 # - conflicts
 # - chosen_strategy
 # - operator_review
+# - layer_hints
 ```
 
 If `KLOMBO_BENCHMARK_SIGNING_KEY` is set, benchmark history signing uses that
@@ -165,5 +171,5 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- benchmark the precision of layer-aware transfer penalties and hints
+- add benchmark cases for operator review choices under layer-sensitive recovery
 - add integration adapters only after benchmark gains are stable

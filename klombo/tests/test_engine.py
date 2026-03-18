@@ -8,7 +8,7 @@ from pathlib import Path
 
 from klombo.benchmark import BenchmarkHarness, BenchmarkScenario
 from klombo.engine import KlomboEngine
-from klombo.fixtures import default_repo_scenarios
+from klombo.fixtures import default_repo_scenarios, layer_guidance_scenarios
 from klombo.models import ActionRecord, Episode, MissionState
 
 
@@ -779,6 +779,19 @@ class KlomboEngineTests(unittest.TestCase):
             self.assertTrue(harness.verify_history()["valid"])
         finally:
             os.environ.pop("KLOMBO_TEST_SIGNING_KEY", None)
+
+    def test_benchmark_harness_tracks_layer_guidance_precision(self) -> None:
+        harness = BenchmarkHarness(self.engine)
+        summary = harness.benchmark_layer_guidance(layer_guidance_scenarios())
+
+        self.assertEqual(summary["kind"], "layer_guidance")
+        self.assertEqual(summary["scenario_count"], 3)
+        self.assertEqual(summary["layer_hint_hit_rate"], 1.0)
+        self.assertEqual(summary["layer_penalty_hit_rate"], 1.0)
+        self.assertEqual(summary["layer_guidance_hit_rate"], 1.0)
+        self.assertTrue(any(item["name"] == "transfer penalty for shared auth foundation" for item in summary["results"]))
+        benchmark_state = self.engine.benchmark_summary()
+        self.assertEqual(benchmark_state["latest"]["summary"]["kind"], "layer_guidance")
 
 
 if __name__ == "__main__":

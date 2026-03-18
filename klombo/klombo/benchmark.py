@@ -21,13 +21,20 @@ class BenchmarkScenario:
     repo_id: str
     task_type: str
     request: str
+    setup_repo_files: dict[str, str] = field(default_factory=dict)
     setup_episodes: list[dict[str, Any]] = field(default_factory=list)
     setup_missions: list[dict[str, Any]] = field(default_factory=list)
+    peer_repo_id: str | None = None
+    peer_repo_files: dict[str, str] = field(default_factory=dict)
+    peer_setup_episodes: list[dict[str, Any]] = field(default_factory=list)
     expected_procedure_tool: str | None = None
     expected_anti_pattern_tool: str | None = None
     expected_preference_key: str | None = None
     expected_semantic_substring: str | None = None
     expected_resume_step: str | None = None
+    expect_layer_hint: bool | None = None
+    expected_layer_hint_substring: str | None = None
+    expect_layer_penalty: bool | None = None
 
 
 class BenchmarkHarness:
@@ -116,12 +123,18 @@ class BenchmarkHarness:
                         repo_id=scenario.repo_id,
                         task_type=scenario.task_type,
                         request=scenario.request,
+                        setup_repo_files=scenario.setup_repo_files,
                         setup_missions=scenario.setup_missions,
+                        peer_repo_id=scenario.peer_repo_id,
+                        peer_repo_files=scenario.peer_repo_files,
                         expected_procedure_tool=scenario.expected_procedure_tool,
                         expected_anti_pattern_tool=scenario.expected_anti_pattern_tool,
                         expected_preference_key=scenario.expected_preference_key,
                         expected_semantic_substring=scenario.expected_semantic_substring,
                         expected_resume_step=scenario.expected_resume_step,
+                        expect_layer_hint=scenario.expect_layer_hint,
+                        expected_layer_hint_substring=scenario.expected_layer_hint_substring,
+                        expect_layer_penalty=scenario.expect_layer_penalty,
                     )
                     for scenario in scenarios
                 ]
@@ -155,6 +168,73 @@ class BenchmarkHarness:
             }
             self._record_benchmark_summary(comparison)
             return comparison
+
+    def benchmark_layer_guidance(self, scenarios: list[BenchmarkScenario]) -> dict[str, Any]:
+        results = []
+        for scenario in scenarios:
+            if scenario.setup_repo_files:
+                repo_root = self._materialize_repo_fixture(scenario.repo_id, scenario.setup_repo_files)
+                self.engine.scan_repo(scenario.repo_id, repo_root)
+            for mission in scenario.setup_missions:
+                self.engine.record_mission_state(mission)
+            for episode in scenario.setup_episodes:
+                self.engine.record_episode(episode)
+
+            if scenario.peer_repo_id and scenario.peer_repo_files:
+                peer_root = self._materialize_repo_fixture(scenario.peer_repo_id, scenario.peer_repo_files)
+                self.engine.scan_repo(scenario.peer_repo_id, peer_root)
+            for episode in scenario.peer_setup_episodes:
+                self.engine.record_episode(episode)
+
+            context = self.engine.get_planning_context(
+                repo_id=scenario.repo_id,
+                request=scenario.request,
+                task_type=scenario.task_type,
+                max_items=5,
+            )
+            resume = None
+            if scenario.setup_missions:
+                resume = self.engine.resume_context(scenario.setup_missions[0]["mission_id"])
+
+            layer_hint_hit = self._layer_hint_hit(
+                context.get("layer_hints", []),
+                scenario.expect_layer_hint,
+                scenario.expected_layer_hint_substring,
+            )
+            layer_penalty_hit = self._layer_penalty_hit(
+                context.get("transfer_candidates", []),
+                scenario.expect_layer_penalty,
+            )
+            results.append(
+                {
+                    "name": scenario.name,
+                    "layer_hint_hit": layer_hint_hit,
+                    "layer_penalty_hit": layer_penalty_hit,
+                    "context": context,
+                    "resume_context": resume,
+                }
+            )
+
+        summary = {
+            "kind": "layer_guidance",
+            "generated_at": utc_now(),
+            "scenario_count": len(results),
+            "layer_hint_hit_rate": self._rate(results, "layer_hint_hit"),
+            "layer_penalty_hit_rate": self._rate(results, "layer_penalty_hit"),
+            "layer_guidance_hit_rate": self._rate(
+                [
+                    {
+                        "layer_guidance_hit": item.get("layer_hint_hit", True)
+                        and item.get("layer_penalty_hit", True)
+                    }
+                    for item in results
+                ],
+                "layer_guidance_hit",
+            ),
+            "results": results,
+        }
+        self._record_benchmark_summary(summary)
+        return summary
 
     def verify_history(self) -> dict[str, Any]:
         payload = self.engine.benchmark_summary()
@@ -201,11 +281,55 @@ class BenchmarkHarness:
             return False
         return item.get("next_best_step") == expected_step
 
+    def _layer_hint_hit(
+        self,
+        hints: list[str],
+        expect_hint: bool | None,
+        expected_substring: str | None,
+    ) -> bool:
+        if expect_hint is None:
+            return True
+        if expect_hint:
+            if not hints:
+                return False
+            if expected_substring is None:
+                return True
+            lowered = expected_substring.lower()
+            return any(lowered in hint.lower() for hint in hints)
+        return not hints
+
+    def _layer_penalty_hit(
+        self,
+        candidates: list[dict[str, Any]],
+        expect_penalty: bool | None,
+    ) -> bool:
+        if expect_penalty is None:
+            return True
+        if not candidates:
+            return not expect_penalty
+        adjustment = float(candidates[0].get("layer_adjustment", 0.0))
+        return adjustment < 0.0 if expect_penalty else adjustment == 0.0
+
     def _rate(self, results: list[dict[str, Any]], key: str) -> float:
         if not results:
             return 0.0
         hits = sum(1 for item in results if item.get(key))
         return round(hits / len(results), 3)
+
+    def _materialize_repo_fixture(self, repo_id: str, files: dict[str, str]) -> Path:
+        root = self.engine.storage.root / "_benchmark_repos" / repo_id
+        if root.exists():
+            for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+        root.mkdir(parents=True, exist_ok=True)
+        for relative_path, content in files.items():
+            target = root / relative_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        return root
 
     def _record_benchmark_summary(self, summary: dict[str, Any]) -> None:
         payload = self.engine.benchmark_summary()
@@ -243,6 +367,9 @@ class BenchmarkHarness:
             "preference_hit_rate",
             "semantic_hit_rate",
             "resume_hit_rate",
+            "layer_hint_hit_rate",
+            "layer_penalty_hit_rate",
+            "layer_guidance_hit_rate",
         ]
         regressions = []
         for metric in metrics:
