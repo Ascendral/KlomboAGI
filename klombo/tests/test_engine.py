@@ -62,17 +62,21 @@ class KlomboEngineTests(unittest.TestCase):
         (repo_root / "src" / "auth").mkdir(parents=True)
         (repo_root / "src" / "api").mkdir(parents=True)
         (repo_root / "tests").mkdir(parents=True)
-        (repo_root / "app.py").write_text("from src.auth.service import refresh_token\n", encoding="utf-8")
+        (repo_root / "app.py").write_text(
+            "import requests\nfrom src.auth.service import refresh_token\n",
+            encoding="utf-8",
+        )
         (repo_root / "src" / "auth" / "service.py").write_text("def refresh_token():\n    return True\n", encoding="utf-8")
         (repo_root / "src" / "api" / "routes.py").write_text(
-            "from src.auth.service import refresh_token\n\ndef route():\n    return refresh_token()\n",
+            "import jwt\nfrom src.auth.service import refresh_token\n\ndef route():\n    return refresh_token()\n",
             encoding="utf-8",
         )
         (repo_root / "tests" / "test_auth.py").write_text("def test_auth():\n    assert True\n", encoding="utf-8")
+        (repo_root / "requirements.txt").write_text("requests==2.32.0\npyjwt>=2.8\n", encoding="utf-8")
         (repo_root / "package.json").write_text(
             json.dumps(
                 {
-                    "dependencies": {"react": "^18.0.0"},
+                    "dependencies": {"react": "^18.0.0", "zod": "^3.0.0"},
                     "scripts": {"test": "vitest", "lint": "eslint ."},
                 }
             ),
@@ -97,8 +101,14 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertIn("src/api", profile["ownership_zones"])
         self.assertIn("src/auth", profile["ownership_zones"])
         self.assertIn("src/api -> src/auth", profile["dependency_edges"])
+        self.assertIn("src/auth", profile["dependency_hotspots"])
+        self.assertIn("react", profile["external_dependencies"])
+        self.assertIn("requests", profile["external_dependencies"])
         self.assertTrue(profile["architecture_summary"])
+        self.assertTrue(any("Dependency hubs" in item for item in profile["architecture_summary"]))
+        self.assertTrue(any("External dependencies" in item for item in profile["architecture_summary"]))
         self.assertTrue(any("package.json script" in fact for fact in profile["semantic_facts"]))
+        self.assertTrue(any("External dependency detected" in fact for fact in profile["semantic_facts"]))
 
     def test_transfer_candidates_use_repo_family_matches(self) -> None:
         shared_a = self.root / "repo-a"

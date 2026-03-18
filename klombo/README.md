@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.8 includes:
+This standalone v0.9 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -44,6 +44,8 @@ This standalone v0.8 includes:
 - atomic writes and corruption quarantine
 - scan-time architecture summaries with entrypoints, test dirs, and service boundaries
 - ownership-zone extraction and lightweight dependency edges from repo scans
+- deeper dependency extraction from source imports and manifests
+- dependency-hub inference for richer architecture summaries
 - realistic repo-shaped benchmark fixtures
 - benchmark scaffolding for memory-on vs memory-off measurement
 - benchmark history and regression tracking
@@ -160,5 +162,5 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- add deeper dependency extraction beyond lightweight import edges
+- add layer-aware transfer and recovery hints from dependency hubs
 - add integration adapters only after benchmark gains are stable

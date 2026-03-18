@@ -150,12 +150,14 @@ class KlomboEngine:
         common_paths = Counter(profile.common_paths)
         frameworks = set(profile.frameworks)
         package_managers = set(profile.package_managers)
+        external_dependencies = Counter(profile.external_dependencies)
         command_families = dict(profile.command_families)
         entrypoints = set(profile.entrypoints)
         test_dirs = set(profile.test_dirs)
         service_boundaries = set(profile.service_boundaries)
         ownership_zones = set(profile.ownership_zones)
         dependency_edges = set(profile.dependency_edges)
+        dependency_hotspots = set(profile.dependency_hotspots)
         architecture_summary = list(profile.architecture_summary)
         semantic_facts = list(profile.semantic_facts)
 
@@ -185,27 +187,51 @@ class KlomboEngine:
                     service_boundaries.add(boundary)
             if self._is_entrypoint(path.name, relative):
                 entrypoints.add(relative)
-            for edge in self._extract_dependency_edges(path, relative):
+            file_dependency_edges, file_external_dependencies = self._extract_dependency_signals(path, relative)
+            for edge in file_dependency_edges:
                 dependency_edges.add(edge)
+            for dependency in file_external_dependencies:
+                external_dependencies[dependency] += 1
             lowered_name = path.name.lower()
             if lowered_name == "package.json":
-                self._scan_package_json(path, frameworks, package_managers, command_families, semantic_facts, profile)
+                self._scan_package_json(
+                    path,
+                    frameworks,
+                    package_managers,
+                    external_dependencies,
+                    command_families,
+                    semantic_facts,
+                    profile,
+                )
             elif lowered_name == "pyproject.toml":
-                self._scan_pyproject(path, frameworks, package_managers, command_families, semantic_facts, profile)
+                self._scan_pyproject(
+                    path,
+                    frameworks,
+                    package_managers,
+                    external_dependencies,
+                    command_families,
+                    semantic_facts,
+                    profile,
+                )
             elif lowered_name in {"requirements.txt", "gemfile", "cargo.toml", "go.mod"}:
-                self._scan_manifest_name(lowered_name, frameworks, package_managers, semantic_facts)
+                self._scan_manifest_name(path, lowered_name, frameworks, package_managers, external_dependencies, semantic_facts)
             elif lowered_name in {"pnpm-lock.yaml", "package-lock.json", "yarn.lock"}:
                 self._scan_lockfile_name(lowered_name, package_managers, semantic_facts)
             if "auth" in relative.lower():
                 fact = f"Auth-related code detected in {repo_id}: {relative}"
                 if fact not in semantic_facts:
                     semantic_facts.append(fact)
+        dependency_hotspots = self._derive_dependency_hotspots(dependency_edges)
         for zone in sorted(ownership_zones)[:4]:
             fact = f"Ownership zone detected in {repo_id}: {zone}"
             if fact not in semantic_facts:
                 semantic_facts.append(fact)
         for edge in sorted(dependency_edges)[:4]:
             fact = f"Dependency edge detected in {repo_id}: {edge}"
+            if fact not in semantic_facts:
+                semantic_facts.append(fact)
+        for dependency in [name for name, _count in external_dependencies.most_common(4)]:
+            fact = f"External dependency detected in {repo_id}: {dependency}"
             if fact not in semantic_facts:
                 semantic_facts.append(fact)
         architecture_summary = self._build_architecture_summary(
@@ -217,12 +243,15 @@ class KlomboEngine:
             service_boundaries=service_boundaries,
             ownership_zones=ownership_zones,
             dependency_edges=dependency_edges,
+            dependency_hotspots=dependency_hotspots,
+            external_dependencies=external_dependencies,
         )
 
         profile.repo_path = str(root)
         profile.languages = [name for name, _count in languages.most_common(8)]
         profile.common_paths = [name for name, _count in common_paths.most_common(10)]
         profile.frameworks = sorted(frameworks)
+        profile.external_dependencies = [name for name, _count in external_dependencies.most_common(12)]
         profile.repo_family = self._derive_repo_family(profile.languages, sorted(frameworks), sorted(package_managers))
         profile.package_managers = sorted(package_managers)
         profile.command_families = command_families
@@ -231,6 +260,7 @@ class KlomboEngine:
         profile.service_boundaries = sorted(service_boundaries)[:10]
         profile.ownership_zones = sorted(ownership_zones)[:10]
         profile.dependency_edges = sorted(dependency_edges)[:12]
+        profile.dependency_hotspots = sorted(dependency_hotspots)[:8]
         profile.architecture_summary = architecture_summary[:10]
         profile.semantic_facts = semantic_facts[-20:]
         profile.confidence = min(1.0, max(profile.confidence, 0.7))
@@ -415,12 +445,14 @@ class KlomboEngine:
         languages = set(profile.languages)
         package_managers = set(profile.package_managers)
         frameworks = set(profile.frameworks)
+        external_dependencies = set(profile.external_dependencies)
         command_families = dict(profile.command_families)
         common_paths = set(profile.common_paths)
         entrypoints = set(profile.entrypoints)
         test_dirs = set(profile.test_dirs)
         service_boundaries = set(profile.service_boundaries)
         ownership_zones = set(profile.ownership_zones)
+        dependency_hotspots = set(profile.dependency_hotspots)
         semantic_facts = list(profile.semantic_facts)
 
         for path in episode.files_touched:
@@ -486,6 +518,7 @@ class KlomboEngine:
         profile.languages = sorted(languages)
         profile.package_managers = sorted(package_managers)
         profile.frameworks = sorted(frameworks)
+        profile.external_dependencies = sorted(external_dependencies)[:12]
         profile.repo_family = self._derive_repo_family(profile.languages, profile.frameworks, profile.package_managers)
         profile.command_families = command_families
         profile.common_paths = sorted(common_paths)[:10]
@@ -493,6 +526,7 @@ class KlomboEngine:
         profile.test_dirs = sorted(test_dirs)[:8]
         profile.service_boundaries = sorted(service_boundaries)[:10]
         profile.ownership_zones = sorted(ownership_zones)[:10]
+        profile.dependency_hotspots = sorted(dependency_hotspots)[:8]
         profile.architecture_summary = self._build_architecture_summary(
             repo_id=episode.repo_id,
             languages=Counter(profile.languages),
@@ -502,6 +536,8 @@ class KlomboEngine:
             service_boundaries=service_boundaries,
             ownership_zones=ownership_zones,
             dependency_edges=set(profile.dependency_edges),
+            dependency_hotspots=dependency_hotspots,
+            external_dependencies=Counter(profile.external_dependencies),
         )[:10]
         profile.semantic_facts = semantic_facts[-14:]
         profile.confidence = min(1.0, profile.confidence + (0.05 if episode.success else 0.01))
@@ -1178,27 +1214,30 @@ class KlomboEngine:
             return "/".join(parts[:2])
         return parts[0]
 
-    def _extract_dependency_edges(self, path: Path, relative_path: str) -> list[str]:
+    def _extract_dependency_signals(self, path: Path, relative_path: str) -> tuple[list[str], list[str]]:
         if path.suffix.lower() not in {".py", ".ts", ".tsx", ".js", ".jsx"}:
-            return []
+            return [], []
         source_zone = self._derive_ownership_zone(relative_path)
         if not source_zone:
-            return []
+            return [], []
         try:
             if path.stat().st_size > 200_000:
-                return []
+                return [], []
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            return []
+            return [], []
 
         edges = set()
+        external_dependencies = set()
         for line in text.splitlines()[:200]:
             for reference in self._extract_import_references(line, path.suffix.lower()):
                 target_zone = self._resolve_dependency_zone(reference, relative_path)
-                if not target_zone:
-                    continue
-                edges.add(f"{source_zone} -> {target_zone}")
-        return sorted(edges)
+                if target_zone:
+                    edges.add(f"{source_zone} -> {target_zone}")
+                external_dependency = self._normalize_external_dependency(reference)
+                if external_dependency:
+                    external_dependencies.add(external_dependency)
+        return sorted(edges), sorted(external_dependencies)
 
     def _extract_import_references(self, line: str, suffix: str) -> list[str]:
         refs: list[str] = []
@@ -1220,6 +1259,8 @@ class KlomboEngine:
         cleaned = reference.strip()
         if not cleaned:
             return None
+        if cleaned.startswith("@/"):
+            return self._derive_ownership_zone(cleaned[2:])
         if cleaned.startswith("."):
             resolved = posixpath.normpath(posixpath.join(posixpath.dirname(relative_path), cleaned))
             return self._derive_ownership_zone(resolved)
@@ -1229,6 +1270,52 @@ class KlomboEngine:
             normalized = cleaned.lstrip(".").replace(".", "/")
             return self._derive_ownership_zone(normalized)
         return None
+
+    def _normalize_external_dependency(self, reference: str) -> str | None:
+        cleaned = reference.strip()
+        if not cleaned or cleaned.startswith(".") or cleaned.startswith("@/"):
+            return None
+        root = cleaned.replace("\\", "/")
+        local_roots = {
+            "src",
+            "app",
+            "lib",
+            "server",
+            "services",
+            "service",
+            "components",
+            "tests",
+            "test",
+            "docs",
+            "config",
+            "scripts",
+            "styles",
+            "assets",
+            "public",
+            "klombo",
+        }
+        if "/" in root:
+            first = root.split("/", 1)[0]
+            if first in local_roots:
+                return None
+            if root.startswith("@"):
+                parts = root.split("/")
+                return "/".join(parts[:2]) if len(parts) >= 2 else root
+            return first
+        if "." in root:
+            first = root.split(".", 1)[0]
+            if first in local_roots:
+                return None
+            return first
+        return root
+
+    def _derive_dependency_hotspots(self, dependency_edges: set[str]) -> set[str]:
+        inbound = Counter()
+        for edge in dependency_edges:
+            _source, _arrow, target = edge.partition(" -> ")
+            if target:
+                inbound[target] += 1
+        return {zone for zone, count in inbound.items() if count >= 1}
 
     def _is_entrypoint(self, filename: str, relative_path: str) -> bool:
         lowered = filename.lower()
@@ -1258,6 +1345,8 @@ class KlomboEngine:
         service_boundaries: set[str],
         ownership_zones: set[str],
         dependency_edges: set[str],
+        dependency_hotspots: set[str],
+        external_dependencies: Counter,
     ) -> list[str]:
         summary = []
         if languages:
@@ -1274,6 +1363,12 @@ class KlomboEngine:
             summary.append(f"Ownership zones in {repo_id}: {', '.join(sorted(ownership_zones)[:4])}")
         if dependency_edges:
             summary.append(f"Dependency edges in {repo_id}: {', '.join(sorted(dependency_edges)[:3])}")
+        if dependency_hotspots:
+            summary.append(f"Dependency hubs in {repo_id}: {', '.join(sorted(dependency_hotspots)[:4])}")
+        if external_dependencies:
+            summary.append(
+                f"External dependencies in {repo_id}: {', '.join(name for name, _count in external_dependencies.most_common(4))}"
+            )
         return summary
 
     def _action_chain(self, episode: Episode) -> list[str]:
@@ -1310,6 +1405,7 @@ class KlomboEngine:
         path: Path,
         frameworks: set[str],
         package_managers: set[str],
+        external_dependencies: Counter,
         command_families: dict[str, int],
         semantic_facts: list[str],
         profile: RepoProfile,
@@ -1325,6 +1421,9 @@ class KlomboEngine:
             **dict(data.get("devDependencies", {})),
         }
         for name in deps:
+            normalized = self._normalize_manifest_dependency(name)
+            if normalized:
+                external_dependencies[normalized] += 1
             for token, framework in _FRAMEWORK_HINTS.items():
                 if token in name.lower():
                     frameworks.add(framework)
@@ -1346,6 +1445,7 @@ class KlomboEngine:
         path: Path,
         frameworks: set[str],
         package_managers: set[str],
+        external_dependencies: Counter,
         command_families: dict[str, int],
         semantic_facts: list[str],
         profile: RepoProfile,
@@ -1361,6 +1461,10 @@ class KlomboEngine:
             frameworks.add("ruff")
             command_families["lint"] = int(command_families.get("lint", 0)) + 1
             profile.preferred_lint_commands = self._bump_command(profile.preferred_lint_commands, "ruff check .")
+        for dependency in self._extract_pyproject_dependency_names(text):
+            normalized = self._normalize_manifest_dependency(dependency)
+            if normalized:
+                external_dependencies[normalized] += 1
         if "[project]" in lowered:
             fact = f"Python project metadata detected in {profile.repo_id}: pyproject.toml"
             if fact not in semantic_facts:
@@ -1368,15 +1472,21 @@ class KlomboEngine:
 
     def _scan_manifest_name(
         self,
+        path: Path,
         name: str,
         frameworks: set[str],
         package_managers: set[str],
+        external_dependencies: Counter,
         semantic_facts: list[str],
     ) -> None:
         if name == "requirements.txt":
             package_managers.add("python")
             frameworks.add("python")
             semantic_facts.append("Python dependency manifest detected: requirements.txt")
+            for dependency in self._extract_requirements_dependency_names(path):
+                normalized = self._normalize_manifest_dependency(dependency)
+                if normalized:
+                    external_dependencies[normalized] += 1
         elif name == "gemfile":
             package_managers.add("bundler")
             frameworks.add("ruby")
@@ -1403,6 +1513,38 @@ class KlomboEngine:
         elif name == "yarn.lock":
             package_managers.add("yarn")
         semantic_facts.append(f"Lockfile detected: {name}")
+
+    def _extract_requirements_dependency_names(self, path: Path) -> list[str]:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        names = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                continue
+            candidate = re.split(r"[<>=!~\[]", stripped, maxsplit=1)[0].strip()
+            if candidate:
+                names.append(candidate)
+        return names
+
+    def _extract_pyproject_dependency_names(self, text: str) -> list[str]:
+        names = []
+        for match in re.findall(r'["\']([A-Za-z0-9_.\-]+(?:\[[A-Za-z0-9_,\-]+\])?(?:\s*[<>=!~].*?)?)["\']', text):
+            candidate = re.split(r"[<>=!~\[]", match, maxsplit=1)[0].strip()
+            if candidate and candidate.lower() not in {"python", "sample"}:
+                names.append(candidate)
+        return names
+
+    def _normalize_manifest_dependency(self, name: str) -> str | None:
+        cleaned = name.strip().strip("\"'").replace("\\", "/")
+        if not cleaned:
+            return None
+        if cleaned.startswith("@"):
+            parts = cleaned.split("/")
+            return "/".join(parts[:2]) if len(parts) >= 2 else cleaned
+        return cleaned.split("/", 1)[0]
 
     def _age_days(self, timestamp: str) -> float:
         try:

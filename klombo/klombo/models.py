@@ -88,6 +88,7 @@ class RepoProfile:
     languages: list[str] = field(default_factory=list)
     package_managers: list[str] = field(default_factory=list)
     frameworks: list[str] = field(default_factory=list)
+    external_dependencies: list[str] = field(default_factory=list)
     repo_family: str | None = None
     command_families: dict[str, int] = field(default_factory=dict)
     preferred_test_commands: list[str] = field(default_factory=list)
@@ -99,6 +100,7 @@ class RepoProfile:
     service_boundaries: list[str] = field(default_factory=list)
     ownership_zones: list[str] = field(default_factory=list)
     dependency_edges: list[str] = field(default_factory=list)
+    dependency_hotspots: list[str] = field(default_factory=list)
     architecture_summary: list[str] = field(default_factory=list)
     semantic_facts: list[str] = field(default_factory=list)
     confidence: float = 0.5
