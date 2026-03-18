@@ -102,13 +102,39 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertIn("src/auth", profile["ownership_zones"])
         self.assertIn("src/api -> src/auth", profile["dependency_edges"])
         self.assertIn("src/auth", profile["dependency_hotspots"])
+        self.assertIn("src/auth:foundation", profile["dependency_layers"])
         self.assertIn("react", profile["external_dependencies"])
         self.assertIn("requests", profile["external_dependencies"])
         self.assertTrue(profile["architecture_summary"])
         self.assertTrue(any("Dependency hubs" in item for item in profile["architecture_summary"]))
+        self.assertTrue(any("Dependency layers" in item for item in profile["architecture_summary"]))
         self.assertTrue(any("External dependencies" in item for item in profile["architecture_summary"]))
         self.assertTrue(any("package.json script" in fact for fact in profile["semantic_facts"]))
+        self.assertTrue(any("Dependency layer detected" in fact for fact in profile["semantic_facts"]))
         self.assertTrue(any("External dependency detected" in fact for fact in profile["semantic_facts"]))
+
+    def test_planning_context_adds_layer_hints_for_dependency_hubs(self) -> None:
+        repo_root = self.root / "layered-repo"
+        (repo_root / "src" / "auth").mkdir(parents=True)
+        (repo_root / "src" / "api").mkdir(parents=True)
+        (repo_root / "app.py").write_text("from src.api.routes import route\n", encoding="utf-8")
+        (repo_root / "src" / "auth" / "service.py").write_text("def refresh_token():\n    return True\n", encoding="utf-8")
+        (repo_root / "src" / "api" / "routes.py").write_text(
+            "from src.auth.service import refresh_token\n\ndef route():\n    return refresh_token()\n",
+            encoding="utf-8",
+        )
+        (repo_root / "pyproject.toml").write_text("[project]\nname='layered'\n[tool.pytest.ini_options]\n", encoding="utf-8")
+
+        self.engine.scan_repo("repo-layer", repo_root)
+        context = self.engine.get_planning_context(
+            repo_id="repo-layer",
+            request="Fix auth token refresh in src/auth",
+            task_type="bugfix",
+            max_items=5,
+        )
+
+        self.assertTrue(context["layer_hints"])
+        self.assertTrue(any("src/auth" in hint for hint in context["layer_hints"]))
 
     def test_transfer_candidates_use_repo_family_matches(self) -> None:
         shared_a = self.root / "repo-a"
@@ -383,10 +409,20 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertEqual(resumed["next_best_step"], "Patch auth migration in src/server/auth")
 
     def test_resume_context_includes_recovery_hints(self) -> None:
+        repo_root = self.root / "resume-repo"
+        (repo_root / "src" / "auth").mkdir(parents=True)
+        (repo_root / "src" / "api").mkdir(parents=True)
+        (repo_root / "src" / "auth" / "service.py").write_text("def migrate():\n    return True\n", encoding="utf-8")
+        (repo_root / "src" / "api" / "routes.py").write_text(
+            "from src.auth.service import migrate\n\ndef route():\n    return migrate()\n",
+            encoding="utf-8",
+        )
+        (repo_root / "pyproject.toml").write_text("[project]\nname='resume'\n[tool.pytest.ini_options]\n", encoding="utf-8")
+        self.engine.scan_repo("repo-resume", repo_root)
         self.engine.record_episode(
             Episode(
                 repo_id="repo-resume",
-                repo_path="/tmp/repo-resume",
+                repo_path=str(repo_root),
                 task_type="resume",
                 request="Resume interrupted auth migration",
                 success=False,
@@ -400,7 +436,7 @@ class KlomboEngineTests(unittest.TestCase):
         self.engine.record_episode(
             Episode(
                 repo_id="repo-resume",
-                repo_path="/tmp/repo-resume",
+                repo_path=str(repo_root),
                 task_type="resume",
                 request="Resume interrupted auth migration",
                 success=True,
@@ -435,7 +471,72 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertTrue(resumed["operator_review"]["options"])
         self.assertTrue(resumed["avoid_action_chains"])
         self.assertTrue(resumed["supporting_procedures"])
+        self.assertTrue(resumed["layer_hints"])
+        self.assertTrue(any("src/auth" in hint for hint in resumed["layer_hints"]))
         self.assertEqual(resumed["suggested_next_step"], "Patch auth migration in src/server/auth/migrate.ts")
+
+    def test_transfer_candidates_penalize_shared_foundation_changes(self) -> None:
+        current_root = self.root / "repo-layer-current"
+        candidate_root = self.root / "repo-layer-candidate"
+        for root in [current_root, candidate_root]:
+            (root / "src" / "auth").mkdir(parents=True)
+            (root / "src" / "api").mkdir(parents=True)
+            (root / "pyproject.toml").write_text("[project]\nname='layered'\n[tool.pytest.ini_options]\n", encoding="utf-8")
+        (current_root / "src" / "auth" / "service.py").write_text("def refresh():\n    return True\n", encoding="utf-8")
+        (current_root / "src" / "api" / "routes.py").write_text(
+            "from src.auth.service import refresh\n\ndef route():\n    return refresh()\n",
+            encoding="utf-8",
+        )
+        (candidate_root / "src" / "auth" / "service.py").write_text("def refresh():\n    return True\n", encoding="utf-8")
+        (candidate_root / "src" / "api" / "routes.py").write_text(
+            "from src.auth.service import refresh\n\ndef route():\n    return refresh()\n",
+            encoding="utf-8",
+        )
+
+        self.engine.scan_repo("repo-layer-current", current_root)
+        self.engine.scan_repo("repo-layer-candidate", candidate_root)
+        for _ in range(3):
+            self.engine.record_episode(
+                Episode(
+                    repo_id="repo-layer-candidate",
+                    repo_path=str(candidate_root),
+                    task_type="bugfix",
+                    request="Fix auth token refresh in src/auth",
+                    success=True,
+                    actions=[
+                        ActionRecord(tool="search_files", success=True),
+                        ActionRecord(tool="apply_patch", success=True),
+                        ActionRecord(tool="run_command", success=True, command="pytest tests/test_auth.py"),
+                    ],
+                    files_touched=["src/auth/service.py"],
+                    commands=["pytest tests/test_auth.py"],
+                )
+            )
+
+        high_risk = self.engine.get_planning_context(
+            repo_id="repo-layer-current",
+            request="Fix auth token refresh in src/auth",
+            task_type="bugfix",
+            max_items=5,
+        )
+        low_risk = self.engine.get_planning_context(
+            repo_id="repo-layer-current",
+            request="Fix output copy in cli",
+            task_type="bugfix",
+            max_items=5,
+        )
+
+        self.assertTrue(high_risk["transfer_candidates"])
+        self.assertTrue(low_risk["transfer_candidates"])
+        self.assertLess(
+            high_risk["transfer_candidates"][0]["transfer_score"],
+            low_risk["transfer_candidates"][0]["transfer_score"],
+        )
+        self.assertLess(high_risk["transfer_candidates"][0]["layer_adjustment"], 0.0)
+        self.assertEqual(low_risk["transfer_candidates"][0]["layer_adjustment"], 0.0)
+        self.assertTrue(
+            any("foundation layer" in reason for reason in high_risk["transfer_candidates"][0]["reasons"])
+        )
 
     def test_operator_review_decision_is_persisted_and_reused(self) -> None:
         self.engine.record_episode(

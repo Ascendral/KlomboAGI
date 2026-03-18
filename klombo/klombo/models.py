@@ -101,6 +101,7 @@ class RepoProfile:
     ownership_zones: list[str] = field(default_factory=list)
     dependency_edges: list[str] = field(default_factory=list)
     dependency_hotspots: list[str] = field(default_factory=list)
+    dependency_layers: list[str] = field(default_factory=list)
     architecture_summary: list[str] = field(default_factory=list)
     semantic_facts: list[str] = field(default_factory=list)
     confidence: float = 0.5

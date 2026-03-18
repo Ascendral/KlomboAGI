@@ -158,6 +158,7 @@ class KlomboEngine:
         ownership_zones = set(profile.ownership_zones)
         dependency_edges = set(profile.dependency_edges)
         dependency_hotspots = set(profile.dependency_hotspots)
+        dependency_layers = list(profile.dependency_layers)
         architecture_summary = list(profile.architecture_summary)
         semantic_facts = list(profile.semantic_facts)
 
@@ -234,6 +235,11 @@ class KlomboEngine:
             fact = f"External dependency detected in {repo_id}: {dependency}"
             if fact not in semantic_facts:
                 semantic_facts.append(fact)
+        dependency_layers = self._derive_dependency_layers(ownership_zones, dependency_edges, dependency_hotspots)
+        for layer in dependency_layers[:4]:
+            fact = f"Dependency layer detected in {repo_id}: {layer}"
+            if fact not in semantic_facts:
+                semantic_facts.append(fact)
         architecture_summary = self._build_architecture_summary(
             repo_id=repo_id,
             languages=languages,
@@ -244,6 +250,7 @@ class KlomboEngine:
             ownership_zones=ownership_zones,
             dependency_edges=dependency_edges,
             dependency_hotspots=dependency_hotspots,
+            dependency_layers=dependency_layers,
             external_dependencies=external_dependencies,
         )
 
@@ -261,6 +268,7 @@ class KlomboEngine:
         profile.ownership_zones = sorted(ownership_zones)[:10]
         profile.dependency_edges = sorted(dependency_edges)[:12]
         profile.dependency_hotspots = sorted(dependency_hotspots)[:8]
+        profile.dependency_layers = dependency_layers[:10]
         profile.architecture_summary = architecture_summary[:10]
         profile.semantic_facts = semantic_facts[-20:]
         profile.confidence = min(1.0, max(profile.confidence, 0.7))
@@ -312,6 +320,12 @@ class KlomboEngine:
             hints.append(f"Recovered work usually succeeds via: {chain}")
         if repo_profile and repo_profile.get("preferred_test_commands"):
             hints.append(f"Prefer targeted verification command: {repo_profile['preferred_test_commands'][0]}")
+        layer_hints = self._build_layer_hints(
+            repo_profile,
+            query_tokens,
+            fallback_to_hotspots=True,
+        )
+        hints.extend(layer_hints[:2])
 
         suggested_next_step = mission.get("next_best_step")
         if not suggested_next_step and scored_procedures and scored_procedures[0]["score"] > 0:
@@ -343,6 +357,7 @@ class KlomboEngine:
             **mission,
             "suggested_next_step": suggested_next_step,
             "recovery_hints": hints[:4],
+            "layer_hints": layer_hints[:3],
             "recovery_plan": recovery_plan,
             "conflicts": conflicts,
             "chosen_strategy": chosen_strategy,
@@ -408,11 +423,13 @@ class KlomboEngine:
         repo_profile = repo_profiles.get(repo_id)
         active_preferences = self._rank_preferences(preferences, repo_id, max_items)
         semantic_facts = self._select_semantic_facts(repo_profile, query_tokens, max_items)
+        layer_hints = self._build_layer_hints(repo_profile, query_tokens)
         transfer_candidates, transfer_controls = self._find_transfer_candidates(
             repo_profiles,
             procedures,
             repo_id,
             task_type,
+            query_tokens,
         )
 
         return {
@@ -421,6 +438,7 @@ class KlomboEngine:
             "anti_patterns": [item["item"] for item in scored_anti_patterns if item["score"] > 0][:max_items],
             "preferences": active_preferences,
             "semantic_facts": [item["fact"] for item in semantic_facts],
+            "layer_hints": layer_hints[:max_items],
             "transfer_candidates": transfer_candidates[:max_items],
             "transfer_controls": transfer_controls,
             "explanations": {
@@ -428,6 +446,7 @@ class KlomboEngine:
                 "anti_patterns": [item for item in scored_anti_patterns if item["score"] > 0][:max_items],
                 "preferences": self._explain_preferences(active_preferences),
                 "semantic_facts": semantic_facts,
+                "layer_hints": layer_hints[:max_items],
                 "transfer_candidates": transfer_candidates[:max_items],
                 "transfer_controls": transfer_controls,
             },
@@ -453,6 +472,7 @@ class KlomboEngine:
         service_boundaries = set(profile.service_boundaries)
         ownership_zones = set(profile.ownership_zones)
         dependency_hotspots = set(profile.dependency_hotspots)
+        dependency_layers = list(profile.dependency_layers)
         semantic_facts = list(profile.semantic_facts)
 
         for path in episode.files_touched:
@@ -527,6 +547,7 @@ class KlomboEngine:
         profile.service_boundaries = sorted(service_boundaries)[:10]
         profile.ownership_zones = sorted(ownership_zones)[:10]
         profile.dependency_hotspots = sorted(dependency_hotspots)[:8]
+        profile.dependency_layers = dependency_layers[:10]
         profile.architecture_summary = self._build_architecture_summary(
             repo_id=episode.repo_id,
             languages=Counter(profile.languages),
@@ -537,6 +558,7 @@ class KlomboEngine:
             ownership_zones=ownership_zones,
             dependency_edges=set(profile.dependency_edges),
             dependency_hotspots=dependency_hotspots,
+            dependency_layers=dependency_layers,
             external_dependencies=Counter(profile.external_dependencies),
         )[:10]
         profile.semantic_facts = semantic_facts[-14:]
@@ -800,11 +822,13 @@ class KlomboEngine:
         procedures: list[dict[str, Any]],
         repo_id: str,
         task_type: str,
+        query_tokens: set[str],
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         current = repo_profiles.get(repo_id)
         if not current or not current.get("repo_family"):
             return [], self._empty_transfer_controls()
         current_family = current.get("repo_family")
+        layer_signal = self._transfer_layer_signal(current, query_tokens)
         transfer_reviews = self.storage.load_json(self.storage.transfer_reviews_file, [])
         candidates = []
         review_count = 0
@@ -848,7 +872,10 @@ class KlomboEngine:
                 procedure_signature=procedure_signature,
             )
             matched_review_count += history["matched_reviews"]
-            transfer_score = round(base_transfer_score + history["history_adjustment"], 4)
+            transfer_score = round(
+                base_transfer_score + history["history_adjustment"] + layer_signal["adjustment"],
+                4,
+            )
             policy = self._score_transfer_candidate(transfer_score)
             candidate = {
                 "repo_id": other_id,
@@ -859,6 +886,8 @@ class KlomboEngine:
                 "strongest_success_count": strongest_success_count,
                 "base_transfer_score": base_transfer_score,
                 "history_adjustment": history["history_adjustment"],
+                "layer_adjustment": layer_signal["adjustment"],
+                "matched_layers": layer_signal["matched_layers"],
                 "accepted_review_count": history["accepted_count"],
                 "rejected_review_count": history["rejected_count"],
                 "transfer_score": transfer_score,
@@ -870,7 +899,9 @@ class KlomboEngine:
                     f"{len(matching_procedures)} matching procedures for task type {task_type}",
                     f"base transfer score {base_transfer_score}",
                     f"review history adjustment {history['history_adjustment']}",
+                    f"layer adjustment {layer_signal['adjustment']}",
                     *history["reasons"],
+                    *layer_signal["reasons"],
                     f"transfer score {transfer_score}",
                     *policy["reasons"],
                 ],
@@ -894,7 +925,7 @@ class KlomboEngine:
                 reverse=True,
             ),
             {
-                "policy": "decision_aware_transfer_v0.8",
+                "policy": "decision_aware_transfer_v0.10",
                 "guided_threshold": 0.9,
                 "review_threshold": 0.72,
                 "eligible_without_review": guided_count,
@@ -907,7 +938,7 @@ class KlomboEngine:
 
     def _empty_transfer_controls(self) -> dict[str, Any]:
         return {
-            "policy": "decision_aware_transfer_v0.8",
+            "policy": "decision_aware_transfer_v0.10",
             "guided_threshold": 0.9,
             "review_threshold": 0.72,
             "eligible_without_review": 0,
@@ -916,6 +947,35 @@ class KlomboEngine:
             "matched_review_count": 0,
             "review_required": False,
         }
+
+    def _transfer_layer_signal(self, repo_profile: dict[str, Any], query_tokens: set[str]) -> dict[str, Any]:
+        matched_layers = self._match_dependency_layers(repo_profile, query_tokens)
+        if not matched_layers:
+            return {"adjustment": 0.0, "matched_layers": [], "reasons": ["request did not match a risky dependency layer"]}
+
+        highest_risk = max(
+            (self._layer_risk_weight(role) for _zone, role in matched_layers),
+            default=0.0,
+        )
+        adjustment = round(-highest_risk, 4)
+        reasons = [
+            f"request touches {role} layer {zone}"
+            for zone, role in matched_layers[:2]
+        ]
+        return {
+            "adjustment": adjustment,
+            "matched_layers": [f"{zone}:{role}" for zone, role in matched_layers[:3]],
+            "reasons": reasons,
+        }
+
+    def _layer_risk_weight(self, role: str) -> float:
+        if role == "foundation":
+            return 0.08
+        if role == "orchestration":
+            return 0.04
+        if role == "shared":
+            return 0.03
+        return 0.0
 
     def _score_transfer_candidate(self, transfer_score: float) -> dict[str, Any]:
         if transfer_score >= 0.9:
@@ -1317,6 +1377,85 @@ class KlomboEngine:
                 inbound[target] += 1
         return {zone for zone, count in inbound.items() if count >= 1}
 
+    def _derive_dependency_layers(
+        self,
+        ownership_zones: set[str],
+        dependency_edges: set[str],
+        dependency_hotspots: set[str],
+    ) -> list[str]:
+        inbound = Counter()
+        outbound = Counter()
+        for edge in dependency_edges:
+            source, _arrow, target = edge.partition(" -> ")
+            if source and target:
+                outbound[source] += 1
+                inbound[target] += 1
+        layers = []
+        for zone in sorted(ownership_zones):
+            if zone in dependency_hotspots and inbound[zone] >= max(1, outbound[zone]):
+                role = "foundation"
+            elif outbound[zone] > inbound[zone]:
+                role = "orchestration"
+            elif inbound[zone] > 0:
+                role = "shared"
+            else:
+                role = "leaf"
+            layers.append(f"{zone}:{role}")
+        return layers
+
+    def _parse_dependency_layers(self, repo_profile: dict[str, Any] | None) -> list[tuple[str, str]]:
+        if not repo_profile:
+            return []
+        parsed = []
+        for entry in repo_profile.get("dependency_layers", []):
+            zone, separator, role = str(entry).partition(":")
+            if zone and separator and role:
+                parsed.append((zone, role))
+        return parsed
+
+    def _match_dependency_layers(
+        self,
+        repo_profile: dict[str, Any] | None,
+        query_tokens: set[str],
+    ) -> list[tuple[str, str]]:
+        if not repo_profile or not query_tokens:
+            return []
+        matched = []
+        hotspots = set(repo_profile.get("dependency_hotspots", []))
+        for zone, role in self._parse_dependency_layers(repo_profile):
+            zone_tokens = self._tokens(zone.replace("/", " "))
+            if query_tokens.intersection(zone_tokens):
+                boosted_role = "foundation" if zone in hotspots and role in {"shared", "leaf"} else role
+                matched.append((zone, boosted_role))
+        return matched
+
+    def _build_layer_hints(
+        self,
+        repo_profile: dict[str, Any] | None,
+        query_tokens: set[str],
+        *,
+        fallback_to_hotspots: bool = False,
+    ) -> list[str]:
+        if not repo_profile:
+            return []
+        matched_layers = self._match_dependency_layers(repo_profile, query_tokens)
+        if not matched_layers and fallback_to_hotspots:
+            matched_layers = [
+                (zone, "foundation")
+                for zone in repo_profile.get("dependency_hotspots", [])[:1]
+            ]
+        hints = []
+        for zone, role in matched_layers[:3]:
+            if role == "foundation":
+                hints.append(f"Treat {zone} as a shared foundation layer; prefer narrow edits and verify dependents.")
+            elif role == "orchestration":
+                hints.append(f"Treat {zone} as an orchestration layer; validate downstream calls before broad refactors.")
+            elif role == "shared":
+                hints.append(f"{zone} is shared across multiple zones; verify adjacent surfaces after changes.")
+            else:
+                hints.append(f"Keep work localized in {zone} before escalating to shared layers.")
+        return hints
+
     def _is_entrypoint(self, filename: str, relative_path: str) -> bool:
         lowered = filename.lower()
         normalized = relative_path.lower()
@@ -1346,6 +1485,7 @@ class KlomboEngine:
         ownership_zones: set[str],
         dependency_edges: set[str],
         dependency_hotspots: set[str],
+        dependency_layers: list[str],
         external_dependencies: Counter,
     ) -> list[str]:
         summary = []
@@ -1365,6 +1505,10 @@ class KlomboEngine:
             summary.append(f"Dependency edges in {repo_id}: {', '.join(sorted(dependency_edges)[:3])}")
         if dependency_hotspots:
             summary.append(f"Dependency hubs in {repo_id}: {', '.join(sorted(dependency_hotspots)[:4])}")
+        if dependency_layers:
+            summary.append(
+                f"Dependency layers in {repo_id}: {', '.join(item.replace(':', ' (', 1) + ')' for item in dependency_layers[:4])}"
+            )
         if external_dependencies:
             summary.append(
                 f"External dependencies in {repo_id}: {', '.join(name for name, _count in external_dependencies.most_common(4))}"

@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.9 includes:
+This standalone v0.10 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -46,6 +46,8 @@ This standalone v0.9 includes:
 - ownership-zone extraction and lightweight dependency edges from repo scans
 - deeper dependency extraction from source imports and manifests
 - dependency-hub inference for richer architecture summaries
+- dependency-layer inference for foundation and orchestration zones
+- layer-aware transfer scoring and resume hints for shared hubs
 - realistic repo-shaped benchmark fixtures
 - benchmark scaffolding for memory-on vs memory-off measurement
 - benchmark history and regression tracking
@@ -151,6 +153,7 @@ Before Klombo attaches to any agent runtime, it should meet these rules:
 14. Operator-approved conflict resolutions should persist across restarts.
 15. Transfer review outcomes should influence future cross-repo guidance.
 16. Persisted approvals must be invalidated when mission context materially changes.
+17. Shared dependency hubs should trigger narrower transfer and recovery guidance.
 
 ## Running Tests
 
@@ -162,5 +165,5 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- add layer-aware transfer and recovery hints from dependency hubs
+- benchmark the precision of layer-aware transfer penalties and hints
 - add integration adapters only after benchmark gains are stable
