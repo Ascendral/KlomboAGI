@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.6 includes:
+This standalone v0.7 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -35,7 +35,9 @@ This standalone v0.6 includes:
 - mission resume guidance with blocked-step recovery hints
 - conflict-aware recovery planning for resume guidance
 - operator review surfaces for recovery conflicts
+- persisted operator review decisions for resumed missions
 - planning-context retrieval with explainability
+- confidence-weighted transfer controls across repo families
 - confidence decay and stale-memory pruning
 - atomic writes and corruption quarantine
 - scan-time architecture summaries with entrypoints, test dirs, and service boundaries
@@ -73,6 +75,7 @@ Klombo stores all state under a dedicated root:
     benchmark_runs.json
     benchmark_signing_key.txt
     missions.json
+    operator_reviews.json
     preferences.json
     procedures.json
     repo_profiles.json
@@ -88,6 +91,7 @@ engine = KlomboEngine("./memory")
 
 engine.record_episode(...)
 engine.record_mission_state(...)
+engine.record_operator_review(...)
 engine.scan_repo("my-repo", "/path/to/repo")
 
 context = engine.get_planning_context(
@@ -108,6 +112,7 @@ harness = BenchmarkHarness(
 
 # context now includes:
 # - transfer_candidates
+# - transfer_controls
 # - explanations for transfer candidates
 #
 # resume now includes:
@@ -137,6 +142,7 @@ Before Klombo attaches to any agent runtime, it should meet these rules:
 11. Benchmark history must fail verification if tampered with.
 12. Transfer across repos must be cautious and explainable, never silent.
 13. Recovery conflicts should surface an explicit operator review path.
+14. Operator-approved conflict resolutions should persist across restarts.
 
 ## Running Tests
 
@@ -148,7 +154,7 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- add confidence-weighted transfer controls across repo families
 - add deeper dependency extraction beyond lightweight import edges
-- add explicit operator approval persistence for reviewed recovery decisions
+- add transfer controls that learn from accepted and rejected review decisions
+- add operator review expiry and invalidation when mission context changes
 - add integration adapters only after benchmark gains are stable

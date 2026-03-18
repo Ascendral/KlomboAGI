@@ -173,3 +173,19 @@ class MissionState:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class OperatorReviewDecision:
+    mission_id: str
+    repo_id: str
+    selected_option: str
+    approved: bool = True
+    selected_step: str | None = None
+    notes: str | None = None
+    id: str = field(default_factory=lambda: new_id("review"))
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

@@ -48,6 +48,10 @@ class KlomboStorage:
         return self.state_dir / "missions.json"
 
     @property
+    def operator_reviews_file(self) -> Path:
+        return self.state_dir / "operator_reviews.json"
+
+    @property
     def benchmark_runs_file(self) -> Path:
         return self.state_dir / "benchmark_runs.json"
 

@@ -12,6 +12,7 @@ from klombo.models import (
     AntiPatternMemory,
     Episode,
     MissionState,
+    OperatorReviewDecision,
     ProcedureMemory,
     RepoProfile,
     UserPreference,
@@ -104,6 +105,20 @@ class KlomboEngine:
         missions = self.storage.load_json(self.storage.missions_file, {})
         missions[materialized.mission_id] = materialized.to_dict()
         self.storage.save_json(self.storage.missions_file, missions)
+        return materialized.to_dict()
+
+    def record_operator_review(
+        self,
+        decision: OperatorReviewDecision | dict[str, Any],
+    ) -> dict[str, Any]:
+        materialized = (
+            decision
+            if isinstance(decision, OperatorReviewDecision)
+            else OperatorReviewDecision(**decision)
+        )
+        reviews = self.storage.load_json(self.storage.operator_reviews_file, {})
+        reviews[materialized.mission_id] = materialized.to_dict()
+        self.storage.save_json(self.storage.operator_reviews_file, reviews)
         return materialized.to_dict()
 
     def scan_repo(self, repo_id: str, repo_path: str | Path, *, max_files: int = 250) -> dict[str, Any]:
@@ -217,7 +232,9 @@ class KlomboEngine:
         procedures = self.storage.load_json(self.storage.procedures_file, [])
         anti_patterns = self.storage.load_json(self.storage.anti_patterns_file, [])
         repo_profiles = self.storage.load_json(self.storage.repo_profiles_file, {})
+        operator_reviews = self.storage.load_json(self.storage.operator_reviews_file, {})
         repo_profile = repo_profiles.get(mission["repo_id"])
+        review_decision = operator_reviews.get(mission_id)
         query_tokens = self._tokens(
             f"{mission.get('summary', '')} {' '.join(mission.get('blocked_actions', []))} {' '.join(mission.get('attempted_actions', []))}"
         )
@@ -254,11 +271,19 @@ class KlomboEngine:
             scored_procedures=scored_procedures,
             scored_anti_patterns=scored_anti_patterns,
         )
+        suggested_next_step, chosen_strategy = self._apply_operator_review_decision(
+            mission=mission,
+            recovery_plan=recovery_plan,
+            suggested_next_step=suggested_next_step,
+            chosen_strategy=chosen_strategy,
+            review_decision=review_decision,
+        )
         operator_review = self._build_operator_review(
             mission=mission,
             recovery_plan=recovery_plan,
             conflicts=conflicts,
             chosen_strategy=chosen_strategy,
+            review_decision=review_decision,
         )
 
         return {
@@ -330,7 +355,12 @@ class KlomboEngine:
         repo_profile = repo_profiles.get(repo_id)
         active_preferences = self._rank_preferences(preferences, repo_id, max_items)
         semantic_facts = self._select_semantic_facts(repo_profile, query_tokens, max_items)
-        transfer_candidates = self._find_transfer_candidates(repo_profiles, procedures, repo_id, task_type)
+        transfer_candidates, transfer_controls = self._find_transfer_candidates(
+            repo_profiles,
+            procedures,
+            repo_id,
+            task_type,
+        )
 
         return {
             "repo_profile": repo_profile,
@@ -339,12 +369,14 @@ class KlomboEngine:
             "preferences": active_preferences,
             "semantic_facts": [item["fact"] for item in semantic_facts],
             "transfer_candidates": transfer_candidates[:max_items],
+            "transfer_controls": transfer_controls,
             "explanations": {
                 "procedures": [item for item in scored_procedures if item["score"] > 0][:max_items],
                 "anti_patterns": [item for item in scored_anti_patterns if item["score"] > 0][:max_items],
                 "preferences": self._explain_preferences(active_preferences),
                 "semantic_facts": semantic_facts,
                 "transfer_candidates": transfer_candidates[:max_items],
+                "transfer_controls": transfer_controls,
             },
             "generated_at": utc_now(),
         }
@@ -709,12 +741,15 @@ class KlomboEngine:
         procedures: list[dict[str, Any]],
         repo_id: str,
         task_type: str,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         current = repo_profiles.get(repo_id)
         if not current or not current.get("repo_family"):
-            return []
+            return [], self._empty_transfer_controls()
         current_family = current.get("repo_family")
         candidates = []
+        review_count = 0
+        guided_count = 0
+        blocked_count = 0
         for other_id, profile in repo_profiles.items():
             if other_id == repo_id:
                 continue
@@ -728,23 +763,93 @@ class KlomboEngine:
             if not matching_procedures:
                 continue
             strongest = max(float(item.get("confidence", 0.0)) for item in matching_procedures)
-            candidates.append(
-                {
-                    "repo_id": other_id,
-                    "repo_family": current_family,
-                    "matching_procedure_count": len(matching_procedures),
-                    "strongest_confidence": round(strongest, 4),
-                    "reasons": [
-                        f"same repo family {current_family}",
-                        f"{len(matching_procedures)} matching procedures for task type {task_type}",
-                    ],
-                }
+            strongest_success_count = max(int(item.get("success_count", 0)) for item in matching_procedures)
+            transfer_score = round(
+                (strongest * 0.7)
+                + (min(strongest_success_count, 3) * 0.05)
+                + (min(len(matching_procedures), 3) * 0.08)
+                + (float(profile.get("confidence", 0.5)) * 0.25),
+                4,
             )
-        return sorted(
-            candidates,
-            key=lambda item: (item["strongest_confidence"], item["matching_procedure_count"]),
-            reverse=True,
+            policy = self._score_transfer_candidate(transfer_score)
+            candidate = {
+                "repo_id": other_id,
+                "repo_family": current_family,
+                "matching_procedure_count": len(matching_procedures),
+                "strongest_confidence": round(strongest, 4),
+                "strongest_success_count": strongest_success_count,
+                "transfer_score": transfer_score,
+                "transfer_tier": policy["tier"],
+                "review_required": policy["review_required"],
+                "apply_mode": policy["apply_mode"],
+                "reasons": [
+                    f"same repo family {current_family}",
+                    f"{len(matching_procedures)} matching procedures for task type {task_type}",
+                    f"transfer score {transfer_score}",
+                    *policy["reasons"],
+                ],
+            }
+            if policy["tier"] == "blocked":
+                blocked_count += 1
+                continue
+            if policy["review_required"]:
+                review_count += 1
+            else:
+                guided_count += 1
+            candidates.append(candidate)
+        return (
+            sorted(
+                candidates,
+                key=lambda item: (
+                    item["transfer_score"],
+                    item["strongest_confidence"],
+                    item["matching_procedure_count"],
+                ),
+                reverse=True,
+            ),
+            {
+                "policy": "confidence_weighted_transfer_v0.7",
+                "guided_threshold": 0.9,
+                "review_threshold": 0.72,
+                "eligible_without_review": guided_count,
+                "eligible_with_review": review_count,
+                "blocked_candidates": blocked_count,
+                "review_required": review_count > 0,
+            },
         )
+
+    def _empty_transfer_controls(self) -> dict[str, Any]:
+        return {
+            "policy": "confidence_weighted_transfer_v0.7",
+            "guided_threshold": 0.9,
+            "review_threshold": 0.72,
+            "eligible_without_review": 0,
+            "eligible_with_review": 0,
+            "blocked_candidates": 0,
+            "review_required": False,
+        }
+
+    def _score_transfer_candidate(self, transfer_score: float) -> dict[str, Any]:
+        if transfer_score >= 0.9:
+            return {
+                "tier": "guided",
+                "review_required": False,
+                "apply_mode": "reference",
+                "reasons": ["score cleared guided transfer threshold"],
+            }
+        if transfer_score >= 0.72:
+            return {
+                "tier": "review",
+                "review_required": True,
+                "apply_mode": "operator_review",
+                "reasons": ["score requires operator review before transfer is applied"],
+            }
+        return {
+            "tier": "blocked",
+            "review_required": True,
+            "apply_mode": "withhold",
+            "reasons": ["score stayed below transfer threshold"],
+        }
 
     def _resolve_recovery_plan(
         self,
@@ -819,8 +924,12 @@ class KlomboEngine:
         recovery_plan: list[dict[str, Any]],
         conflicts: list[str],
         chosen_strategy: str,
+        review_decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        required = bool(conflicts)
+        decision_status = "none"
+        if review_decision:
+            decision_status = "approved" if review_decision.get("approved", True) else "rejected"
+        required = bool(conflicts) and decision_status != "approved"
         options = []
         next_step = mission.get("next_best_step")
         if next_step:
@@ -855,14 +964,43 @@ class KlomboEngine:
                 continue
             seen.add(marker)
             unique_options.append(option)
-        summary = conflicts[0] if conflicts else "No operator review required."
+        if decision_status == "approved":
+            summary = f"Operator approved strategy: {review_decision.get('selected_option', chosen_strategy)}"
+        elif conflicts:
+            summary = conflicts[0]
+        else:
+            summary = "No operator review required."
         return {
             "required": required,
             "summary": summary,
             "recommended_option": chosen_strategy,
             "options": unique_options[:3],
             "conflicts": conflicts,
+            "decision_status": decision_status,
+            "decision": review_decision,
         }
+
+    def _apply_operator_review_decision(
+        self,
+        *,
+        mission: dict[str, Any],
+        recovery_plan: list[dict[str, Any]],
+        suggested_next_step: str | None,
+        chosen_strategy: str,
+        review_decision: dict[str, Any] | None,
+    ) -> tuple[str | None, str]:
+        if not review_decision or not review_decision.get("approved", True):
+            return suggested_next_step, chosen_strategy
+
+        selected_option = str(review_decision.get("selected_option") or chosen_strategy)
+        selected_step = review_decision.get("selected_step")
+        if selected_option == "apply_recovery_plan" and recovery_plan:
+            return str(selected_step or recovery_plan[0]["step"]), selected_option
+        if selected_option == "pause_and_replan":
+            return str(selected_step or "Pause and request a fresh plan"), selected_option
+        if selected_option == "follow_saved_next_step":
+            return str(selected_step or mission.get("next_best_step") or suggested_next_step), selected_option
+        return suggested_next_step, selected_option
 
     def _find_chain_match(
         self,
