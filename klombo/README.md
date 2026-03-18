@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.5 includes:
+This standalone v0.6 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -34,14 +34,17 @@ This standalone v0.5 includes:
 - mission resume state storage
 - mission resume guidance with blocked-step recovery hints
 - conflict-aware recovery planning for resume guidance
+- operator review surfaces for recovery conflicts
 - planning-context retrieval with explainability
 - confidence decay and stale-memory pruning
 - atomic writes and corruption quarantine
 - scan-time architecture summaries with entrypoints, test dirs, and service boundaries
+- ownership-zone extraction and lightweight dependency edges from repo scans
 - realistic repo-shaped benchmark fixtures
 - benchmark scaffolding for memory-on vs memory-off measurement
 - benchmark history and regression tracking
 - tamper-evident benchmark signing and verification
+- external signing key sourcing via explicit key, provider, env var, or persisted fallback
 - automated tests
 
 ## Not Included Yet
@@ -78,7 +81,7 @@ Klombo stores all state under a dedicated root:
 ## Core API
 
 ```python
-from klombo import KlomboEngine
+from klombo import BenchmarkHarness, KlomboEngine
 from klombo.fixtures import default_repo_scenarios
 
 engine = KlomboEngine("./memory")
@@ -97,6 +100,12 @@ resume = engine.resume_context("mission_123")
 engine.maintain_memories()
 scenarios = default_repo_scenarios()
 
+harness = BenchmarkHarness(
+    engine,
+    signing_key_env="KLOMBO_BENCHMARK_SIGNING_KEY",
+    persist_generated_key=False,
+)
+
 # context now includes:
 # - transfer_candidates
 # - explanations for transfer candidates
@@ -105,7 +114,11 @@ scenarios = default_repo_scenarios()
 # - recovery_plan
 # - conflicts
 # - chosen_strategy
+# - operator_review
 ```
+
+If `KLOMBO_BENCHMARK_SIGNING_KEY` is set, benchmark history signing uses that
+external key and does not need to persist a generated local key.
 
 ## Hardening Rules
 
@@ -123,6 +136,7 @@ Before Klombo attaches to any agent runtime, it should meet these rules:
 10. Benchmark regressions must be visible before any integration is enabled.
 11. Benchmark history must fail verification if tampered with.
 12. Transfer across repos must be cautious and explainable, never silent.
+13. Recovery conflicts should surface an explicit operator review path.
 
 ## Running Tests
 
@@ -134,8 +148,7 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- add externalized benchmark key management for stronger tamper evidence
-- add richer architecture extraction such as dependency graphs and ownership zones
 - add confidence-weighted transfer controls across repo families
-- add explicit operator review surfaces for recovery-plan conflicts
+- add deeper dependency extraction beyond lightweight import edges
+- add explicit operator approval persistence for reviewed recovery decisions
 - add integration adapters only after benchmark gains are stable

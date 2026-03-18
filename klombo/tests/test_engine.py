@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,9 +60,14 @@ class KlomboEngineTests(unittest.TestCase):
     def test_scan_repo_extracts_semantic_facts_from_filesystem(self) -> None:
         repo_root = self.root / "sample-repo"
         (repo_root / "src" / "auth").mkdir(parents=True)
+        (repo_root / "src" / "api").mkdir(parents=True)
         (repo_root / "tests").mkdir(parents=True)
         (repo_root / "app.py").write_text("from src.auth.service import refresh_token\n", encoding="utf-8")
         (repo_root / "src" / "auth" / "service.py").write_text("def refresh_token():\n    return True\n", encoding="utf-8")
+        (repo_root / "src" / "api" / "routes.py").write_text(
+            "from src.auth.service import refresh_token\n\ndef route():\n    return refresh_token()\n",
+            encoding="utf-8",
+        )
         (repo_root / "tests" / "test_auth.py").write_text("def test_auth():\n    assert True\n", encoding="utf-8")
         (repo_root / "package.json").write_text(
             json.dumps(
@@ -88,6 +94,9 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertIn("app.py", profile["entrypoints"])
         self.assertIn("tests", profile["test_dirs"])
         self.assertIn("src/auth", profile["service_boundaries"])
+        self.assertIn("src/api", profile["ownership_zones"])
+        self.assertIn("src/auth", profile["ownership_zones"])
+        self.assertIn("src/api -> src/auth", profile["dependency_edges"])
         self.assertTrue(profile["architecture_summary"])
         self.assertTrue(any("package.json script" in fact for fact in profile["semantic_facts"]))
 
@@ -229,6 +238,9 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertTrue(resumed["recovery_plan"])
         self.assertEqual(resumed["chosen_strategy"], "prefer_safe_variation")
         self.assertTrue(resumed["conflicts"])
+        self.assertTrue(resumed["review_required"])
+        self.assertEqual(resumed["operator_review"]["recommended_option"], "prefer_safe_variation")
+        self.assertTrue(resumed["operator_review"]["options"])
         self.assertTrue(resumed["avoid_action_chains"])
         self.assertTrue(resumed["supporting_procedures"])
         self.assertEqual(resumed["suggested_next_step"], "Patch auth migration in src/server/auth/migrate.ts")
@@ -355,6 +367,24 @@ class KlomboEngineTests(unittest.TestCase):
         verified_after = harness.verify_history()
         self.assertFalse(verified_after["valid"])
         self.assertTrue(any("signature mismatch" in item for item in verified_after["issues"]))
+
+    def test_benchmark_harness_uses_env_signing_key_without_persisting_file(self) -> None:
+        os.environ["KLOMBO_TEST_SIGNING_KEY"] = "external-signing-key"
+        try:
+            harness = BenchmarkHarness(
+                self.engine,
+                signing_key_env="KLOMBO_TEST_SIGNING_KEY",
+                persist_generated_key=False,
+            )
+            harness.compare_memory_modes(default_repo_scenarios())
+
+            benchmark_state = self.engine.benchmark_summary()
+            latest = benchmark_state["latest"]
+            self.assertEqual(latest["signature_meta"]["source"], "env:KLOMBO_TEST_SIGNING_KEY")
+            self.assertFalse(self.engine.storage.benchmark_signing_key_file.exists())
+            self.assertTrue(harness.verify_history()["valid"])
+        finally:
+            os.environ.pop("KLOMBO_TEST_SIGNING_KEY", None)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import secrets
 from tempfile import TemporaryDirectory
@@ -31,8 +33,22 @@ class BenchmarkScenario:
 class BenchmarkHarness:
     """Evaluation harness for memory-informed retrieval quality."""
 
-    def __init__(self, engine: KlomboEngine) -> None:
+    def __init__(
+        self,
+        engine: KlomboEngine,
+        *,
+        signing_key: str | bytes | None = None,
+        signing_key_provider: Callable[[], str | bytes | None] | None = None,
+        signing_key_env: str = "KLOMBO_BENCHMARK_SIGNING_KEY",
+        persist_generated_key: bool = True,
+    ) -> None:
         self.engine = engine
+        self.signing_key = signing_key
+        self.signing_key_provider = signing_key_provider
+        self.signing_key_env = signing_key_env
+        self.persist_generated_key = persist_generated_key
+        self._cached_signing_key: bytes | None = None
+        self._cached_signing_meta: dict[str, str] | None = None
 
     def run(self, scenarios: list[BenchmarkScenario]) -> dict[str, Any]:
         results = []
@@ -204,6 +220,7 @@ class BenchmarkHarness:
             "summary": summary,
             "previous_signature": previous_signature,
             "signature": self._sign_summary(summary, previous_signature),
+            "signature_meta": self._signing_metadata(),
             "signed_at": utc_now(),
         }
         history.append(envelope)
@@ -243,7 +260,7 @@ class BenchmarkHarness:
         return regressions
 
     def _sign_summary(self, summary: dict[str, Any], previous_signature: str) -> str:
-        key = self._get_signing_key()
+        key, _meta = self._resolve_signing_key()
         payload = json.dumps(
             {"summary": summary, "previous_signature": previous_signature},
             sort_keys=True,
@@ -251,10 +268,52 @@ class BenchmarkHarness:
         ).encode("utf-8")
         return hmac.new(key, payload, hashlib.sha256).hexdigest()
 
-    def _get_signing_key(self) -> bytes:
+    def _signing_metadata(self) -> dict[str, str]:
+        _key, meta = self._resolve_signing_key()
+        return dict(meta)
+
+    def _resolve_signing_key(self) -> tuple[bytes, dict[str, str]]:
+        if self._cached_signing_key is not None and self._cached_signing_meta is not None:
+            return self._cached_signing_key, dict(self._cached_signing_meta)
+
+        resolved_key: bytes
+        source: str
+
+        if self.signing_key is not None:
+            resolved_key = self._coerce_signing_key(self.signing_key)
+            source = "explicit"
+        elif self.signing_key_provider is not None:
+            provided = self.signing_key_provider()
+            if provided:
+                resolved_key = self._coerce_signing_key(provided)
+                source = "provider"
+            else:
+                resolved_key, source = self._load_env_or_file_key()
+        else:
+            resolved_key, source = self._load_env_or_file_key()
+
+        meta = {
+            "source": source,
+            "fingerprint": hashlib.sha256(resolved_key).hexdigest()[:16],
+        }
+        self._cached_signing_key = resolved_key
+        self._cached_signing_meta = dict(meta)
+        return resolved_key, meta
+
+    def _load_env_or_file_key(self) -> tuple[bytes, str]:
+        env_value = os.environ.get(self.signing_key_env)
+        if env_value:
+            return env_value.encode("utf-8"), f"env:{self.signing_key_env}"
+
         key_file = self.engine.storage.benchmark_signing_key_file
         if key_file.exists():
-            return key_file.read_text(encoding="utf-8").strip().encode("utf-8")
+            return key_file.read_text(encoding="utf-8").strip().encode("utf-8"), "state_file"
+
         key = secrets.token_hex(32)
-        key_file.write_text(key, encoding="utf-8")
-        return key.encode("utf-8")
+        if self.persist_generated_key:
+            key_file.write_text(key, encoding="utf-8")
+            return key.encode("utf-8"), "generated+persisted"
+        return key.encode("utf-8"), "generated+ephemeral"
+
+    def _coerce_signing_key(self, value: str | bytes) -> bytes:
+        return value if isinstance(value, bytes) else value.encode("utf-8")

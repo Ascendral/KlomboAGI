@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import posixpath
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +49,12 @@ _FRAMEWORK_HINTS = {
     "shopify": "shopify-theme",
     "liquid": "shopify-theme",
 }
+
+_PYTHON_FROM_IMPORT_RE = re.compile(r"^\s*from\s+([\.a-zA-Z0-9_]+)\s+import\s+")
+_PYTHON_IMPORT_RE = re.compile(r"^\s*import\s+([a-zA-Z0-9_.,\s]+)")
+_JS_IMPORT_RE = re.compile(r"""from\s+["']([^"']+)["']""")
+_JS_REQUIRE_RE = re.compile(r"""require\(\s*["']([^"']+)["']\s*\)""")
+_JS_DYNAMIC_IMPORT_RE = re.compile(r"""import\(\s*["']([^"']+)["']\s*\)""")
 
 
 class KlomboEngine:
@@ -114,6 +122,8 @@ class KlomboEngine:
         entrypoints = set(profile.entrypoints)
         test_dirs = set(profile.test_dirs)
         service_boundaries = set(profile.service_boundaries)
+        ownership_zones = set(profile.ownership_zones)
+        dependency_edges = set(profile.dependency_edges)
         architecture_summary = list(profile.architecture_summary)
         semantic_facts = list(profile.semantic_facts)
 
@@ -131,6 +141,9 @@ class KlomboEngine:
             if suffix in _EXTENSION_LANGUAGE_MAP:
                 languages[_EXTENSION_LANGUAGE_MAP[suffix]] += 1
             parent = path.parent.relative_to(root).as_posix().strip(".")
+            ownership_zone = self._derive_ownership_zone(relative)
+            if ownership_zone:
+                ownership_zones.add(ownership_zone)
             if parent:
                 common_paths[parent.strip("/")] += 1
                 if "test" in parent.lower():
@@ -140,6 +153,8 @@ class KlomboEngine:
                     service_boundaries.add(boundary)
             if self._is_entrypoint(path.name, relative):
                 entrypoints.add(relative)
+            for edge in self._extract_dependency_edges(path, relative):
+                dependency_edges.add(edge)
             lowered_name = path.name.lower()
             if lowered_name == "package.json":
                 self._scan_package_json(path, frameworks, package_managers, command_families, semantic_facts, profile)
@@ -153,6 +168,14 @@ class KlomboEngine:
                 fact = f"Auth-related code detected in {repo_id}: {relative}"
                 if fact not in semantic_facts:
                     semantic_facts.append(fact)
+        for zone in sorted(ownership_zones)[:4]:
+            fact = f"Ownership zone detected in {repo_id}: {zone}"
+            if fact not in semantic_facts:
+                semantic_facts.append(fact)
+        for edge in sorted(dependency_edges)[:4]:
+            fact = f"Dependency edge detected in {repo_id}: {edge}"
+            if fact not in semantic_facts:
+                semantic_facts.append(fact)
         architecture_summary = self._build_architecture_summary(
             repo_id=repo_id,
             languages=languages,
@@ -160,6 +183,8 @@ class KlomboEngine:
             entrypoints=entrypoints,
             test_dirs=test_dirs,
             service_boundaries=service_boundaries,
+            ownership_zones=ownership_zones,
+            dependency_edges=dependency_edges,
         )
 
         profile.repo_path = str(root)
@@ -172,6 +197,8 @@ class KlomboEngine:
         profile.entrypoints = sorted(entrypoints)[:8]
         profile.test_dirs = sorted(test_dirs)[:8]
         profile.service_boundaries = sorted(service_boundaries)[:10]
+        profile.ownership_zones = sorted(ownership_zones)[:10]
+        profile.dependency_edges = sorted(dependency_edges)[:12]
         profile.architecture_summary = architecture_summary[:10]
         profile.semantic_facts = semantic_facts[-20:]
         profile.confidence = min(1.0, max(profile.confidence, 0.7))
@@ -227,6 +254,12 @@ class KlomboEngine:
             scored_procedures=scored_procedures,
             scored_anti_patterns=scored_anti_patterns,
         )
+        operator_review = self._build_operator_review(
+            mission=mission,
+            recovery_plan=recovery_plan,
+            conflicts=conflicts,
+            chosen_strategy=chosen_strategy,
+        )
 
         return {
             **mission,
@@ -235,6 +268,8 @@ class KlomboEngine:
             "recovery_plan": recovery_plan,
             "conflicts": conflicts,
             "chosen_strategy": chosen_strategy,
+            "review_required": operator_review["required"],
+            "operator_review": operator_review,
             "avoid_action_chains": [
                 item["item"].get("failing_chain", [])
                 for item in scored_anti_patterns[:3]
@@ -330,6 +365,7 @@ class KlomboEngine:
         entrypoints = set(profile.entrypoints)
         test_dirs = set(profile.test_dirs)
         service_boundaries = set(profile.service_boundaries)
+        ownership_zones = set(profile.ownership_zones)
         semantic_facts = list(profile.semantic_facts)
 
         for path in episode.files_touched:
@@ -349,6 +385,9 @@ class KlomboEngine:
                 boundary = self._derive_service_boundary(path)
                 if boundary:
                     service_boundaries.add(boundary)
+            ownership_zone = self._derive_ownership_zone(path)
+            if ownership_zone:
+                ownership_zones.add(ownership_zone)
             if self._is_entrypoint(Path(path).name, path):
                 entrypoints.add(path)
             for token, framework in _FRAMEWORK_HINTS.items():
@@ -398,6 +437,7 @@ class KlomboEngine:
         profile.entrypoints = sorted(entrypoints)[:8]
         profile.test_dirs = sorted(test_dirs)[:8]
         profile.service_boundaries = sorted(service_boundaries)[:10]
+        profile.ownership_zones = sorted(ownership_zones)[:10]
         profile.architecture_summary = self._build_architecture_summary(
             repo_id=episode.repo_id,
             languages=Counter(profile.languages),
@@ -405,6 +445,8 @@ class KlomboEngine:
             entrypoints=entrypoints,
             test_dirs=test_dirs,
             service_boundaries=service_boundaries,
+            ownership_zones=ownership_zones,
+            dependency_edges=set(profile.dependency_edges),
         )[:10]
         profile.semantic_facts = semantic_facts[-14:]
         profile.confidence = min(1.0, profile.confidence + (0.05 if episode.success else 0.01))
@@ -770,6 +812,58 @@ class KlomboEngine:
 
         return sorted(plan, key=lambda item: item["priority"]), conflicts, chosen_strategy
 
+    def _build_operator_review(
+        self,
+        *,
+        mission: dict[str, Any],
+        recovery_plan: list[dict[str, Any]],
+        conflicts: list[str],
+        chosen_strategy: str,
+    ) -> dict[str, Any]:
+        required = bool(conflicts)
+        options = []
+        next_step = mission.get("next_best_step")
+        if next_step:
+            options.append(
+                {
+                    "id": "follow_saved_next_step",
+                    "label": "Follow saved next step",
+                    "step": next_step,
+                }
+            )
+        if recovery_plan:
+            options.append(
+                {
+                    "id": "apply_recovery_plan",
+                    "label": "Apply the highest-priority safe recovery step",
+                    "step": recovery_plan[0]["step"],
+                }
+            )
+        if mission.get("blocked_actions"):
+            options.append(
+                {
+                    "id": "pause_and_replan",
+                    "label": "Pause and request a fresh plan",
+                    "step": f"Replan around blocked action: {mission['blocked_actions'][0]}",
+                }
+            )
+        unique_options = []
+        seen = set()
+        for option in options:
+            marker = (option["id"], option["step"])
+            if marker in seen:
+                continue
+            seen.add(marker)
+            unique_options.append(option)
+        summary = conflicts[0] if conflicts else "No operator review required."
+        return {
+            "required": required,
+            "summary": summary,
+            "recommended_option": chosen_strategy,
+            "options": unique_options[:3],
+            "conflicts": conflicts,
+        }
+
     def _find_chain_match(
         self,
         items: list[dict[str, Any]],
@@ -808,6 +902,74 @@ class KlomboEngine:
             return "/".join(parts[:2])
         return None
 
+    def _derive_ownership_zone(self, relative_path: str) -> str | None:
+        normalized = relative_path.replace("\\", "/").strip("/")
+        if not normalized:
+            return None
+        boundary = self._derive_service_boundary(normalized)
+        if boundary:
+            return boundary
+        parts = [part for part in normalized.split("/") if part and part != "."]
+        if not parts:
+            return None
+        if parts[0] in {"tests", "test", "docs", "config", "scripts"}:
+            return parts[0]
+        if len(parts) >= 2 and parts[0] in {"src", "app", "klombo"}:
+            return "/".join(parts[:2])
+        return parts[0]
+
+    def _extract_dependency_edges(self, path: Path, relative_path: str) -> list[str]:
+        if path.suffix.lower() not in {".py", ".ts", ".tsx", ".js", ".jsx"}:
+            return []
+        source_zone = self._derive_ownership_zone(relative_path)
+        if not source_zone:
+            return []
+        try:
+            if path.stat().st_size > 200_000:
+                return []
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return []
+
+        edges = set()
+        for line in text.splitlines()[:200]:
+            for reference in self._extract_import_references(line, path.suffix.lower()):
+                target_zone = self._resolve_dependency_zone(reference, relative_path)
+                if not target_zone:
+                    continue
+                edges.add(f"{source_zone} -> {target_zone}")
+        return sorted(edges)
+
+    def _extract_import_references(self, line: str, suffix: str) -> list[str]:
+        refs: list[str] = []
+        if suffix == ".py":
+            from_match = _PYTHON_FROM_IMPORT_RE.match(line)
+            if from_match:
+                refs.append(from_match.group(1))
+            import_match = _PYTHON_IMPORT_RE.match(line)
+            if import_match:
+                for chunk in import_match.group(1).split(","):
+                    refs.append(chunk.strip().split(" as ")[0].strip())
+            return [ref for ref in refs if ref]
+        refs.extend(_JS_IMPORT_RE.findall(line))
+        refs.extend(_JS_REQUIRE_RE.findall(line))
+        refs.extend(_JS_DYNAMIC_IMPORT_RE.findall(line))
+        return [ref for ref in refs if ref]
+
+    def _resolve_dependency_zone(self, reference: str, relative_path: str) -> str | None:
+        cleaned = reference.strip()
+        if not cleaned:
+            return None
+        if cleaned.startswith("."):
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(relative_path), cleaned))
+            return self._derive_ownership_zone(resolved)
+        if "/" in cleaned:
+            return self._derive_ownership_zone(cleaned)
+        if "." in cleaned:
+            normalized = cleaned.lstrip(".").replace(".", "/")
+            return self._derive_ownership_zone(normalized)
+        return None
+
     def _is_entrypoint(self, filename: str, relative_path: str) -> bool:
         lowered = filename.lower()
         normalized = relative_path.lower()
@@ -834,6 +996,8 @@ class KlomboEngine:
         entrypoints: set[str],
         test_dirs: set[str],
         service_boundaries: set[str],
+        ownership_zones: set[str],
+        dependency_edges: set[str],
     ) -> list[str]:
         summary = []
         if languages:
@@ -846,6 +1010,10 @@ class KlomboEngine:
             summary.append(f"Test directories in {repo_id}: {', '.join(sorted(test_dirs)[:3])}")
         if service_boundaries:
             summary.append(f"Service boundaries in {repo_id}: {', '.join(sorted(service_boundaries)[:4])}")
+        if ownership_zones:
+            summary.append(f"Ownership zones in {repo_id}: {', '.join(sorted(ownership_zones)[:4])}")
+        if dependency_edges:
+            summary.append(f"Dependency edges in {repo_id}: {', '.join(sorted(dependency_edges)[:3])}")
         return summary
 
     def _action_chain(self, episode: Episode) -> list[str]:

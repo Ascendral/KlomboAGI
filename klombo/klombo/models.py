@@ -97,6 +97,8 @@ class RepoProfile:
     entrypoints: list[str] = field(default_factory=list)
     test_dirs: list[str] = field(default_factory=list)
     service_boundaries: list[str] = field(default_factory=list)
+    ownership_zones: list[str] = field(default_factory=list)
+    dependency_edges: list[str] = field(default_factory=list)
     architecture_summary: list[str] = field(default_factory=list)
     semantic_facts: list[str] = field(default_factory=list)
     confidence: float = 0.5
