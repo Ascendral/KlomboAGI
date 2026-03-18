@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import posixpath
 import re
@@ -15,6 +16,7 @@ from klombo.models import (
     OperatorReviewDecision,
     ProcedureMemory,
     RepoProfile,
+    TransferReview,
     UserPreference,
     utc_now,
 )
@@ -116,9 +118,24 @@ class KlomboEngine:
             if isinstance(decision, OperatorReviewDecision)
             else OperatorReviewDecision(**decision)
         )
+        if not materialized.context_signature:
+            missions = self.storage.load_json(self.storage.missions_file, {})
+            mission = missions.get(materialized.mission_id)
+            if mission:
+                materialized.context_signature = self._mission_context_signature(mission)
         reviews = self.storage.load_json(self.storage.operator_reviews_file, {})
         reviews[materialized.mission_id] = materialized.to_dict()
         self.storage.save_json(self.storage.operator_reviews_file, reviews)
+        return materialized.to_dict()
+
+    def record_transfer_review(
+        self,
+        review: TransferReview | dict[str, Any],
+    ) -> dict[str, Any]:
+        materialized = review if isinstance(review, TransferReview) else TransferReview(**review)
+        reviews = self.storage.load_json(self.storage.transfer_reviews_file, [])
+        reviews.append(materialized.to_dict())
+        self.storage.save_json(self.storage.transfer_reviews_file, reviews[-200:])
         return materialized.to_dict()
 
     def scan_repo(self, repo_id: str, repo_path: str | Path, *, max_files: int = 250) -> dict[str, Any]:
@@ -235,6 +252,10 @@ class KlomboEngine:
         operator_reviews = self.storage.load_json(self.storage.operator_reviews_file, {})
         repo_profile = repo_profiles.get(mission["repo_id"])
         review_decision = operator_reviews.get(mission_id)
+        applied_review_decision, decision_status, decision_reason = self._resolve_operator_review_state(
+            mission,
+            review_decision,
+        )
         query_tokens = self._tokens(
             f"{mission.get('summary', '')} {' '.join(mission.get('blocked_actions', []))} {' '.join(mission.get('attempted_actions', []))}"
         )
@@ -276,7 +297,7 @@ class KlomboEngine:
             recovery_plan=recovery_plan,
             suggested_next_step=suggested_next_step,
             chosen_strategy=chosen_strategy,
-            review_decision=review_decision,
+            review_decision=applied_review_decision,
         )
         operator_review = self._build_operator_review(
             mission=mission,
@@ -284,6 +305,8 @@ class KlomboEngine:
             conflicts=conflicts,
             chosen_strategy=chosen_strategy,
             review_decision=review_decision,
+            decision_status=decision_status,
+            decision_reason=decision_reason,
         )
 
         return {
@@ -746,10 +769,12 @@ class KlomboEngine:
         if not current or not current.get("repo_family"):
             return [], self._empty_transfer_controls()
         current_family = current.get("repo_family")
+        transfer_reviews = self.storage.load_json(self.storage.transfer_reviews_file, [])
         candidates = []
         review_count = 0
         guided_count = 0
         blocked_count = 0
+        matched_review_count = 0
         for other_id, profile in repo_profiles.items():
             if other_id == repo_id:
                 continue
@@ -762,22 +787,44 @@ class KlomboEngine:
             ]
             if not matching_procedures:
                 continue
-            strongest = max(float(item.get("confidence", 0.0)) for item in matching_procedures)
-            strongest_success_count = max(int(item.get("success_count", 0)) for item in matching_procedures)
-            transfer_score = round(
+            representative_procedure = max(
+                matching_procedures,
+                key=lambda item: (
+                    float(item.get("confidence", 0.0)),
+                    int(item.get("success_count", 0)),
+                    len(item.get("action_chain", [])),
+                ),
+            )
+            procedure_signature = self._procedure_signature(representative_procedure)
+            strongest = float(representative_procedure.get("confidence", 0.0))
+            strongest_success_count = int(representative_procedure.get("success_count", 0))
+            base_transfer_score = round(
                 (strongest * 0.7)
                 + (min(strongest_success_count, 3) * 0.05)
                 + (min(len(matching_procedures), 3) * 0.08)
                 + (float(profile.get("confidence", 0.5)) * 0.25),
                 4,
             )
+            history = self._summarize_transfer_history(
+                transfer_reviews,
+                repo_family=current_family,
+                task_type=task_type,
+                procedure_signature=procedure_signature,
+            )
+            matched_review_count += history["matched_reviews"]
+            transfer_score = round(base_transfer_score + history["history_adjustment"], 4)
             policy = self._score_transfer_candidate(transfer_score)
             candidate = {
                 "repo_id": other_id,
                 "repo_family": current_family,
                 "matching_procedure_count": len(matching_procedures),
+                "procedure_signature": procedure_signature,
                 "strongest_confidence": round(strongest, 4),
                 "strongest_success_count": strongest_success_count,
+                "base_transfer_score": base_transfer_score,
+                "history_adjustment": history["history_adjustment"],
+                "accepted_review_count": history["accepted_count"],
+                "rejected_review_count": history["rejected_count"],
                 "transfer_score": transfer_score,
                 "transfer_tier": policy["tier"],
                 "review_required": policy["review_required"],
@@ -785,6 +832,9 @@ class KlomboEngine:
                 "reasons": [
                     f"same repo family {current_family}",
                     f"{len(matching_procedures)} matching procedures for task type {task_type}",
+                    f"base transfer score {base_transfer_score}",
+                    f"review history adjustment {history['history_adjustment']}",
+                    *history["reasons"],
                     f"transfer score {transfer_score}",
                     *policy["reasons"],
                 ],
@@ -808,24 +858,26 @@ class KlomboEngine:
                 reverse=True,
             ),
             {
-                "policy": "confidence_weighted_transfer_v0.7",
+                "policy": "decision_aware_transfer_v0.8",
                 "guided_threshold": 0.9,
                 "review_threshold": 0.72,
                 "eligible_without_review": guided_count,
                 "eligible_with_review": review_count,
                 "blocked_candidates": blocked_count,
+                "matched_review_count": matched_review_count,
                 "review_required": review_count > 0,
             },
         )
 
     def _empty_transfer_controls(self) -> dict[str, Any]:
         return {
-            "policy": "confidence_weighted_transfer_v0.7",
+            "policy": "decision_aware_transfer_v0.8",
             "guided_threshold": 0.9,
             "review_threshold": 0.72,
             "eligible_without_review": 0,
             "eligible_with_review": 0,
             "blocked_candidates": 0,
+            "matched_review_count": 0,
             "review_required": False,
         }
 
@@ -850,6 +902,75 @@ class KlomboEngine:
             "apply_mode": "withhold",
             "reasons": ["score stayed below transfer threshold"],
         }
+
+    def _summarize_transfer_history(
+        self,
+        transfer_reviews: list[dict[str, Any]],
+        *,
+        repo_family: str,
+        task_type: str,
+        procedure_signature: str,
+    ) -> dict[str, Any]:
+        accepted_count = 0
+        rejected_count = 0
+        for item in transfer_reviews:
+            if item.get("repo_family") != repo_family:
+                continue
+            if item.get("task_type") != task_type:
+                continue
+            if item.get("procedure_signature") != procedure_signature:
+                continue
+            if item.get("accepted", False):
+                accepted_count += 1
+            else:
+                rejected_count += 1
+        history_adjustment = round((min(accepted_count, 3) * 0.05) - (min(rejected_count, 3) * 0.12), 4)
+        reasons = []
+        if accepted_count:
+            reasons.append(f"{accepted_count} accepted transfer reviews matched this procedure")
+        if rejected_count:
+            reasons.append(f"{rejected_count} rejected transfer reviews matched this procedure")
+        if not reasons:
+            reasons.append("no matching transfer review history yet")
+        return {
+            "accepted_count": accepted_count,
+            "rejected_count": rejected_count,
+            "matched_reviews": accepted_count + rejected_count,
+            "history_adjustment": history_adjustment,
+            "reasons": reasons,
+        }
+
+    def _procedure_signature(self, procedure: dict[str, Any]) -> str:
+        return " -> ".join(str(tool) for tool in procedure.get("action_chain", []))
+
+    def _mission_context_signature(self, mission: dict[str, Any]) -> str:
+        payload = {
+            "repo_id": mission.get("repo_id"),
+            "summary": mission.get("summary"),
+            "status": mission.get("status"),
+            "last_plan": mission.get("last_plan"),
+            "attempted_actions": mission.get("attempted_actions", []),
+            "blocked_actions": mission.get("blocked_actions", []),
+            "next_best_step": mission.get("next_best_step"),
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def _resolve_operator_review_state(
+        self,
+        mission: dict[str, Any],
+        review_decision: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any] | None, str, str | None]:
+        if not review_decision:
+            return None, "none", None
+        approved = bool(review_decision.get("approved", True))
+        if not approved:
+            return None, "rejected", "Previous operator review did not approve auto-reuse."
+        stored_signature = review_decision.get("context_signature")
+        if stored_signature and stored_signature != self._mission_context_signature(mission):
+            return None, "invalidated", "Prior operator approval was invalidated because the mission context changed."
+        return review_decision, "approved", None
 
     def _resolve_recovery_plan(
         self,
@@ -925,10 +1046,9 @@ class KlomboEngine:
         conflicts: list[str],
         chosen_strategy: str,
         review_decision: dict[str, Any] | None = None,
+        decision_status: str = "none",
+        decision_reason: str | None = None,
     ) -> dict[str, Any]:
-        decision_status = "none"
-        if review_decision:
-            decision_status = "approved" if review_decision.get("approved", True) else "rejected"
         required = bool(conflicts) and decision_status != "approved"
         options = []
         next_step = mission.get("next_best_step")
@@ -966,6 +1086,8 @@ class KlomboEngine:
             unique_options.append(option)
         if decision_status == "approved":
             summary = f"Operator approved strategy: {review_decision.get('selected_option', chosen_strategy)}"
+        elif decision_status in {"rejected", "invalidated"} and decision_reason:
+            summary = decision_reason
         elif conflicts:
             summary = conflicts[0]
         else:

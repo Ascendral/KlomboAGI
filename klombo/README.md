@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.7 includes:
+This standalone v0.8 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -36,8 +36,10 @@ This standalone v0.7 includes:
 - conflict-aware recovery planning for resume guidance
 - operator review surfaces for recovery conflicts
 - persisted operator review decisions for resumed missions
+- mission-context invalidation for stale operator approvals
 - planning-context retrieval with explainability
 - confidence-weighted transfer controls across repo families
+- decision-aware transfer learning from accepted and rejected reviews
 - confidence decay and stale-memory pruning
 - atomic writes and corruption quarantine
 - scan-time architecture summaries with entrypoints, test dirs, and service boundaries
@@ -79,6 +81,7 @@ Klombo stores all state under a dedicated root:
     preferences.json
     procedures.json
     repo_profiles.json
+    transfer_reviews.json
 ```
 
 ## Core API
@@ -92,6 +95,7 @@ engine = KlomboEngine("./memory")
 engine.record_episode(...)
 engine.record_mission_state(...)
 engine.record_operator_review(...)
+engine.record_transfer_review(...)
 engine.scan_repo("my-repo", "/path/to/repo")
 
 context = engine.get_planning_context(
@@ -143,6 +147,8 @@ Before Klombo attaches to any agent runtime, it should meet these rules:
 12. Transfer across repos must be cautious and explainable, never silent.
 13. Recovery conflicts should surface an explicit operator review path.
 14. Operator-approved conflict resolutions should persist across restarts.
+15. Transfer review outcomes should influence future cross-repo guidance.
+16. Persisted approvals must be invalidated when mission context materially changes.
 
 ## Running Tests
 
@@ -155,6 +161,4 @@ python3 -m unittest discover -s tests -v
 ## Next Hardening Targets
 
 - add deeper dependency extraction beyond lightweight import edges
-- add transfer controls that learn from accepted and rejected review decisions
-- add operator review expiry and invalidation when mission context changes
 - add integration adapters only after benchmark gains are stable

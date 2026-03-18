@@ -183,7 +183,28 @@ class OperatorReviewDecision:
     approved: bool = True
     selected_step: str | None = None
     notes: str | None = None
+    context_signature: str | None = None
     id: str = field(default_factory=lambda: new_id("review"))
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class TransferReview:
+    repo_id: str
+    candidate_repo_id: str
+    repo_family: str
+    task_type: str
+    procedure_signature: str
+    accepted: bool
+    transfer_score: float | None = None
+    transfer_tier: str | None = None
+    apply_mode: str | None = None
+    notes: str | None = None
+    id: str = field(default_factory=lambda: new_id("transfer"))
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
 

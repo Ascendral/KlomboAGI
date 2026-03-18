@@ -191,6 +191,140 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertFalse(context["transfer_candidates"][0]["review_required"])
         self.assertEqual(context["transfer_controls"]["eligible_without_review"], 1)
 
+    def test_transfer_reviews_can_promote_candidate_to_guided(self) -> None:
+        shared_a = self.root / "repo-reviewed-a"
+        shared_b = self.root / "repo-reviewed-b"
+        for root in [shared_a, shared_b]:
+            (root / "src" / "checkout").mkdir(parents=True)
+            (root / "tests").mkdir(parents=True)
+            (root / "package.json").write_text(
+                json.dumps({"dependencies": {"react": "^18.0.0"}, "scripts": {"test": "vitest"}}),
+                encoding="utf-8",
+            )
+            (root / "src" / "checkout" / "index.tsx").write_text("export const Checkout = () => null;\n", encoding="utf-8")
+            (root / "tests" / "checkout.test.tsx").write_text("it('works', () => {});\n", encoding="utf-8")
+
+        self.engine.scan_repo("repo-reviewed-a", shared_a)
+        self.engine.scan_repo("repo-reviewed-b", shared_b)
+        self.engine.record_episode(
+            Episode(
+                repo_id="repo-reviewed-b",
+                repo_path=str(shared_b),
+                task_type="feature",
+                request="Add promo banner to checkout flow",
+                success=True,
+                actions=[
+                    ActionRecord(tool="search_files", success=True),
+                    ActionRecord(tool="write_file", success=True),
+                    ActionRecord(tool="run_command", success=True, command="vitest checkout"),
+                ],
+                files_touched=["src/checkout/Banner.tsx", "tests/checkout.test.tsx"],
+                commands=["vitest checkout"],
+            )
+        )
+
+        before = self.engine.get_planning_context(
+            repo_id="repo-reviewed-a",
+            request="Add promo banner to checkout flow",
+            task_type="feature",
+            max_items=5,
+        )
+        candidate = before["transfer_candidates"][0]
+        self.assertEqual(candidate["transfer_tier"], "review")
+
+        for _ in range(3):
+            self.engine.record_transfer_review(
+                {
+                    "repo_id": "repo-reviewed-a",
+                    "candidate_repo_id": "repo-reviewed-b",
+                    "repo_family": candidate["repo_family"],
+                    "task_type": "feature",
+                    "procedure_signature": candidate["procedure_signature"],
+                    "accepted": True,
+                    "transfer_score": candidate["transfer_score"],
+                    "transfer_tier": candidate["transfer_tier"],
+                    "apply_mode": candidate["apply_mode"],
+                }
+            )
+
+        after = self.engine.get_planning_context(
+            repo_id="repo-reviewed-a",
+            request="Add promo banner to checkout flow",
+            task_type="feature",
+            max_items=5,
+        )
+
+        self.assertEqual(after["transfer_candidates"][0]["transfer_tier"], "guided")
+        self.assertEqual(after["transfer_candidates"][0]["accepted_review_count"], 3)
+        self.assertEqual(after["transfer_controls"]["matched_review_count"], 3)
+
+    def test_rejected_transfer_reviews_can_block_candidate(self) -> None:
+        shared_a = self.root / "repo-block-a"
+        shared_b = self.root / "repo-block-b"
+        for root in [shared_a, shared_b]:
+            (root / "src" / "checkout").mkdir(parents=True)
+            (root / "tests").mkdir(parents=True)
+            (root / "package.json").write_text(
+                json.dumps({"dependencies": {"react": "^18.0.0"}, "scripts": {"test": "vitest"}}),
+                encoding="utf-8",
+            )
+            (root / "src" / "checkout" / "index.tsx").write_text("export const Checkout = () => null;\n", encoding="utf-8")
+            (root / "tests" / "checkout.test.tsx").write_text("it('works', () => {});\n", encoding="utf-8")
+
+        self.engine.scan_repo("repo-block-a", shared_a)
+        self.engine.scan_repo("repo-block-b", shared_b)
+        self.engine.record_episode(
+            Episode(
+                repo_id="repo-block-b",
+                repo_path=str(shared_b),
+                task_type="feature",
+                request="Add promo banner to checkout flow",
+                success=True,
+                actions=[
+                    ActionRecord(tool="search_files", success=True),
+                    ActionRecord(tool="write_file", success=True),
+                    ActionRecord(tool="run_command", success=True, command="vitest checkout"),
+                ],
+                files_touched=["src/checkout/Banner.tsx", "tests/checkout.test.tsx"],
+                commands=["vitest checkout"],
+            )
+        )
+
+        before = self.engine.get_planning_context(
+            repo_id="repo-block-a",
+            request="Add promo banner to checkout flow",
+            task_type="feature",
+            max_items=5,
+        )
+        candidate = before["transfer_candidates"][0]
+        self.assertEqual(candidate["transfer_tier"], "review")
+
+        self.engine.record_transfer_review(
+            {
+                "repo_id": "repo-block-a",
+                "candidate_repo_id": "repo-block-b",
+                "repo_family": candidate["repo_family"],
+                "task_type": "feature",
+                "procedure_signature": candidate["procedure_signature"],
+                "accepted": False,
+                "transfer_score": candidate["transfer_score"],
+                "transfer_tier": candidate["transfer_tier"],
+                "apply_mode": candidate["apply_mode"],
+                "notes": "Transfer suggested the wrong checkout pattern",
+            }
+        )
+
+        after = self.engine.get_planning_context(
+            repo_id="repo-block-a",
+            request="Add promo banner to checkout flow",
+            task_type="feature",
+            max_items=5,
+        )
+
+        self.assertFalse(after["transfer_candidates"])
+        self.assertEqual(after["transfer_controls"]["blocked_candidates"], 1)
+        self.assertEqual(after["transfer_controls"]["matched_review_count"], 1)
+
     def test_repeated_failures_create_ranked_anti_pattern(self) -> None:
         for _ in range(2):
             self.engine.record_episode(
@@ -337,6 +471,62 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertFalse(resumed["review_required"])
         self.assertEqual(resumed["operator_review"]["decision_status"], "approved")
         self.assertEqual(resumed["suggested_next_step"], "Pause and request a fresh migration plan")
+
+    def test_operator_review_is_invalidated_when_mission_context_changes(self) -> None:
+        self.engine.record_episode(
+            Episode(
+                repo_id="repo-review-drift",
+                repo_path="/tmp/repo-review-drift",
+                task_type="resume",
+                request="Resume interrupted checkout migration",
+                success=True,
+                actions=[
+                    ActionRecord(tool="search_files", success=True),
+                    ActionRecord(tool="apply_patch", success=True),
+                    ActionRecord(tool="run_command", success=True, command="pnpm test checkout-migration"),
+                ],
+                commands=["pnpm test checkout-migration"],
+            )
+        )
+        self.engine.record_mission_state(
+            MissionState(
+                mission_id="mission_review_drift",
+                repo_id="repo-review-drift",
+                summary="Resume interrupted checkout migration",
+                status="active",
+                blocked_actions=["apply_patch:checkout migration"],
+                next_best_step="Patch checkout migration in src/checkout/migrate.ts",
+            )
+        )
+        self.engine.record_operator_review(
+            {
+                "mission_id": "mission_review_drift",
+                "repo_id": "repo-review-drift",
+                "selected_option": "pause_and_replan",
+                "selected_step": "Pause and request a fresh migration plan",
+            }
+        )
+        self.engine.record_mission_state(
+            MissionState(
+                mission_id="mission_review_drift",
+                repo_id="repo-review-drift",
+                summary="Resume interrupted checkout migration after schema update",
+                status="active",
+                blocked_actions=["apply_patch:checkout migration"],
+                next_best_step="Patch checkout migration in src/checkout/migrate-v2.ts",
+            )
+        )
+
+        resumed = self.engine.resume_context("mission_review_drift")
+
+        self.assertEqual(resumed["chosen_strategy"], "prefer_safe_variation")
+        self.assertTrue(resumed["review_required"])
+        self.assertEqual(resumed["operator_review"]["decision_status"], "invalidated")
+        self.assertEqual(
+            resumed["operator_review"]["summary"],
+            "Prior operator approval was invalidated because the mission context changed.",
+        )
+        self.assertEqual(resumed["suggested_next_step"], "Patch checkout migration in src/checkout/migrate-v2.ts")
 
     def test_preferences_are_repo_scoped_with_global_rollup(self) -> None:
         self.engine.record_episode(
