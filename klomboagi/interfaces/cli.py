@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import time
 
@@ -14,6 +15,8 @@ from klomboagi.storage.manager import StorageManager
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="klomboagi")
+    _version = importlib.metadata.version("klomboagi")
+    parser.add_argument("--version", action="version", version=f"KlomboAGI v{_version}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init")

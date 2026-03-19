@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import os
 import tempfile
@@ -48,3 +49,12 @@ class CliTests(unittest.TestCase):
         self.run_cli("mission", "create", "Bootstrap cognition")
         payload = self.run_cli("run")
         self.assertIn("status", payload)
+
+    def test_version_flag(self) -> None:
+        buf = StringIO()
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stdout(buf):
+                main(["--version"])
+        self.assertEqual(ctx.exception.code, 0)
+        expected_version = importlib.metadata.version("klomboagi")
+        self.assertIn(f"KlomboAGI v{expected_version}", buf.getvalue())
