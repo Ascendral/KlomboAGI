@@ -8,7 +8,11 @@ from pathlib import Path
 
 from klombo.benchmark import BenchmarkHarness, BenchmarkScenario
 from klombo.engine import KlomboEngine
-from klombo.fixtures import default_repo_scenarios, layer_guidance_scenarios
+from klombo.fixtures import (
+    default_repo_scenarios,
+    layer_guidance_scenarios,
+    layer_sensitive_operator_review_scenarios,
+)
 from klombo.models import ActionRecord, Episode, MissionState
 
 
@@ -792,6 +796,22 @@ class KlomboEngineTests(unittest.TestCase):
         self.assertTrue(any(item["name"] == "transfer penalty for shared auth foundation" for item in summary["results"]))
         benchmark_state = self.engine.benchmark_summary()
         self.assertEqual(benchmark_state["latest"]["summary"]["kind"], "layer_guidance")
+
+    def test_benchmark_harness_tracks_operator_review_recovery(self) -> None:
+        harness = BenchmarkHarness(self.engine)
+        summary = harness.benchmark_operator_review_recovery(layer_sensitive_operator_review_scenarios())
+
+        self.assertEqual(summary["kind"], "operator_review_recovery")
+        self.assertEqual(summary["scenario_count"], 3)
+        self.assertEqual(summary["layer_hint_hit_rate"], 1.0)
+        self.assertEqual(summary["review_required_hit_rate"], 1.0)
+        self.assertEqual(summary["chosen_strategy_hit_rate"], 1.0)
+        self.assertEqual(summary["decision_status_hit_rate"], 1.0)
+        self.assertEqual(summary["resume_step_hit_rate"], 1.0)
+        self.assertEqual(summary["operator_recovery_hit_rate"], 1.0)
+        self.assertTrue(any(item["name"] == "operator can pause shared-layer recovery" for item in summary["results"]))
+        benchmark_state = self.engine.benchmark_summary()
+        self.assertEqual(benchmark_state["latest"]["summary"]["kind"], "operator_review_recovery")
 
 
 if __name__ == "__main__":

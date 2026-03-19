@@ -21,7 +21,7 @@ Klombo should then use that memory to improve future planning context.
 
 ## Current Scope
 
-This standalone v0.11 includes:
+This standalone v0.12 includes:
 
 - append-only episode recording
 - richer repo profile learning
@@ -49,6 +49,7 @@ This standalone v0.11 includes:
 - dependency-layer inference for foundation and orchestration zones
 - layer-aware transfer scoring and resume hints for shared hubs
 - dedicated benchmark coverage for layer-aware hint and penalty precision
+- dedicated benchmark coverage for operator review choices under layer-sensitive recovery
 - realistic repo-shaped benchmark fixtures
 - benchmark scaffolding for memory-on vs memory-off measurement
 - benchmark history and regression tracking
@@ -93,7 +94,11 @@ Klombo stores all state under a dedicated root:
 
 ```python
 from klombo import BenchmarkHarness, KlomboEngine
-from klombo.fixtures import default_repo_scenarios, layer_guidance_scenarios
+from klombo.fixtures import (
+    default_repo_scenarios,
+    layer_guidance_scenarios,
+    layer_sensitive_operator_review_scenarios,
+)
 
 engine = KlomboEngine("./memory")
 
@@ -113,6 +118,7 @@ resume = engine.resume_context("mission_123")
 engine.maintain_memories()
 scenarios = default_repo_scenarios()
 layer_scenarios = layer_guidance_scenarios()
+review_scenarios = layer_sensitive_operator_review_scenarios()
 
 harness = BenchmarkHarness(
     engine,
@@ -121,6 +127,7 @@ harness = BenchmarkHarness(
 )
 harness.compare_memory_modes(scenarios)
 harness.benchmark_layer_guidance(layer_scenarios)
+harness.benchmark_operator_review_recovery(review_scenarios)
 
 # context now includes:
 # - transfer_candidates
@@ -160,6 +167,7 @@ Before Klombo attaches to any agent runtime, it should meet these rules:
 15. Transfer review outcomes should influence future cross-repo guidance.
 16. Persisted approvals must be invalidated when mission context materially changes.
 17. Shared dependency hubs should trigger narrower transfer and recovery guidance.
+18. Layer-sensitive recovery should prove operator choices improve resumed next-step safety.
 
 ## Running Tests
 
@@ -171,5 +179,5 @@ python3 -m unittest discover -s tests -v
 
 ## Next Hardening Targets
 
-- add benchmark cases for operator review choices under layer-sensitive recovery
+- stress-test invalidated operator approvals across longer mission drift
 - add integration adapters only after benchmark gains are stable
