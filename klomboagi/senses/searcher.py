@@ -13,17 +13,28 @@ class Searcher:
 
     def search(self, query: str) -> str:
         """
-        Search for information. Tries multiple sources:
-        1. Wikipedia API (free, no key needed)
-        2. DuckDuckGo instant answers (free, no key needed)
+        Search for information. Tries multiple sources and strategies.
         """
-        # Try Wikipedia first — cleanest source
+        # Try Wikipedia first
         result = self._search_wikipedia(query)
+        if result and len(result.strip()) > 50:
+            # Check if it's a disambiguation page
+            if 'may refer to' not in result.lower():
+                return result
+
+        # Try DuckDuckGo
+        result = self._search_duckduckgo(query)
         if result and len(result.strip()) > 50:
             return result
 
-        # Fallback to DuckDuckGo
-        result = self._search_duckduckgo(query)
+        # Try Wikipedia with '(disambiguation)' stripped and more specific queries
+        for suffix in [' (programming language)', ' (animal)', ' (software)', ' (concept)', '']:
+            result = self._search_wikipedia(query + suffix)
+            if result and len(result.strip()) > 50 and 'may refer to' not in result.lower():
+                return result
+
+        # Try DuckDuckGo with 'what is' prefix
+        result = self._search_duckduckgo(f'what is {query}')
         if result and len(result.strip()) > 50:
             return result
 

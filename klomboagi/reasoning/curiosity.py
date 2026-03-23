@@ -135,23 +135,17 @@ class CuriosityDriver:
         return gap
 
     def _choose_sense(self, concept: str, context: str) -> SenseType:
-        """Decide which ability to use to fill a gap."""
-        # If it looks like a coding concept, try executing
-        code_indicators = {"function", "class", "module", "library", "syntax",
-                           "error", "bug", "code", "program", "script",
-                           "python", "javascript", "rust", "compile", "import"}
-        concept_words = set(concept.lower().split())
-        context_words = set(context.lower().split())
-        all_words = concept_words | context_words
-
-        if all_words & code_indicators:
-            return SenseType.EXECUTE
-
+        """Decide which ability to use. SEARCH FIRST — always learn what it IS before trying to run it."""
         # If it looks like a file or URL, read it
         if concept.startswith(("/", "http", "www", "file:")):
             return SenseType.READ
 
-        # Default: search
+        # Only execute if explicitly about running/testing code
+        execute_words = {"run", "test", "execute", "compile", "debug"}
+        if set(concept.lower().split()) & execute_words:
+            return SenseType.EXECUTE
+
+        # Default: SEARCH. Learn what something IS first.
         return SenseType.SEARCH
 
     def get_next_gap(self) -> KnowledgeGap | None:

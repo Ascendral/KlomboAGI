@@ -144,11 +144,34 @@ class Baby:
     def _parse_intent(self, message: str) -> dict:
         """
         Figure out what the human is doing.
-        Not NLU — just structural pattern matching.
+        Order matters: correction → command → question → teach → general
         """
         msg = message.strip().lower()
 
-        # Teaching: "X is Y", "X are Y", "a X is a Y"
+        # 1. Correction: "no,", "wrong", "actually"
+        correction_starters = ("no,", "no ", "wrong", "actually", "that's not",
+                               "thats not", "incorrect", "not quite")
+        if any(msg.startswith(c) for c in correction_starters):
+            return {"type": "correction", "content": message, "raw": message}
+
+        # 2. Command: "learn", "search", "look up", "status"
+        command_words = {"learn ": "learn", "look up ": "lookup", "search ": "search",
+                         "search for ": "search", "find out about ": "search",
+                         "read ": "read", "forget ": "forget", "what do you know": "status",
+                         "show me": "show", "status": "status", "what do you": "status"}
+        for phrase, cmd in command_words.items():
+            if msg.startswith(phrase):
+                rest = msg[len(phrase):].strip()
+                return {"type": "command", "command": cmd, "target": rest, "raw": message}
+
+        # 3. Question: starts with question word or ends with ?
+        question_starters = ("what ", "who ", "where ", "how ", "is ", "are ",
+                             "can ", "do ", "does ", "why ", "which ", "when ",
+                             "tell me about ", "explain ")
+        if any(msg.startswith(q) for q in question_starters) or msg.endswith("?"):
+            return {"type": "question", "query": message.strip().rstrip("?"), "raw": message}
+
+        # 4. Teaching: "X is Y", "X are Y", "X means Y", "X has Y"
         teach_patterns = [
             r"^(?:a |an |the )?(.+?) (?:is|are) (?:a |an |the )?(.+?)\.?$",
             r"^(.+?) means (.+?)\.?$",
@@ -157,31 +180,15 @@ class Baby:
         for pattern in teach_patterns:
             m = re.match(pattern, msg)
             if m:
-                return {"type": "teach", "subject": m.group(1).strip(),
-                        "predicate": m.group(2).strip(), "raw": message}
+                subject = m.group(1).strip()
+                predicate = m.group(2).strip()
+                # Skip if subject is a question word
+                if subject in ("what", "who", "where", "how", "when", "which", "why"):
+                    continue
+                return {"type": "teach", "subject": subject,
+                        "predicate": predicate, "raw": message}
 
-        # Command: check FIRST — commands take priority over questions
-        command_words = {"learn": "learn", "look up": "lookup", "search": "search",
-                         "read": "read", "forget": "forget", "what do you know": "status",
-                         "show me": "show", "status": "status", "what do you": "status"}
-        for phrase, cmd in command_words.items():
-            if msg.startswith(phrase):
-                rest = msg[len(phrase):].strip()
-                return {"type": "command", "command": cmd, "target": rest, "raw": message}
-
-        # Question: starts with what/who/where/how/is/are/can/do/why
-        question_starters = ("what", "who", "where", "how", "is ", "are ",
-                             "can ", "do ", "does ", "why", "which", "when")
-        if any(msg.startswith(q) for q in question_starters) or msg.endswith("?"):
-            return {"type": "question", "query": message.strip().rstrip("?"), "raw": message}
-
-        # Correction: "no,", "wrong", "actually", "that's not right"
-        correction_starters = ("no,", "no ", "wrong", "actually", "that's not",
-                               "thats not", "incorrect", "not quite")
-        if any(msg.startswith(c) for c in correction_starters):
-            return {"type": "correction", "content": message, "raw": message}
-
-        # General statement — try to extract knowledge
+        # 5. General statement
         return {"type": "general", "content": message, "raw": message}
 
     def _learn_from_teaching(self, intent: dict) -> str:
@@ -276,24 +283,92 @@ class Baby:
         known = self._what_do_i_know(query)
 
         if known:
-            # We know something — reason about it
-            facts = [f"{k}: {', '.join(v['facts'])}" for k, v in known.items()]
+            # Check beliefs for relevant deductions
+            relevant_beliefs = []
+            query_words = set(query.lower().split())
+            for statement, belief in self._beliefs.items():
+                stmt_words = set(statement.lower().split())
+                if stmt_words & query_words:
+                    relevant_beliefs.append(belief)
+
+            if relevant_beliefs:
+                # Sort by confidence
+                relevant_beliefs.sort(key=lambda b: b.truth.confidence, reverse=True)
+                lines = ["Based on what I know:"]
+                for b in relevant_beliefs[:10]:
+                    source_tag = f"[{b.source}]" if b.source != "human" else ""
+                    lines.append(f"  • {b.statement} (confidence: {b.truth.confidence:.0%}) {source_tag}")
+
+                # Check for deduction chains we can make
+                chains = self._find_deduction_chains(query_words)
+                if chains:
+                    lines.append("")
+                    lines.append("I can also derive:")
+                    for chain in chains:
+                        lines.append(f"  → {chain}")
+
+                return "\n".join(lines)
+
+            # Fallback to engine reasoning
+            facts = [f"{k}: {', '.join(str(f)[:100] for f in v['facts'])}" for k, v in known.items()]
             chain = self.engine.reason(query, facts)
 
-            if chain.confidence > 0.5:
+            if chain.confidence > 0.3:
                 return f"Based on what I know:\n{chain.conclusion}\n\nMy reasoning:\n{chain.explain()}"
             else:
-                # Low confidence — supplement with search
-                response = f"I know a little: {'; '.join(facts)}\n"
+                response = f"I know a little: {'; '.join(facts[:3])}\n"
                 response += "But I'm not confident. Let me look for more..."
                 return response + self._curious_lookup(query)
         else:
             # We don't know — go find out
             return self._curious_lookup(query)
 
+    def _find_deduction_chains(self, query_words: set) -> list[str]:
+        """Find transitive deductions: A→B, B→C ∴ A→C"""
+        chains = []
+        for stmt1, b1 in list(self._beliefs.items()):
+            if not b1.predicate:
+                continue
+            # If this belief's predicate is another belief's subject, we can chain
+            for stmt2, b2 in list(self._beliefs.items()):
+                if b2.subject and b2.subject == b1.predicate and b1.subject != b2.predicate:
+                    derived_stmt = f"{b1.subject} is {b2.predicate}"
+                    if derived_stmt not in self._beliefs:
+                        # Only include if relevant to query
+                        all_words = set(b1.subject.split()) | set(b2.predicate.split())
+                        if all_words & query_words:
+                            from klomboagi.reasoning.truth import deduction as nars_ded
+                            tv = nars_ded(b1.truth, b2.truth)
+                            chains.append(
+                                f"{b1.subject} is {b2.predicate} "
+                                f"(because {b1.subject}→{b1.predicate}→{b2.predicate}, "
+                                f"confidence: {tv.confidence:.0%})"
+                            )
+                            # Store the derived belief
+                            self._evidence_counter += 1
+                            derived = Belief(
+                                statement=derived_stmt,
+                                truth=tv,
+                                stamp=b1.stamp.merge(b2.stamp),
+                                subject=b1.subject,
+                                predicate=b2.predicate,
+                                source="deduction",
+                            )
+                            self._beliefs[derived_stmt] = derived
+                            self.memory.beliefs[derived_stmt] = derived.to_dict()
+        return chains
+
     def _curious_lookup(self, topic: str) -> str:
         """Don't know something? Let's find out."""
-        self.curiosity.notice_gap(topic, context="answering a question",
+        # Clean the topic — strip question words
+        clean = topic.lower().strip()
+        for prefix in ('what is ', 'what are ', 'who is ', 'where is ', 'tell me about ', 'explain ', 'about '):
+            if clean.startswith(prefix):
+                clean = clean[len(prefix):]
+        clean = clean.strip()
+        if not clean:
+            clean = topic
+        self.curiosity.notice_gap(clean, context="answering a question",
                                   priority=GapPriority.HIGH)
         event = self.curiosity.investigate()
 
@@ -314,7 +389,10 @@ class Baby:
         target = intent.get("target", "")
 
         if cmd == "learn":
-            return self._curious_lookup(target)
+            clean_target = target
+            if clean_target.startswith("about "):
+                clean_target = clean_target[6:]
+            return self._curious_lookup(clean_target)
 
         elif cmd == "lookup" or cmd == "search":
             result = self.searcher.search(target)
