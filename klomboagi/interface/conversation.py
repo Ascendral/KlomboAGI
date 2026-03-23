@@ -22,6 +22,7 @@ from pathlib import Path
 from klomboagi.reasoning.deriver import PropertyDeriver, KnowledgeGraph
 from klomboagi.reasoning.engine import ReasoningEngine, ReasoningChain
 from klomboagi.reasoning.curiosity import CuriosityDriver, GapPriority, SenseType
+from klomboagi.reasoning.truth import TruthValue, EvidenceStamp, Belief, revision
 from klomboagi.senses.reader import Reader
 from klomboagi.senses.searcher import Searcher
 from klomboagi.senses.executor import Executor
@@ -31,6 +32,7 @@ from klomboagi.senses.executor import Executor
 class Memory:
     """Everything the system has learned, persistently."""
     concepts: dict[str, dict] = field(default_factory=dict)  # concept_name → facts about it
+    beliefs: dict[str, dict] = field(default_factory=dict)      # statement → serialized Belief
     conversations: list[dict] = field(default_factory=list)   # full conversation history
     teachings: list[dict] = field(default_factory=list)        # things human explicitly taught
     discoveries: list[dict] = field(default_factory=list)      # things system found on its own
@@ -43,6 +45,7 @@ class Memory:
             "teachings": self.teachings[-500:],
             "discoveries": self.discoveries[-500:],
             "corrections": self.corrections[-200:],
+            "beliefs": self.beliefs,
         }
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(json.dumps(data, indent=2, default=str))
@@ -56,6 +59,7 @@ class Memory:
             self.teachings = data.get("teachings", [])
             self.discoveries = data.get("discoveries", [])
             self.corrections = data.get("corrections", [])
+            self.beliefs = data.get("beliefs", {})
 
 
 class Baby:
@@ -96,6 +100,11 @@ class Baby:
         # Load persistent memory
         self.memory.load(self.memory_path)
         self._rebuild_graph_from_memory()
+
+        # Belief system — NARS truth values
+        self._evidence_counter = 0
+        self._beliefs: dict[str, Belief] = {}
+        self._rebuild_beliefs_from_memory()
 
         # Conversation state
         self.pending_questions: list[str] = []  # Questions to ask the human
@@ -151,6 +160,15 @@ class Baby:
                 return {"type": "teach", "subject": m.group(1).strip(),
                         "predicate": m.group(2).strip(), "raw": message}
 
+        # Command: check FIRST — commands take priority over questions
+        command_words = {"learn": "learn", "look up": "lookup", "search": "search",
+                         "read": "read", "forget": "forget", "what do you know": "status",
+                         "show me": "show", "status": "status", "what do you": "status"}
+        for phrase, cmd in command_words.items():
+            if msg.startswith(phrase):
+                rest = msg[len(phrase):].strip()
+                return {"type": "command", "command": cmd, "target": rest, "raw": message}
+
         # Question: starts with what/who/where/how/is/are/can/do/why
         question_starters = ("what", "who", "where", "how", "is ", "are ",
                              "can ", "do ", "does ", "why", "which", "when")
@@ -163,22 +181,37 @@ class Baby:
         if any(msg.startswith(c) for c in correction_starters):
             return {"type": "correction", "content": message, "raw": message}
 
-        # Command: "learn", "look up", "search", "read", "forget"
-        command_words = {"learn": "learn", "look up": "lookup", "search": "search",
-                         "read": "read", "forget": "forget", "what do you know": "status",
-                         "show me": "show"}
-        for phrase, cmd in command_words.items():
-            if msg.startswith(phrase):
-                rest = msg[len(phrase):].strip()
-                return {"type": "command", "command": cmd, "target": rest, "raw": message}
-
         # General statement — try to extract knowledge
         return {"type": "general", "content": message, "raw": message}
 
     def _learn_from_teaching(self, intent: dict) -> str:
-        """Human is teaching us something. Learn it."""
+        """Human is teaching us something. Learn it with evidence-based truth."""
         subject = intent["subject"]
         predicate = intent["predicate"]
+        statement = f"{subject} is {predicate}"
+
+        # Create or revise belief with NARS truth values
+        self._evidence_counter += 1
+        new_belief = Belief(
+            statement=statement,
+            truth=TruthValue.from_single_observation(True),
+            stamp=EvidenceStamp.new(self._evidence_counter),
+            subject=subject,
+            predicate=predicate,
+            source="human",
+        )
+
+        existing = self._beliefs.get(statement)
+        if existing:
+            revised = existing.revise_with(new_belief)
+            if revised:
+                self._beliefs[statement] = revised
+                tv = revised.truth
+            else:
+                tv = existing.truth
+        else:
+            self._beliefs[statement] = new_belief
+            tv = new_belief.truth
 
         # Add to knowledge graph
         self.graph.add(subject, is_a=[predicate])
@@ -186,7 +219,11 @@ class Baby:
         # Store in memory
         if subject not in self.memory.concepts:
             self.memory.concepts[subject] = {"facts": [], "taught_by": "human"}
-        self.memory.concepts[subject]["facts"].append(predicate)
+        if predicate not in self.memory.concepts[subject]["facts"]:
+            self.memory.concepts[subject]["facts"].append(predicate)
+
+        # Persist belief
+        self.memory.beliefs[statement] = self._beliefs[statement].to_dict()
 
         self.memory.teachings.append({
             "subject": subject,
@@ -197,9 +234,18 @@ class Baby:
         # Try to connect to what we already know
         connections = self._find_connections(subject)
 
-        response = f"Got it. {subject} is {predicate}."
+        # Build response with truth value
+        response = f"Got it. {subject} is {predicate}. (confidence: {tv.confidence:.0%})"
+        if tv.confidence > 0.7:
+            response = f"I'm now quite sure: {subject} is {predicate}. (confidence: {tv.confidence:.0%})"
+
         if connections:
-            response += f" I can see it connects to: {', '.join(connections)}."
+            response += f" Connects to: {', '.join(connections)}."
+
+        # Check deductions — can we derive new knowledge?
+        deductions = self._try_deductions(subject, predicate)
+        if deductions:
+            response += "\n" + "\n".join(deductions)
 
         # Check if this fills any curiosity gaps
         resolved = self._check_gaps_resolved(subject, predicate)
@@ -339,6 +385,54 @@ class Baby:
 
     # ── Internal helpers ──
 
+    def _try_deductions(self, subject: str, predicate: str) -> list[str]:
+        """Try to derive new knowledge from what we just learned."""
+        results = []
+
+        # If we know A→B and B→C, derive A→C
+        # Check if predicate has its own facts
+        pred_info = self.memory.concepts.get(predicate, {})
+        pred_facts = pred_info.get("facts", [])
+
+        for fact in pred_facts:
+            chain_statement = f"{subject} is {fact}"
+            if chain_statement not in self._beliefs:
+                # Derive through deduction
+                from klomboagi.reasoning.truth import deduction as nars_deduction
+                ab = self._beliefs.get(f"{subject} is {predicate}")
+                bc = self._beliefs.get(f"{predicate} is {fact}")
+                if ab and bc:
+                    derived_tv = nars_deduction(ab.truth, bc.truth)
+                    self._evidence_counter += 1
+                    derived = Belief(
+                        statement=chain_statement,
+                        truth=derived_tv,
+                        stamp=ab.stamp.merge(bc.stamp),
+                        subject=subject,
+                        predicate=fact,
+                        source="deduction",
+                    )
+                    self._beliefs[chain_statement] = derived
+                    self.memory.beliefs[chain_statement] = derived.to_dict()
+                    results.append(
+                        f"  → I derived: {subject} is {fact} "
+                        f"(confidence: {derived_tv.confidence:.0%}, via {predicate})"
+                    )
+
+        return results
+
+    def _rebuild_beliefs_from_memory(self) -> None:
+        """Rebuild belief objects from persisted memory."""
+        for statement, data in self.memory.beliefs.items():
+            try:
+                self._beliefs[statement] = Belief.from_dict(data)
+                # Track highest evidence counter
+                for src in data.get("stamp", {}).get("sources", []):
+                    if isinstance(src, int) and src > self._evidence_counter:
+                        self._evidence_counter = src
+            except Exception:
+                pass
+
     def _find_connections(self, concept: str) -> list[str]:
         """Find what this concept connects to in the graph."""
         connections = []
@@ -426,6 +520,7 @@ class Baby:
     def _status(self) -> str:
         """Report what I know."""
         n_concepts = len(self.memory.concepts)
+        n_beliefs = len(self._beliefs)
         n_teachings = len(self.memory.teachings)
         n_discoveries = len(self.memory.discoveries)
         n_corrections = len(self.memory.corrections)
@@ -434,22 +529,27 @@ class Baby:
 
         lines = [
             "Here's what I know:",
-            f"  Concepts learned: {n_concepts}",
+            f"  Concepts: {n_concepts}",
+            f"  Beliefs: {n_beliefs}",
             f"  Taught by human: {n_teachings}",
             f"  Discovered myself: {n_discoveries}",
             f"  Times corrected: {n_corrections}",
-            f"  Conversation exchanges: {n_conversations}",
-            f"  Curiosity gaps: {curiosity_stats['unresolved']} unresolved, {curiosity_stats['resolved']} resolved",
+            f"  Conversations: {n_conversations}",
+            f"  Curiosity gaps: {curiosity_stats['unresolved']} open, {curiosity_stats['resolved']} resolved",
             "",
-            "Concepts I know about:",
+            "My beliefs (strongest first):",
         ]
-        for name, info in list(self.memory.concepts.items())[:20]:
-            facts = info.get("facts", [])
-            source = info.get("taught_by", "unknown")
-            short_facts = [f[:40] for f in facts[:3]]
-            lines.append(f"  {name} ({source}): {'; '.join(short_facts)}")
 
-        if len(self.memory.concepts) > 20:
-            lines.append(f"  ... and {len(self.memory.concepts) - 20} more")
+        # Sort beliefs by confidence
+        sorted_beliefs = sorted(
+            self._beliefs.values(),
+            key=lambda b: b.truth.confidence,
+            reverse=True,
+        )
+        for b in sorted_beliefs[:20]:
+            lines.append(f"  {b.statement} {b.truth} [{b.source}]")
+
+        if len(sorted_beliefs) > 20:
+            lines.append(f"  ... and {len(sorted_beliefs) - 20} more beliefs")
 
         return "\n".join(lines)
