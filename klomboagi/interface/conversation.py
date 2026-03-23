@@ -79,7 +79,7 @@ class Baby:
         # → "I found out: an alligator is a large reptile..."
     """
 
-    def __init__(self, memory_path: str = "~/.klomboagi/memory.json") -> None:
+    def __init__(self, memory_path: str = "/Volumes/AIStorage/AI/klomboagi/memory/brain.json") -> None:
         self.memory_path = str(Path(memory_path).expanduser())
         self.memory = Memory()
         self.graph = KnowledgeGraph()
