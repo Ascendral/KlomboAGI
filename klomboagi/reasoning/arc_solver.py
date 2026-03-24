@@ -1295,3 +1295,77 @@ class ARCSolverV4(ARCSolverV3):
             return None
         largest = max(objects, key=lambda o: len(o[1]))
         return extract_object(test_input, largest[1])
+
+
+class ARCSolverV5(ARCSolverV4):
+    """V5: composite strategies — combine two transforms."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        # Try single strategies first
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        # Try composites: apply transform A then transform B
+        atomic_transforms = [
+            ("hflip", self._apply_hflip),
+            ("vflip", self._apply_vflip),
+            ("rot90", self._apply_rot90),
+            ("rot180", self._apply_rot180),
+            ("transpose", self._apply_transpose),
+        ]
+        
+        value_transforms = []
+        # Discover value mapping from first example
+        if train:
+            ex = train[0]
+            if len(ex["input"]) == len(ex["output"]) and len(ex["input"][0]) == len(ex["output"][0]):
+                vmap = {}
+                for r in range(len(ex["input"])):
+                    for c in range(len(ex["input"][r])):
+                        a, b = ex["input"][r][c], ex["output"][r][c]
+                        if a != b:
+                            vmap[a] = b
+                if vmap:
+                    def make_vmap_fn(m):
+                        def fn(grid):
+                            return [[m.get(c, c) for c in row] for row in grid]
+                        return fn
+                    value_transforms.append(("vmap", make_vmap_fn(vmap)))
+        
+        all_transforms = atomic_transforms + value_transforms
+        
+        # Try all pairs
+        for name_a, fn_a in all_transforms:
+            for name_b, fn_b in all_transforms:
+                if name_a == name_b:
+                    continue
+                try:
+                    matches = True
+                    for ex in train:
+                        composed = fn_b(fn_a(ex["input"]))
+                        if composed != ex["output"]:
+                            matches = False
+                            break
+                    if matches:
+                        return fn_b(fn_a(test_input))
+                except:
+                    continue
+        
+        return None
+    
+    def _apply_hflip(self, grid: Grid) -> Grid:
+        return [row[::-1] for row in grid]
+    
+    def _apply_vflip(self, grid: Grid) -> Grid:
+        return grid[::-1]
+    
+    def _apply_rot90(self, grid: Grid) -> Grid:
+        rows, cols = len(grid), len(grid[0])
+        return [[grid[rows-1-r][c] for r in range(rows)] for c in range(cols)]
+    
+    def _apply_rot180(self, grid: Grid) -> Grid:
+        return [row[::-1] for row in grid[::-1]]
+    
+    def _apply_transpose(self, grid: Grid) -> Grid:
+        return [list(col) for col in zip(*grid)]
