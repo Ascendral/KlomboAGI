@@ -969,3 +969,329 @@ class ARCSolverV3(ARCSolverV2):
             return col_majority(test_input)
         
         return None
+
+
+class ARCSolverV4(ARCSolverV3):
+    """V4: cross-validation + composite strategies + object-level transforms."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        strategies = [
+            self._try_identity,
+            self._try_position_transform,
+            self._try_size_transform,
+            self._try_tile_scale,
+            self._try_mask_overlay,
+            self._try_mirror_symmetry,
+            self._try_extract_subgrid,
+            self._try_count_to_grid,
+            self._try_color_by_position,
+            self._try_diagonal_flip,
+            self._try_rotate_90_270,
+            self._try_majority_color_fill,
+            # V4 strategies
+            self._try_unique_color_extract,
+            self._try_repeat_pattern,
+            self._try_color_swap,
+            self._try_remove_color,
+            self._try_largest_object,
+            # Earlier strategies
+            self._try_color_conditional,
+            self._try_border_fill,
+            self._try_gravity,
+            self._try_row_col_sort,
+            self._try_many_to_one,
+            self._try_value_replacement,
+            self._try_size_change,
+            self._try_cell_by_cell_mapping,
+        ]
+        
+        # Cross-validate: if we have 2+ training examples, hold one out and verify
+        for strategy in strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None:
+                    if self._cross_validate(strategy, train):
+                        return result
+            except Exception:
+                continue
+        
+        # If cross-validation blocked everything, try without it
+        for strategy in strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None:
+                    return result
+            except Exception:
+                continue
+        return None
+
+    def _cross_validate(self, strategy, train: list[dict]) -> bool:
+        """Hold out one training example and verify the strategy works on it."""
+        if len(train) < 2:
+            return True  # Can't cross-validate with 1 example
+        
+        for i in range(min(len(train), 3)):  # Test up to 3 holdouts
+            holdout = train[i]
+            remaining = train[:i] + train[i+1:]
+            try:
+                prediction = strategy(remaining, holdout["input"])
+                if prediction != holdout["output"]:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    def _try_unique_color_extract(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Extract cells of the unique/minority color as a small grid."""
+        if not train:
+            return None
+        
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["output"]) >= len(ex["input"]) and len(ex["output"][0]) >= len(ex["input"][0]):
+                return None  # Output should be smaller
+        
+        # Find minority color in each example
+        results_match = True
+        for ex in train:
+            color_counts = Counter()
+            for row in ex["input"]:
+                color_counts.update(row)
+            
+            if len(color_counts) < 2:
+                return None
+            
+            # Most common = background, second = target
+            bg = color_counts.most_common(1)[0][0]
+            
+            # Find bounding box of non-bg
+            rows, cols = len(ex["input"]), len(ex["input"][0])
+            min_r, max_r, min_c, max_c = rows, -1, cols, -1
+            for r in range(rows):
+                for c in range(cols):
+                    if ex["input"][r][c] != bg:
+                        min_r = min(min_r, r)
+                        max_r = max(max_r, r)
+                        min_c = min(min_c, c)
+                        max_c = max(max_c, c)
+            
+            if max_r == -1:
+                return None
+            
+            extracted = [row[min_c:max_c+1] for row in ex["input"][min_r:max_r+1]]
+            if extracted != ex["output"]:
+                results_match = False
+                break
+        
+        if results_match:
+            color_counts = Counter()
+            for row in test_input:
+                color_counts.update(row)
+            bg = color_counts.most_common(1)[0][0]
+            rows, cols = len(test_input), len(test_input[0])
+            min_r, max_r, min_c, max_c = rows, -1, cols, -1
+            for r in range(rows):
+                for c in range(cols):
+                    if test_input[r][c] != bg:
+                        min_r = min(min_r, r)
+                        max_r = max(max_r, r)
+                        min_c = min(min_c, c)
+                        max_c = max(max_c, c)
+            if max_r == -1:
+                return None
+            return [row[min_c:max_c+1] for row in test_input[min_r:max_r+1]]
+        
+        return None
+
+    def _try_repeat_pattern(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output is the input pattern repeated/tiled to fill a larger grid."""
+        if not train:
+            return None
+        
+        # Check if all outputs are same size but inputs vary
+        out_sizes = set()
+        for ex in train:
+            out_sizes.add((len(ex["output"]), len(ex["output"][0])))
+        
+        if len(out_sizes) != 1:
+            return None
+        
+        target_rows, target_cols = list(out_sizes)[0]
+        
+        # Check if output = input tiled
+        for ex in train:
+            inp = ex["input"]
+            ir, ic = len(inp), len(inp[0])
+            if target_rows % ir != 0 or target_cols % ic != 0:
+                return None
+            
+            # Verify tiling
+            for r in range(target_rows):
+                for c in range(target_cols):
+                    if ex["output"][r][c] != inp[r % ir][c % ic]:
+                        return None
+        
+        ir, ic = len(test_input), len(test_input[0])
+        if target_rows % ir != 0 or target_cols % ic != 0:
+            return None
+        
+        return [[test_input[r % ir][c % ic] for c in range(target_cols)] for r in range(target_rows)]
+
+    def _try_color_swap(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Exactly two colors swap positions (A↔B), others unchanged."""
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Find swap pair
+        swap_pairs = set()
+        for ex in train:
+            for r in range(len(ex["input"])):
+                for c in range(len(ex["input"][r])):
+                    a, b = ex["input"][r][c], ex["output"][r][c]
+                    if a != b:
+                        swap_pairs.add((min(a,b), max(a,b)))
+        
+        if len(swap_pairs) != 1:
+            return None
+        
+        a, b = list(swap_pairs)[0]
+        
+        # Verify it's a true swap
+        for ex in train:
+            predicted = []
+            for row in ex["input"]:
+                predicted.append([b if cell == a else a if cell == b else cell for cell in row])
+            if predicted != ex["output"]:
+                return None
+        
+        return [[b if cell == a else a if cell == b else cell for cell in row] for row in test_input]
+
+    def _try_remove_color(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Remove all cells of one color (shift remaining together)."""
+        # Output is smaller — one color removed, grid compacted
+        if not train:
+            return None
+        
+        from collections import Counter
+        
+        # Find which color is removed
+        for ex in train:
+            in_colors = set()
+            out_colors = set()
+            for row in ex["input"]:
+                in_colors.update(row)
+            for row in ex["output"]:
+                out_colors.update(row)
+            removed = in_colors - out_colors
+            if len(removed) != 1:
+                return None
+        
+        # Get the removed color
+        removed_color = None
+        for ex in train:
+            in_colors = set()
+            out_colors = set()
+            for row in ex["input"]:
+                in_colors.update(row)
+            for row in ex["output"]:
+                out_colors.update(row)
+            rc = list(in_colors - out_colors)[0]
+            if removed_color is None:
+                removed_color = rc
+            elif rc != removed_color:
+                return None
+        
+        # Try removing rows/cols containing that color
+        # Or try compacting: remove cells of that color from each row
+        def compact_rows(grid, color):
+            result = []
+            for row in grid:
+                new_row = [c for c in row if c != color]
+                if new_row:
+                    result.append(new_row)
+            return result if result else None
+        
+        if all(compact_rows(ex["input"], removed_color) == ex["output"] for ex in train):
+            return compact_rows(test_input, removed_color)
+        
+        return None
+
+    def _try_largest_object(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Extract the largest connected component."""
+        if not train:
+            return None
+        
+        from collections import Counter
+        
+        def find_objects(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            objects = []
+            
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg:
+                        # BFS
+                        obj = []
+                        queue = [(r, c)]
+                        color = grid[r][c]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc]:
+                                continue
+                            if grid[cr][cc] != color:
+                                continue
+                            visited[cr][cc] = True
+                            obj.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc]:
+                                    queue.append((nr, nc))
+                        objects.append((color, obj))
+            
+            return objects
+        
+        def extract_object(grid, cells):
+            min_r = min(r for r, c in cells)
+            max_r = max(r for r, c in cells)
+            min_c = min(c for r, c in cells)
+            max_c = max(c for r, c in cells)
+            cell_set = set(cells)
+            result = []
+            for r in range(min_r, max_r + 1):
+                row = []
+                for c in range(min_c, max_c + 1):
+                    if (r, c) in cell_set:
+                        row.append(grid[r][c])
+                    else:
+                        row.append(0)
+                result.append(row)
+            return result
+        
+        # Find bg
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Check if output is the largest object extracted
+        for ex in train:
+            objects = find_objects(ex["input"], bg)
+            if not objects:
+                return None
+            largest = max(objects, key=lambda o: len(o[1]))
+            extracted = extract_object(ex["input"], largest[1])
+            if extracted != ex["output"]:
+                return None
+        
+        objects = find_objects(test_input, bg)
+        if not objects:
+            return None
+        largest = max(objects, key=lambda o: len(o[1]))
+        return extract_object(test_input, largest[1])
