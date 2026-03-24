@@ -2034,3 +2034,384 @@ class ARCSolverV7(ARCSolverV6):
             return unique_cols(test_input)
         
         return None
+
+
+class ARCSolverV8(ARCSolverV7):
+    """V8: brute force rule learning — learn exact cell transformation rules."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v8_strategies = [
+            self._try_relative_position_rule,
+            self._try_color_adjacency_rule,
+            self._try_connected_component_color,
+            self._try_row_pattern_match,
+            self._try_column_pattern_match,
+            self._try_max_color_per_region,
+            self._try_outline_objects,
+            self._try_fill_rectangles,
+        ]
+        
+        for strategy in v8_strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None and self._cross_validate(strategy, train):
+                    return result
+            except Exception:
+                continue
+        return None
+
+    def _try_relative_position_rule(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output color depends on relative position within the grid (%, //)."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Try: output[r][c] = f(input[r][c], r % k, c % k) for small k
+        from collections import Counter
+        
+        for k in [2, 3, 4]:
+            lookup = {}
+            consistent = True
+            for ex in train:
+                inp, out = ex["input"], ex["output"]
+                for r in range(len(inp)):
+                    for c in range(len(inp[r])):
+                        key = (inp[r][c], r % k, c % k)
+                        if key in lookup and lookup[key] != out[r][c]:
+                            consistent = False
+                            break
+                        lookup[key] = out[r][c]
+                    if not consistent:
+                        break
+                if not consistent:
+                    break
+            
+            if consistent and lookup:
+                result = [row[:] for row in test_input]
+                all_found = True
+                for r in range(len(test_input)):
+                    for c in range(len(test_input[r])):
+                        key = (test_input[r][c], r % k, c % k)
+                        if key in lookup:
+                            result[r][c] = lookup[key]
+                        else:
+                            all_found = False
+                if all_found:
+                    return result
+        
+        return None
+
+    def _try_color_adjacency_rule(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """If a cell is adjacent to color X, it becomes color Y."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Build rule: (cell_color, has_adjacent_colorX) -> output_color
+        # Simplified: what color is adjacent determines the output
+        rules = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] != out[r][c]:
+                        adj_colors = set()
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols and inp[nr][nc] != inp[r][c]:
+                                adj_colors.add(inp[nr][nc])
+                        key = (inp[r][c], frozenset(adj_colors))
+                        if key in rules and rules[key] != out[r][c]:
+                            return None
+                        rules[key] = out[r][c]
+        
+        if not rules:
+            return None
+        
+        rows, cols = len(test_input), len(test_input[0])
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                adj_colors = set()
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < rows and 0 <= nc < cols and test_input[nr][nc] != test_input[r][c]:
+                        adj_colors.add(test_input[nr][nc])
+                key = (test_input[r][c], frozenset(adj_colors))
+                if key in rules:
+                    result[r][c] = rules[key]
+        return result
+
+    def _try_connected_component_color(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Each connected component gets recolored based on its size or position."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        def find_components(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            components = []
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        comp = []
+                        color = grid[r][c]
+                        queue = [(r,c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc] or grid[cr][cc] != color:
+                                continue
+                            visited[cr][cc] = True
+                            comp.append((cr,cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr,nc))
+                        components.append({"cells": comp, "color": color, "size": len(comp)})
+            return components
+        
+        # Check: components recolored by size
+        size_to_color = {}
+        for ex in train:
+            comps = find_components(ex["input"], bg)
+            for comp in comps:
+                out_color = ex["output"][comp["cells"][0][0]][comp["cells"][0][1]]
+                size = comp["size"]
+                if size in size_to_color and size_to_color[size] != out_color:
+                    size_to_color = {}
+                    break
+                size_to_color[size] = out_color
+        
+        if size_to_color:
+            comps = find_components(test_input, bg)
+            result = [[bg]*len(test_input[0]) for _ in range(len(test_input))]
+            all_mapped = True
+            for comp in comps:
+                if comp["size"] in size_to_color:
+                    color = size_to_color[comp["size"]]
+                    for r, c in comp["cells"]:
+                        result[r][c] = color
+                else:
+                    all_mapped = False
+                    for r, c in comp["cells"]:
+                        result[r][c] = comp["color"]
+            if all_mapped:
+                return result
+        
+        return None
+
+    def _try_row_pattern_match(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Each row is transformed independently based on its pattern."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Build row transformation lookup
+        row_map = {}
+        for ex in train:
+            for r in range(len(ex["input"])):
+                key = tuple(ex["input"][r])
+                val = ex["output"][r]
+                if key in row_map and row_map[key] != val:
+                    return None
+                row_map[key] = val
+        
+        result = []
+        for row in test_input:
+            key = tuple(row)
+            if key in row_map:
+                result.append(row_map[key])
+            else:
+                return None
+        return result
+
+    def _try_column_pattern_match(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Each column transformed independently."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        col_map = {}
+        for ex in train:
+            cols = len(ex["input"][0])
+            for c in range(cols):
+                key = tuple(ex["input"][r][c] for r in range(len(ex["input"])))
+                val = [ex["output"][r][c] for r in range(len(ex["output"]))]
+                if key in col_map and col_map[key] != val:
+                    return None
+                col_map[key] = val
+        
+        rows, cols = len(test_input), len(test_input[0])
+        result = [[0]*cols for _ in range(rows)]
+        for c in range(cols):
+            key = tuple(test_input[r][c] for r in range(rows))
+            if key in col_map:
+                for r in range(rows):
+                    result[r][c] = col_map[key][r]
+            else:
+                return None
+        return result
+
+    def _try_max_color_per_region(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Grid divided into NxN blocks, each block filled with its majority color."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]):
+                return None
+        
+        from collections import Counter
+        
+        for block_size in [2, 3, 4, 5]:
+            matches = True
+            for ex in train:
+                inp, out = ex["input"], ex["output"]
+                rows, cols = len(inp), len(inp[0])
+                if rows % block_size != 0 or cols % block_size != 0:
+                    matches = False
+                    break
+                
+                predicted = [row[:] for row in inp]
+                for br in range(0, rows, block_size):
+                    for bc in range(0, cols, block_size):
+                        vals = []
+                        for r in range(br, min(br+block_size, rows)):
+                            for c in range(bc, min(bc+block_size, cols)):
+                                vals.append(inp[r][c])
+                        majority = Counter(vals).most_common(1)[0][0]
+                        for r in range(br, min(br+block_size, rows)):
+                            for c in range(bc, min(bc+block_size, cols)):
+                                predicted[r][c] = majority
+                
+                if predicted != out:
+                    matches = False
+                    break
+            
+            if matches:
+                rows, cols = len(test_input), len(test_input[0])
+                if rows % block_size != 0 or cols % block_size != 0:
+                    continue
+                result = [row[:] for row in test_input]
+                for br in range(0, rows, block_size):
+                    for bc in range(0, cols, block_size):
+                        vals = [test_input[r][c] for r in range(br, min(br+block_size, rows))
+                                for c in range(bc, min(bc+block_size, cols))]
+                        majority = Counter(vals).most_common(1)[0][0]
+                        for r in range(br, min(br+block_size, rows)):
+                            for c in range(bc, min(bc+block_size, cols)):
+                                result[r][c] = majority
+                return result
+        
+        return None
+
+    def _try_outline_objects(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Draw outlines around objects (replace interior cells with bg)."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        def outline(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg_val:
+                        # Check if all 4 neighbors are same color (interior)
+                        all_same = True
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                if grid[nr][nc] != grid[r][c]:
+                                    all_same = False
+                                    break
+                            else:
+                                all_same = False
+                                break
+                        if all_same:
+                            result[r][c] = bg_val
+            return result
+        
+        if all(outline(ex["input"], bg) == ex["output"] for ex in train):
+            return outline(test_input, bg)
+        return None
+
+    def _try_fill_rectangles(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Fill rectangular outlines with their border color."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        def fill_rects(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            
+            # Find rectangular outlines and fill them
+            for color in set(v for row in grid for v in row if v != bg_val):
+                # Find bounding box of this color
+                min_r, max_r, min_c, max_c = rows, -1, cols, -1
+                for r in range(rows):
+                    for c in range(cols):
+                        if grid[r][c] == color:
+                            min_r, max_r = min(min_r, r), max(max_r, r)
+                            min_c, max_c = min(min_c, c), max(max_c, c)
+                
+                if max_r == -1:
+                    continue
+                
+                # Check if border is complete
+                is_rect = True
+                for r in [min_r, max_r]:
+                    for c in range(min_c, max_c+1):
+                        if grid[r][c] != color:
+                            is_rect = False
+                for c in [min_c, max_c]:
+                    for r in range(min_r, max_r+1):
+                        if grid[r][c] != color:
+                            is_rect = False
+                
+                if is_rect and max_r - min_r >= 2 and max_c - min_c >= 2:
+                    for r in range(min_r+1, max_r):
+                        for c in range(min_c+1, max_c):
+                            result[r][c] = color
+            
+            return result
+        
+        if all(fill_rects(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_rects(test_input, bg)
+        return None
