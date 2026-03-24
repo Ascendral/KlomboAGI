@@ -588,3 +588,384 @@ class ARCSolverV2(ARCSolver):
             return sort_cols(test_input)
 
         return None
+
+
+class ARCSolverV3(ARCSolverV2):
+    """V3: object detection, masking, mirroring, pattern completion."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        strategies = [
+            self._try_identity,
+            self._try_position_transform,
+            self._try_size_transform,
+            self._try_tile_scale,
+            # V3 strategies
+            self._try_mask_overlay,
+            self._try_mirror_symmetry,
+            self._try_extract_subgrid,
+            self._try_count_to_grid,
+            self._try_color_by_position,
+            self._try_diagonal_flip,
+            self._try_rotate_90_270,
+            self._try_majority_color_fill,
+            # V2 strategies
+            self._try_color_conditional,
+            self._try_border_fill,
+            self._try_gravity,
+            self._try_row_col_sort,
+            self._try_many_to_one,
+            self._try_value_replacement,
+            self._try_size_change,
+            self._try_cell_by_cell_mapping,
+        ]
+        for strategy in strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None:
+                    return result
+            except Exception:
+                continue
+        return None
+
+    def _try_mask_overlay(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output = input with a mask applied (e.g., non-zero cells of a pattern painted onto background)."""
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Find: which cells change and is there a spatial pattern?
+        # Check if changes form a connected region
+        from collections import Counter
+        
+        # Find background color (most common)
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Check: does the output replace bg cells that are adjacent to non-bg with a new color?
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] != out[r][c] and inp[r][c] != bg:
+                        return None  # Non-bg cells changed — not a simple mask
+        
+        # Check if changed cells (bg→something) follow a pattern
+        # Common pattern: fill enclosed bg regions with a specific color
+        new_colors = set()
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            for r in range(len(inp)):
+                for c in range(len(inp[0])):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        new_colors.add(out[r][c])
+        
+        if len(new_colors) != 1:
+            return None
+        
+        fill_color = list(new_colors)[0]
+        
+        # Check: are filled cells those bg cells that are completely enclosed by non-bg?
+        def is_enclosed(grid, r, c, bg_val, rows, cols):
+            """BFS to check if bg region touches the border."""
+            visited = set()
+            queue = [(r, c)]
+            touches_border = False
+            while queue:
+                cr, cc = queue.pop(0)
+                if (cr, cc) in visited:
+                    continue
+                visited.add((cr, cc))
+                if cr == 0 or cr == rows-1 or cc == 0 or cc == cols-1:
+                    touches_border = True
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    nr, nc = cr+dr, cc+dc
+                    if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == bg_val and (nr,nc) not in visited:
+                        queue.append((nr, nc))
+            return not touches_border, visited
+        
+        # Verify on training examples
+        works = True
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            visited_all = set()
+            predicted = [row[:] for row in inp]
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and (r,c) not in visited_all:
+                        enclosed, region = is_enclosed(inp, r, c, bg, rows, cols)
+                        visited_all |= region
+                        if enclosed:
+                            for rr, cc in region:
+                                predicted[rr][cc] = fill_color
+            if predicted != out:
+                works = False
+                break
+        
+        if works:
+            rows, cols = len(test_input), len(test_input[0])
+            result = [row[:] for row in test_input]
+            visited_all = set()
+            for r in range(rows):
+                for c in range(cols):
+                    if test_input[r][c] == bg and (r,c) not in visited_all:
+                        enclosed, region = is_enclosed(test_input, r, c, bg, rows, cols)
+                        visited_all |= region
+                        if enclosed:
+                            for rr, cc in region:
+                                result[rr][cc] = fill_color
+            return result
+        
+        return None
+
+    def _try_mirror_symmetry(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Complete a pattern by mirroring — e.g., top half mirrors to bottom."""
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        from collections import Counter
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Check: is output = input with empty (bg) regions filled by mirroring?
+        # Horizontal mirror (top↔bottom)
+        def mirror_h(grid, bg_val):
+            rows = len(grid)
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(len(grid[0])):
+                    if result[r][c] == bg_val:
+                        mirror_r = rows - 1 - r
+                        if grid[mirror_r][c] != bg_val:
+                            result[r][c] = grid[mirror_r][c]
+            return result
+        
+        # Vertical mirror (left↔right)
+        def mirror_v(grid, bg_val):
+            cols = len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(len(grid)):
+                for c in range(cols):
+                    if result[r][c] == bg_val:
+                        mirror_c = cols - 1 - c
+                        if grid[r][mirror_c] != bg_val:
+                            result[r][c] = grid[r][mirror_c]
+            return result
+        
+        # Both mirrors
+        def mirror_both(grid, bg_val):
+            result = mirror_h(grid, bg_val)
+            result = mirror_v(result, bg_val)
+            # One more pass to catch corners
+            rows, cols = len(result), len(result[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if result[r][c] == bg_val:
+                        mr, mc = rows-1-r, cols-1-c
+                        if grid[mr][mc] != bg_val:
+                            result[r][c] = grid[mr][mc]
+            return result
+        
+        for name, fn in [("both", mirror_both), ("h", mirror_h), ("v", mirror_v)]:
+            if all(fn(ex["input"], bg) == ex["output"] for ex in train):
+                return fn(test_input, bg)
+        
+        return None
+
+    def _try_extract_subgrid(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output is a subgrid extracted from input (e.g., the non-bg bounding box)."""
+        if not train:
+            return None
+        
+        from collections import Counter
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        def extract_bbox(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            min_r, max_r, min_c, max_c = rows, -1, cols, -1
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg_val:
+                        min_r = min(min_r, r)
+                        max_r = max(max_r, r)
+                        min_c = min(min_c, c)
+                        max_c = max(max_c, c)
+            if max_r == -1:
+                return grid
+            return [row[min_c:max_c+1] for row in grid[min_r:max_r+1]]
+        
+        if all(extract_bbox(ex["input"], bg) == ex["output"] for ex in train):
+            return extract_bbox(test_input, bg)
+        
+        return None
+
+    def _try_count_to_grid(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output dimensions or values relate to counting objects in input."""
+        # Count non-bg cells in input, output is NxN or 1xN
+        if not train:
+            return None
+        
+        from collections import Counter
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Count non-bg cells
+        observations = []
+        for ex in train:
+            count = sum(1 for row in ex["input"] for cell in row if cell != bg)
+            out_rows, out_cols = len(ex["output"]), len(ex["output"][0])
+            observations.append({"count": count, "rows": out_rows, "cols": out_cols, "output": ex["output"]})
+        
+        # Check: output is 1x1 with count as value?
+        if all(o["rows"] == 1 and o["cols"] == 1 and o["output"][0][0] == o["count"] for o in observations):
+            count = sum(1 for row in test_input for cell in row if cell != bg)
+            return [[count]]
+        
+        return None
+
+    def _try_color_by_position(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Color depends on row/col index (e.g., checkerboard, diagonal stripes)."""
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Check: output[r][c] depends only on (r+c) % 2 and input color
+        # (checkerboard pattern)
+        def make_checker(grid, color_even, color_odd):
+            return [[color_even if (r+c) % 2 == 0 else color_odd for c in range(len(grid[0]))] for r in range(len(grid))]
+        
+        # Get the two most common output colors
+        from collections import Counter
+        out_vals = Counter()
+        for ex in train:
+            for row in ex["output"]:
+                out_vals.update(row)
+        
+        if len(out_vals) == 2:
+            colors = out_vals.most_common(2)
+            c1, c2 = colors[0][0], colors[1][0]
+            if all(make_checker(ex["input"], c1, c2) == ex["output"] for ex in train):
+                return make_checker(test_input, c1, c2)
+            if all(make_checker(ex["input"], c2, c1) == ex["output"] for ex in train):
+                return make_checker(test_input, c2, c1)
+        
+        return None
+
+    def _try_diagonal_flip(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Flip along main or anti diagonal."""
+        if not train:
+            return None
+        
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if ir != oc or ic != or_:
+                return None  # Dimensions must swap for diagonal flip
+        
+        # Main diagonal: output[c][r] = input[r][c]
+        def diag_main(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[r][c] for r in range(rows)] for c in range(cols)]
+        
+        # Anti diagonal: output[cols-1-c][rows-1-r] = input[r][c]
+        def diag_anti(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [[0]*rows for _ in range(cols)]
+            for r in range(rows):
+                for c in range(cols):
+                    result[cols-1-c][rows-1-r] = grid[r][c]
+            return result
+        
+        if all(diag_main(ex["input"]) == ex["output"] for ex in train):
+            return diag_main(test_input)
+        if all(diag_anti(ex["input"]) == ex["output"] for ex in train):
+            return diag_anti(test_input)
+        
+        return None
+
+    def _try_rotate_90_270(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """90 or 270 degree rotation (dimensions swap)."""
+        if not train:
+            return None
+        
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if ir != oc or ic != or_:
+                return None
+        
+        def rot90(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[rows-1-r][c] for r in range(rows)] for c in range(cols)]
+        
+        def rot270(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[r][cols-1-c] for r in range(rows)] for c in range(cols)]
+        
+        if all(rot90(ex["input"]) == ex["output"] for ex in train):
+            return rot90(test_input)
+        if all(rot270(ex["input"]) == ex["output"] for ex in train):
+            return rot270(test_input)
+        
+        return None
+
+    def _try_majority_color_fill(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Each cell becomes the majority color of its row or column."""
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        from collections import Counter
+        
+        # Row majority
+        def row_majority(grid):
+            result = []
+            for row in grid:
+                mc = Counter(row).most_common(1)[0][0]
+                result.append([mc] * len(row))
+            return result
+        
+        # Col majority
+        def col_majority(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [[0]*cols for _ in range(rows)]
+            for c in range(cols):
+                col = [grid[r][c] for r in range(rows)]
+                mc = Counter(col).most_common(1)[0][0]
+                for r in range(rows):
+                    result[r][c] = mc
+            return result
+        
+        if all(row_majority(ex["input"]) == ex["output"] for ex in train):
+            return row_majority(test_input)
+        if all(col_majority(ex["input"]) == ex["output"] for ex in train):
+            return col_majority(test_input)
+        
+        return None
