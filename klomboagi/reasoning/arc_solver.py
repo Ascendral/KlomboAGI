@@ -1737,3 +1737,300 @@ class ARCSolverV6(ARCSolverV5):
         """Output contains bounding boxes of each color, marked differently."""
         # TODO: complex — skip for now
         return None
+
+
+class ARCSolverV7(ARCSolverV6):
+    """V7: smarter composites, pixel-level rule learning, 3-transform chains."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v7_strategies = [
+            self._try_per_cell_rule,
+            self._try_sliding_window,
+            self._try_color_mapping_by_region,
+            self._try_triple_composite,
+            self._try_symmetric_completion,
+            self._try_unique_row_col,
+        ]
+        
+        for strategy in v7_strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None and self._cross_validate(strategy, train):
+                    return result
+            except Exception:
+                continue
+        return None
+
+    def _try_per_cell_rule(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Learn a function: output[r][c] = f(input[r][c], neighbors)."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Build lookup: (center_val, top, right, bottom, left) -> output_val
+        lookup = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    center = inp[r][c]
+                    top = inp[r-1][c] if r > 0 else -1
+                    right = inp[r][c+1] if c < cols-1 else -1
+                    bottom = inp[r+1][c] if r < rows-1 else -1
+                    left = inp[r][c-1] if c > 0 else -1
+                    key = (center, top, right, bottom, left)
+                    val = out[r][c]
+                    if key in lookup and lookup[key] != val:
+                        return None  # Inconsistent
+                    lookup[key] = val
+        
+        # Apply
+        rows, cols = len(test_input), len(test_input[0])
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                center = test_input[r][c]
+                top = test_input[r-1][c] if r > 0 else -1
+                right = test_input[r][c+1] if c < cols-1 else -1
+                bottom = test_input[r+1][c] if r < rows-1 else -1
+                left = test_input[r][c-1] if c > 0 else -1
+                key = (center, top, right, bottom, left)
+                if key in lookup:
+                    result[r][c] = lookup[key]
+                # If key not in lookup, keep original
+        return result
+
+    def _try_sliding_window(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output shrinks by applying a function over a sliding window."""
+        if not train:
+            return None
+        
+        # Check if output = input shrunk by 1 in each direction (3x3 window → 1 cell)
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ != ir - 2 or oc != ic - 2:
+                return None
+        
+        from collections import Counter
+        
+        # For each output cell, check what function of the 3x3 input neighborhood produces it
+        # Try: majority, min, max, center
+        def window_majority(grid, r, c):
+            vals = []
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    vals.append(grid[r+dr][c+dc])
+            return Counter(vals).most_common(1)[0][0]
+        
+        def window_center(grid, r, c):
+            return grid[r][c]
+        
+        def window_min(grid, r, c):
+            vals = [grid[r+dr][c+dc] for dr in range(-1,2) for dc in range(-1,2)]
+            return min(vals)
+        
+        def window_max(grid, r, c):
+            vals = [grid[r+dr][c+dc] for dr in range(-1,2) for dc in range(-1,2)]
+            return max(vals)
+        
+        for name, fn in [("majority", window_majority), ("center", window_center),
+                          ("min", window_min), ("max", window_max)]:
+            matches = True
+            for ex in train:
+                inp, out = ex["input"], ex["output"]
+                ir, ic = len(inp), len(inp[0])
+                for r in range(1, ir-1):
+                    for c in range(1, ic-1):
+                        if fn(inp, r, c) != out[r-1][c-1]:
+                            matches = False
+                            break
+                    if not matches:
+                        break
+                if not matches:
+                    break
+            
+            if matches:
+                ir, ic = len(test_input), len(test_input[0])
+                return [[fn(test_input, r, c) for c in range(1, ic-1)] for r in range(1, ir-1)]
+        
+        return None
+
+    def _try_color_mapping_by_region(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Different regions of the grid get different color mappings."""
+        # Check: top half uses one mapping, bottom half uses another
+        if not train:
+            return None
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Try: split at midpoint horizontally
+        def try_split_h(train_exs):
+            for ex in train_exs:
+                rows = len(ex["input"])
+                mid = rows // 2
+                # Top mapping
+                top_map = {}
+                for r in range(mid):
+                    for c in range(len(ex["input"][r])):
+                        a, b = ex["input"][r][c], ex["output"][r][c]
+                        if a in top_map and top_map[a] != b:
+                            return None
+                        top_map[a] = b
+                # Bottom mapping
+                bot_map = {}
+                for r in range(mid, rows):
+                    for c in range(len(ex["input"][r])):
+                        a, b = ex["input"][r][c], ex["output"][r][c]
+                        if a in bot_map and bot_map[a] != b:
+                            return None
+                        bot_map[a] = b
+            return top_map, bot_map
+        
+        result = try_split_h(train)
+        if result:
+            top_map, bot_map = result
+            rows = len(test_input)
+            mid = rows // 2
+            output = []
+            for r in range(rows):
+                m = top_map if r < mid else bot_map
+                output.append([m.get(c, c) for c in test_input[r]])
+            return output
+        
+        return None
+
+    def _try_triple_composite(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Try 3-transform chains."""
+        transforms = [
+            ("hflip", self._apply_hflip),
+            ("vflip", self._apply_vflip),
+            ("rot180", self._apply_rot180),
+        ]
+        
+        # Value map from first example
+        if not train:
+            return None
+        ex = train[0]
+        if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+            return None
+        
+        vmap = {}
+        for r in range(len(ex["input"])):
+            for c in range(len(ex["input"][r])):
+                a, b = ex["input"][r][c], ex["output"][r][c]
+                if a != b:
+                    if a in vmap and vmap[a] != b:
+                        vmap = {}
+                        break
+                    vmap[a] = b
+        
+        if vmap:
+            def apply_vmap(grid):
+                return [[vmap.get(c, c) for c in row] for row in grid]
+            transforms.append(("vmap", apply_vmap))
+        
+        # Try all triples (limited to keep fast)
+        for _, fn_a in transforms:
+            for _, fn_b in transforms:
+                for _, fn_c in transforms:
+                    try:
+                        if all(fn_c(fn_b(fn_a(ex["input"]))) == ex["output"] for ex in train):
+                            return fn_c(fn_b(fn_a(test_input)))
+                    except:
+                        continue
+        return None
+
+    def _try_symmetric_completion(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Input has partial symmetry, output completes it."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Check: output has perfect horizontal symmetry
+        def make_h_symmetric(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    mirror_c = cols - 1 - c
+                    if result[r][c] == bg_val and result[r][mirror_c] != bg_val:
+                        result[r][c] = result[r][mirror_c]
+                    elif result[r][c] != bg_val and result[r][mirror_c] == bg_val:
+                        result[r][mirror_c] = result[r][c]
+            return result
+        
+        def make_v_symmetric(grid, bg_val):
+            rows = len(grid)
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                mirror_r = rows - 1 - r
+                for c in range(len(grid[0])):
+                    if result[r][c] == bg_val and result[mirror_r][c] != bg_val:
+                        result[r][c] = result[mirror_r][c]
+                    elif result[r][c] != bg_val and result[mirror_r][c] == bg_val:
+                        result[mirror_r][c] = result[r][c]
+            return result
+        
+        def make_full_symmetric(grid, bg_val):
+            r = make_h_symmetric(grid, bg_val)
+            return make_v_symmetric(r, bg_val)
+        
+        for fn in [make_full_symmetric, make_h_symmetric, make_v_symmetric]:
+            if all(fn(ex["input"], bg) == ex["output"] for ex in train):
+                return fn(test_input, bg)
+        
+        return None
+
+    def _try_unique_row_col(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Remove duplicate rows or columns."""
+        if not train:
+            return None
+        
+        # Remove duplicate rows
+        def unique_rows(grid):
+            seen = []
+            result = []
+            for row in grid:
+                if row not in seen:
+                    seen.append(row)
+                    result.append(row)
+            return result
+        
+        if all(unique_rows(ex["input"]) == ex["output"] for ex in train):
+            return unique_rows(test_input)
+        
+        # Remove duplicate columns
+        def unique_cols(grid):
+            if not grid:
+                return grid
+            transposed = list(map(list, zip(*grid)))
+            seen = []
+            result = []
+            for col in transposed:
+                if col not in seen:
+                    seen.append(col)
+                    result.append(col)
+            return list(map(list, zip(*result))) if result else grid
+        
+        if all(unique_cols(ex["input"]) == ex["output"] for ex in train):
+            return unique_cols(test_input)
+        
+        return None
