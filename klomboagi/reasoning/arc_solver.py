@@ -1369,3 +1369,371 @@ class ARCSolverV5(ARCSolverV4):
     
     def _apply_transpose(self, grid: Grid) -> Grid:
         return [list(col) for col in zip(*grid)]
+
+
+class ARCSolverV6(ARCSolverV5):
+    """V6: per-object transforms, color counting, region analysis, pattern repetition."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        # V6 strategies — these are more expensive, run after V5 fails
+        v6_strategies = [
+            self._try_color_count_grid,
+            self._try_replace_by_neighbor_count,
+            self._try_crop_to_unique,
+            self._try_upscale_pattern,
+            self._try_denoise,
+            self._try_paint_by_template,
+            self._try_keep_color,
+            self._try_output_is_input_subset_rows,
+            self._try_output_is_input_subset_cols,
+            self._try_per_color_bbox,
+        ]
+        
+        for strategy in v6_strategies:
+            try:
+                result = strategy(train, test_input)
+                if result is not None and self._cross_validate(strategy, train):
+                    return result
+            except Exception:
+                continue
+        return None
+
+    def _try_color_count_grid(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output is a grid where each cell = count of that color in input."""
+        from collections import Counter
+        
+        # Check if output is 1-row with color counts
+        for ex in train:
+            in_colors = Counter()
+            for row in ex["input"]:
+                in_colors.update(row)
+            
+            out = ex["output"]
+            if len(out) != 1:
+                continue
+            # Check: output row = sorted color counts?
+            counts = sorted(in_colors.values())
+            if out[0] == counts:
+                # Apply
+                in_colors = Counter()
+                for row in test_input:
+                    in_colors.update(row)
+                return [sorted(in_colors.values())]
+        
+        return None
+
+    def _try_replace_by_neighbor_count(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Each cell's output color depends on how many non-bg neighbors it has."""
+        from collections import Counter
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Build mapping: neighbor_count -> output_color for non-bg cells
+        mapping = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] != bg:
+                        nc = 0
+                        for dr, dc in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                            nr, nc2 = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc2 < cols and inp[nr][nc2] != bg:
+                                nc += 1
+                        if nc in mapping and mapping[nc] != out[r][c]:
+                            return None
+                        mapping[nc] = out[r][c]
+        
+        if not mapping:
+            return None
+        
+        # Apply
+        rows, cols = len(test_input), len(test_input[0])
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                if test_input[r][c] != bg:
+                    nc = 0
+                    for dr, dc in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                        nr, nc2 = r+dr, c+dc
+                        if 0 <= nr < rows and 0 <= nc2 < cols and test_input[nr][nc2] != bg:
+                            nc += 1
+                    if nc in mapping:
+                        result[r][c] = mapping[nc]
+        return result
+
+    def _try_crop_to_unique(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Crop to the bounding box of the unique (non-majority) color."""
+        from collections import Counter
+        
+        for ex in train:
+            color_counts = Counter()
+            for row in ex["input"]:
+                color_counts.update(row)
+            if len(color_counts) < 3:
+                return None
+            
+            # Find the least common non-bg color
+            bg = color_counts.most_common(1)[0][0]
+            minority = color_counts.most_common()[-1][0]
+            
+            rows, cols = len(ex["input"]), len(ex["input"][0])
+            min_r, max_r, min_c, max_c = rows, -1, cols, -1
+            for r in range(rows):
+                for c in range(cols):
+                    if ex["input"][r][c] == minority:
+                        min_r, max_r = min(min_r, r), max(max_r, r)
+                        min_c, max_c = min(min_c, c), max(max_c, c)
+            
+            if max_r == -1:
+                return None
+            
+            extracted = [row[min_c:max_c+1] for row in ex["input"][min_r:max_r+1]]
+            if extracted != ex["output"]:
+                return None
+        
+        # Apply
+        color_counts = Counter()
+        for row in test_input:
+            color_counts.update(row)
+        bg = color_counts.most_common(1)[0][0]
+        minority = color_counts.most_common()[-1][0]
+        
+        rows, cols = len(test_input), len(test_input[0])
+        min_r, max_r, min_c, max_c = rows, -1, cols, -1
+        for r in range(rows):
+            for c in range(cols):
+                if test_input[r][c] == minority:
+                    min_r, max_r = min(min_r, r), max(max_r, r)
+                    min_c, max_c = min(min_c, c), max(max_c, c)
+        
+        if max_r == -1:
+            return None
+        return [row[min_c:max_c+1] for row in test_input[min_r:max_r+1]]
+
+    def _try_upscale_pattern(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Input is a small pattern, output scales each cell to NxN block."""
+        if not train:
+            return None
+        
+        scales = set()
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ % ir != 0 or oc % ic != 0:
+                return None
+            sr, sc = or_ // ir, oc // ic
+            if sr != sc:
+                return None
+            scales.add(sr)
+        
+        if len(scales) != 1:
+            return None
+        
+        scale = list(scales)[0]
+        if scale <= 1:
+            return None
+        
+        # Verify
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            ir, ic = len(inp), len(inp[0])
+            for r in range(ir):
+                for c in range(ic):
+                    for dr in range(scale):
+                        for dc in range(scale):
+                            if out[r*scale+dr][c*scale+dc] != inp[r][c]:
+                                return None
+        
+        ir, ic = len(test_input), len(test_input[0])
+        result = [[0]*(ic*scale) for _ in range(ir*scale)]
+        for r in range(ir):
+            for c in range(ic):
+                for dr in range(scale):
+                    for dc in range(scale):
+                        result[r*scale+dr][c*scale+dc] = test_input[r][c]
+        return result
+
+    def _try_denoise(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Remove isolated single cells (noise) — replace with surrounding color."""
+        from collections import Counter
+        
+        def is_isolated(grid, r, c, rows, cols):
+            val = grid[r][c]
+            neighbors = []
+            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                nr, nc = r+dr, c+dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    neighbors.append(grid[nr][nc])
+            return all(n != val for n in neighbors) and len(neighbors) > 0
+        
+        def get_majority_neighbor(grid, r, c, rows, cols):
+            neighbors = []
+            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                nr, nc = r+dr, c+dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    neighbors.append(grid[nr][nc])
+            if neighbors:
+                return Counter(neighbors).most_common(1)[0][0]
+            return grid[r][c]
+        
+        def denoise(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if is_isolated(grid, r, c, rows, cols):
+                        result[r][c] = get_majority_neighbor(grid, r, c, rows, cols)
+            return result
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]):
+                return None
+        
+        if all(denoise(ex["input"]) == ex["output"] for ex in train):
+            return denoise(test_input)
+        return None
+
+    def _try_paint_by_template(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """One color in input acts as a template — paint it with the color from another region."""
+        from collections import Counter
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Find template color (appears in both input and output at same positions)
+        # and paint color (replaces bg in specific positions)
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+        
+        return None  # TODO: implement fully
+
+    def _try_keep_color(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Keep only cells of a specific color, replace everything else with bg."""
+        from collections import Counter
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Find which color is kept
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # For each possible keep_color
+        all_colors = set(all_vals) - {bg}
+        for keep in all_colors:
+            matches = True
+            for ex in train:
+                predicted = [[cell if cell == keep else bg for cell in row] for row in ex["input"]]
+                if predicted != ex["output"]:
+                    matches = False
+                    break
+            if matches:
+                return [[cell if cell == keep else bg for cell in row] for row in test_input]
+        
+        return None
+
+    def _try_output_is_input_subset_rows(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output is a subset of input rows (filter rows by some criterion)."""
+        if not train:
+            return None
+        
+        from collections import Counter
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        # Check: output rows are a subset of input rows
+        for ex in train:
+            if len(ex["output"][0]) != len(ex["input"][0]):
+                return None
+            for out_row in ex["output"]:
+                if out_row not in ex["input"]:
+                    return None
+        
+        # Find the criterion: which rows are kept?
+        # Try: rows with unique elements
+        def has_unique(row, bg_val):
+            non_bg = [c for c in row if c != bg_val]
+            return len(non_bg) == len(set(non_bg))
+        
+        criterion_fns = [
+            ("has_non_bg", lambda row: any(c != bg for c in row)),
+            ("all_same", lambda row: len(set(row)) == 1),
+            ("has_unique", lambda row: has_unique(row, bg)),
+            ("no_bg", lambda row: bg not in row),
+        ]
+        
+        for name, fn in criterion_fns:
+            matches = True
+            for ex in train:
+                filtered = [row for row in ex["input"] if fn(row)]
+                if filtered != ex["output"]:
+                    matches = False
+                    break
+            if matches:
+                return [row for row in test_input if fn(row)] or None
+        
+        return None
+
+    def _try_output_is_input_subset_cols(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output is a subset of input columns."""
+        if not train:
+            return None
+        
+        from collections import Counter
+        
+        all_vals = []
+        for ex in train:
+            for row in ex["input"]:
+                all_vals.extend(row)
+        bg = Counter(all_vals).most_common(1)[0][0]
+        
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"]):
+                return None
+        
+        # Check: which columns are kept?
+        def has_non_bg_col(grid, c, bg_val):
+            return any(grid[r][c] != bg_val for r in range(len(grid)))
+        
+        for ex in train:
+            cols = len(ex["input"][0])
+            kept = [c for c in range(cols) if has_non_bg_col(ex["input"], c, bg)]
+            predicted = [[ex["input"][r][c] for c in kept] for r in range(len(ex["input"]))]
+            if predicted != ex["output"]:
+                return None
+        
+        cols = len(test_input[0])
+        kept = [c for c in range(cols) if has_non_bg_col(test_input, c, bg)]
+        if not kept:
+            return None
+        return [[test_input[r][c] for c in kept] for r in range(len(test_input))]
+
+    def _try_per_color_bbox(self, train: list[dict], test_input: Grid) -> Grid | None:
+        """Output contains bounding boxes of each color, marked differently."""
+        # TODO: complex — skip for now
+        return None
