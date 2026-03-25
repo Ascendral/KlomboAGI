@@ -3643,3 +3643,227 @@ class ARCSolverV12(ARCSolverV10):
     def _try_replace_object_with_pattern(self, train, test_input):
         """Each instance of a small pattern in input gets replaced with a different pattern."""
         return None  # Complex — skip for now
+
+
+class ARCSolverV13(ARCSolverV12):
+    """V13: defect removal, rectangle completion, pattern cleanup."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v13 = [
+            self._try_remove_defects,
+            self._try_complete_rectangles,
+            self._try_flood_fill_per_object,
+            self._try_replace_minority_in_region,
+        ]
+        for s in v13:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_remove_defects(self, train, test_input):
+        """Remove a specific 'defect' color and replace with surrounding color."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Find which color is removed (present in input, absent or reduced in output)
+        for ex in train:
+            in_c = Counter(); out_c = Counter()
+            for row in ex["input"]: in_c.update(row)
+            for row in ex["output"]: out_c.update(row)
+            
+            # Colors that decreased or disappeared
+            defect_colors = set()
+            for c in in_c:
+                if out_c.get(c, 0) < in_c[c]:
+                    defect_colors.add(c)
+        
+        if not defect_colors:
+            return None
+        
+        # For each potential defect color, try replacing with neighbor majority
+        for defect in defect_colors:
+            def remove_defect(grid, dc):
+                rows, cols = len(grid), len(grid[0])
+                result = [row[:] for row in grid]
+                for r in range(rows):
+                    for c in range(cols):
+                        if grid[r][c] == dc:
+                            # Replace with most common non-defect neighbor
+                            neighbors = []
+                            for dr, dc2 in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                                nr, nc = r+dr, c+dc2
+                                if 0<=nr<rows and 0<=nc<cols and grid[nr][nc] != dc:
+                                    neighbors.append(grid[nr][nc])
+                            if neighbors:
+                                result[r][c] = Counter(neighbors).most_common(1)[0][0]
+                            # else keep as-is
+                return result
+            
+            if all(remove_defect(ex["input"], defect) == ex["output"] for ex in train):
+                return remove_defect(test_input, defect)
+        
+        return None
+
+    def _try_complete_rectangles(self, train, test_input):
+        """Find rectangular regions, fill any gaps/holes in them."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def complete_rects(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            
+            # For each non-bg color, find its bounding box and fill it
+            colors = set(c for row in grid for c in row if c != bg_val)
+            for color in colors:
+                mr, xr, mc, xc = rows, -1, cols, -1
+                for r in range(rows):
+                    for c in range(cols):
+                        if grid[r][c] == color:
+                            mr, xr = min(mr, r), max(xr, r)
+                            mc, xc = min(mc, c), max(xc, c)
+                if xr >= 0:
+                    for r in range(mr, xr+1):
+                        for c in range(mc, xc+1):
+                            if result[r][c] == bg_val or result[r][c] != color:
+                                # Only fill if most of the bbox is this color
+                                pass
+                    # Count what fraction of bbox is this color
+                    total = (xr-mr+1) * (xc-mc+1)
+                    count = sum(1 for r in range(mr,xr+1) for c in range(mc,xc+1) if grid[r][c] == color)
+                    if count / total > 0.6:  # >60% of bbox is this color — fill the rest
+                        for r in range(mr, xr+1):
+                            for c in range(mc, xc+1):
+                                result[r][c] = color
+            return result
+        
+        if all(complete_rects(ex["input"], bg) == ex["output"] for ex in train):
+            return complete_rects(test_input, bg)
+        return None
+
+    def _try_flood_fill_per_object(self, train, test_input):
+        """Each connected component gets flood-filled to its bounding box."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def fill_objects(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            result = [row[:] for row in grid]
+            
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        # BFS to find component
+                        color = grid[r][c]
+                        cells = []
+                        queue = [(r, c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc]: continue
+                            if grid[cr][cc] != color and grid[cr][cc] != bg_val: continue
+                            if grid[cr][cc] == bg_val:
+                                # Include bg cells that are surrounded
+                                adj_color = 0
+                                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                    nr, nc = cr+dr, cc+dc
+                                    if 0<=nr<rows and 0<=nc<cols and grid[nr][nc] == color:
+                                        adj_color += 1
+                                if adj_color < 2:
+                                    continue
+                            visited[cr][cc] = True
+                            cells.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr, nc))
+                        
+                        # Fill bounding box
+                        if cells:
+                            mr = min(r for r,c in cells)
+                            xr = max(r for r,c in cells)
+                            mc = min(c for r,c in cells)
+                            xc = max(c for r,c in cells)
+                            for r2 in range(mr, xr+1):
+                                for c2 in range(mc, xc+1):
+                                    result[r2][c2] = color
+            return result
+        
+        if all(fill_objects(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_objects(test_input, bg)
+        return None
+
+    def _try_replace_minority_in_region(self, train, test_input):
+        """Within each rectangular region, replace minority colors with majority."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def replace_minority(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            
+            # Find connected non-bg regions
+            visited = [[False]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        # BFS — include all non-bg neighbors
+                        region = []
+                        queue = [(r, c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc] or grid[cr][cc] == bg_val:
+                                continue
+                            visited[cr][cc] = True
+                            region.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr, nc))
+                        
+                        # Find majority color in region
+                        colors = Counter(grid[r2][c2] for r2, c2 in region)
+                        majority = colors.most_common(1)[0][0]
+                        
+                        # Replace all cells with majority
+                        for r2, c2 in region:
+                            result[r2][c2] = majority
+            return result
+        
+        if all(replace_minority(ex["input"], bg) == ex["output"] for ex in train):
+            return replace_minority(test_input, bg)
+        return None
