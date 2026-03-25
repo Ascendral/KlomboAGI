@@ -4432,3 +4432,126 @@ class ARCSolverV16(ARCSolverV15):
                 result = test_input[::step]
                 return result if result else None
         return None
+
+
+class ARCSolverV17(ARCSolverV16):
+    """V17: concat-with-flip, crop-to-color, replace-bg, scale, border."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v17 = [
+            self._try_concat_hflip,
+            self._try_concat_vflip,
+            self._try_crop_to_specific_color,
+            self._try_add_border,
+            self._try_remove_border,
+        ]
+        for s in v17:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_concat_hflip(self, train, test_input):
+        """Output = input concatenated horizontally with its h-flip."""
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"]): return None
+            if len(ex["output"][0]) != len(ex["input"][0]) * 2: return None
+        
+        def concat(grid):
+            return [row + row[::-1] for row in grid]
+        
+        if all(concat(ex["input"]) == ex["output"] for ex in train):
+            return concat(test_input)
+        
+        # Also try: hflip + original
+        def concat_rev(grid):
+            return [row[::-1] + row for row in grid]
+        
+        if all(concat_rev(ex["input"]) == ex["output"] for ex in train):
+            return concat_rev(test_input)
+        
+        return None
+
+    def _try_concat_vflip(self, train, test_input):
+        """Output = input concatenated vertically with its v-flip."""
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"]) * 2: return None
+            if len(ex["output"][0]) != len(ex["input"][0]): return None
+        
+        def concat(grid):
+            return grid + grid[::-1]
+        
+        if all(concat(ex["input"]) == ex["output"] for ex in train):
+            return concat(test_input)
+        
+        def concat_rev(grid):
+            return grid[::-1] + grid
+        
+        if all(concat_rev(ex["input"]) == ex["output"] for ex in train):
+            return concat_rev(test_input)
+        
+        return None
+
+    def _try_crop_to_specific_color(self, train, test_input):
+        """Crop to bounding box of a specific color."""
+        from collections import Counter
+        av = []
+        for ex in train:
+            for row in ex["input"]: av.extend(row)
+        bg = Counter(av).most_common(1)[0][0]
+        non_bg = set(av) - {bg}
+        
+        for color in non_bg:
+            def crop(grid, c):
+                R,C=len(grid),len(grid[0])
+                mr,xr,mc,xc=R,-1,C,-1
+                for r in range(R):
+                    for c2 in range(C):
+                        if grid[r][c2]==c:
+                            mr,xr,mc,xc=min(mr,r),max(xr,r),min(mc,c2),max(xc,c2)
+                if xr<0: return None
+                return [row[mc:xc+1] for row in grid[mr:xr+1]]
+            
+            if all(crop(ex["input"],color)==ex["output"] for ex in train):
+                return crop(test_input,color)
+        
+        return None
+
+    def _try_add_border(self, train, test_input):
+        """Add a 1-cell border of specific color."""
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"])+2: return None
+            if len(ex["output"][0]) != len(ex["input"][0])+2: return None
+        
+        bc = train[0]["output"][0][0]
+        
+        def add_b(grid, color):
+            C=len(grid[0])
+            r=[[color]*(C+2)]
+            for row in grid: r.append([color]+row+[color])
+            r.append([color]*(C+2))
+            return r
+        
+        if all(add_b(ex["input"],bc)==ex["output"] for ex in train):
+            return add_b(test_input,bc)
+        return None
+
+    def _try_remove_border(self, train, test_input):
+        """Remove 1-cell border."""
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"])-2: return None
+            if len(ex["output"][0]) != len(ex["input"][0])-2: return None
+        
+        def rm(grid):
+            return [row[1:-1] for row in grid[1:-1]]
+        
+        if all(rm(ex["input"])==ex["output"] for ex in train):
+            return rm(test_input)
+        return None
