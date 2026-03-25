@@ -3360,3 +3360,286 @@ class ARCSolverV10(ARCSolverV9):
         return None
 
 
+
+
+class ARCSolverV12(ARCSolverV10):
+    """V12: ray casting, line drawing, template matching, grid arithmetic."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v12 = [
+            self._try_ray_cast,
+            self._try_draw_lines_between,
+            self._try_grid_difference,
+            self._try_grid_sum,
+            self._try_repeat_rows,
+            self._try_repeat_cols,
+            self._try_color_by_component_size,
+            self._try_replace_object_with_pattern,
+        ]
+        for s in v12:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_ray_cast(self, train, test_input):
+        """Extend non-bg cells horizontally/vertically until they hit another non-bg cell or edge."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def cast_horizontal(grid, bg_val):
+            """Extend non-bg cells horizontally to fill row between endpoints."""
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                non_bg_positions = [(c, grid[r][c]) for c in range(cols) if grid[r][c] != bg_val]
+                if len(non_bg_positions) >= 2:
+                    min_c = non_bg_positions[0][0]
+                    max_c = non_bg_positions[-1][0]
+                    fill_color = non_bg_positions[0][1]
+                    for c in range(min_c, max_c + 1):
+                        if result[r][c] == bg_val:
+                            result[r][c] = fill_color
+            return result
+        
+        def cast_vertical(grid, bg_val):
+            """Extend non-bg cells vertically."""
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for c in range(cols):
+                non_bg_positions = [(r, grid[r][c]) for r in range(rows) if grid[r][c] != bg_val]
+                if len(non_bg_positions) >= 2:
+                    min_r = non_bg_positions[0][0]
+                    max_r = non_bg_positions[-1][0]
+                    fill_color = non_bg_positions[0][1]
+                    for r in range(min_r, max_r + 1):
+                        if result[r][c] == bg_val:
+                            result[r][c] = fill_color
+            return result
+        
+        def cast_both(grid, bg_val):
+            r = cast_horizontal(grid, bg_val)
+            return cast_vertical(r, bg_val)
+        
+        for fn in [cast_both, cast_horizontal, cast_vertical]:
+            if all(fn(ex["input"], bg) == ex["output"] for ex in train):
+                return fn(test_input, bg)
+        return None
+
+    def _try_draw_lines_between(self, train, test_input):
+        """Draw lines between pairs of same-colored non-bg cells."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def draw_lines(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            # Find all non-bg cells grouped by color
+            by_color = {}
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg_val:
+                        by_color.setdefault(grid[r][c], []).append((r, c))
+            
+            # For each color with exactly 2 cells, draw a line
+            for color, cells in by_color.items():
+                if len(cells) == 2:
+                    (r1, c1), (r2, c2) = cells
+                    # Horizontal line
+                    if r1 == r2:
+                        for c in range(min(c1, c2), max(c1, c2) + 1):
+                            result[r1][c] = color
+                    # Vertical line
+                    elif c1 == c2:
+                        for r in range(min(r1, r2), max(r1, r2) + 1):
+                            result[r][c1] = color
+            return result
+        
+        if all(draw_lines(ex["input"], bg) == ex["output"] for ex in train):
+            return draw_lines(test_input, bg)
+        return None
+
+    def _try_grid_difference(self, train, test_input):
+        """Output = difference between two halves (cells that differ)."""
+        for ex in train:
+            rows = len(ex["input"])
+            if rows % 2 != 0: return None
+            if len(ex["output"]) != rows // 2: return None
+        
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def diff_halves(grid, bg_val):
+            rows = len(grid); half = rows // 2; cols = len(grid[0])
+            result = [[bg_val]*cols for _ in range(half)]
+            for r in range(half):
+                for c in range(cols):
+                    a, b = grid[r][c], grid[r+half][c]
+                    if a != b:
+                        result[r][c] = a if a != bg_val else b
+            return result
+        
+        if all(diff_halves(ex["input"], bg) == ex["output"] for ex in train):
+            return diff_halves(test_input, bg)
+        
+        # Left-right diff
+        for ex in train:
+            cols = len(ex["input"][0])
+            if cols % 2 != 0: return None
+            if len(ex["output"][0]) != cols // 2: return None
+        
+        def diff_halves_lr(grid, bg_val):
+            rows = len(grid); cols = len(grid[0]); half = cols // 2
+            result = [[bg_val]*half for _ in range(rows)]
+            for r in range(rows):
+                for c in range(half):
+                    a, b = grid[r][c], grid[r][c+half]
+                    if a != b:
+                        result[r][c] = a if a != bg_val else b
+            return result
+        
+        if all(diff_halves_lr(ex["input"], bg) == ex["output"] for ex in train):
+            return diff_halves_lr(test_input, bg)
+        
+        return None
+
+    def _try_grid_sum(self, train, test_input):
+        """Output = sum/merge of two halves (non-bg from either half)."""
+        # Already covered by OR — skip
+        return None
+
+    def _try_repeat_rows(self, train, test_input):
+        """Each row is repeated N times in output."""
+        for ex in train:
+            if len(ex["input"][0]) != len(ex["output"][0]): return None
+            or_ = len(ex["output"])
+            ir = len(ex["input"])
+            if or_ % ir != 0: return None
+        
+        # Find repeat factor
+        factors = set()
+        for ex in train:
+            factors.add(len(ex["output"]) // len(ex["input"]))
+        if len(factors) != 1: return None
+        n = list(factors)[0]
+        if n <= 1: return None
+        
+        def repeat(grid, n_):
+            result = []
+            for row in grid:
+                for _ in range(n_):
+                    result.append(row[:])
+            return result
+        
+        if all(repeat(ex["input"], n) == ex["output"] for ex in train):
+            return repeat(test_input, n)
+        return None
+
+    def _try_repeat_cols(self, train, test_input):
+        """Each column repeated N times."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]): return None
+            oc = len(ex["output"][0])
+            ic = len(ex["input"][0])
+            if oc % ic != 0: return None
+        
+        factors = set()
+        for ex in train:
+            factors.add(len(ex["output"][0]) // len(ex["input"][0]))
+        if len(factors) != 1: return None
+        n = list(factors)[0]
+        if n <= 1: return None
+        
+        def repeat(grid, n_):
+            return [[cell for cell in row for _ in range(n_)] for row in grid]
+        
+        if all(repeat(ex["input"], n) == ex["output"] for ex in train):
+            return repeat(test_input, n)
+        return None
+
+    def _try_color_by_component_size(self, train, test_input):
+        """Recolor connected components: small→colorA, medium→colorB, large→colorC."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def get_components(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            vis = [[False]*cols for _ in range(rows)]
+            comps = []
+            for r in range(rows):
+                for c in range(cols):
+                    if not vis[r][c] and grid[r][c] != bg_val:
+                        cells = []; q = [(r,c)]
+                        while q:
+                            cr,cc = q.pop(0)
+                            if vis[cr][cc] or grid[cr][cc] == bg_val: continue
+                            vis[cr][cc] = True; cells.append((cr,cc))
+                            for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr,nc = cr+dr,cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not vis[nr][nc]: q.append((nr,nc))
+                        comps.append(cells)
+            return comps
+        
+        # Build mapping: component_size → output_color
+        size_map = {}
+        for ex in train:
+            comps = get_components(ex["input"], bg)
+            for cells in comps:
+                size = len(cells)
+                out_color = ex["output"][cells[0][0]][cells[0][1]]
+                if size in size_map and size_map[size] != out_color:
+                    return None
+                size_map[size] = out_color
+        
+        if not size_map:
+            return None
+        
+        comps = get_components(test_input, bg)
+        result = [[bg]*len(test_input[0]) for _ in range(len(test_input))]
+        for cells in comps:
+            size = len(cells)
+            color = size_map.get(size)
+            if color is None:
+                return None
+            for r, c in cells:
+                result[r][c] = color
+        return result
+
+    def _try_replace_object_with_pattern(self, train, test_input):
+        """Each instance of a small pattern in input gets replaced with a different pattern."""
+        return None  # Complex — skip for now
