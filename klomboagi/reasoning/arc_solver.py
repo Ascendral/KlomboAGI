@@ -3867,3 +3867,300 @@ class ARCSolverV13(ARCSolverV12):
         if all(replace_minority(ex["input"], bg) == ex["output"] for ex in train):
             return replace_minority(test_input, bg)
         return None
+
+
+class ARCSolverV14(ARCSolverV13):
+    """V14: pattern templates, grid division, conditional color mapping."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v14 = [
+            self._try_grid_overlay_combine,
+            self._try_color_by_quadrant,
+            self._try_surround_with_color,
+            self._try_expand_pixels,
+            self._try_shrink_to_unique_pattern,
+            self._try_count_per_row_col,
+        ]
+        for s in v14:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_grid_overlay_combine(self, train, test_input):
+        """Split grid into N equal sections and overlay/combine them."""
+        from collections import Counter
+        
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ > ir or oc > ic:
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Try splitting into 2 vertical sections
+        for n_sections in [2, 3, 4]:
+            for ex in train:
+                rows = len(ex["input"])
+                if rows % n_sections != 0:
+                    break
+                if len(ex["output"]) != rows // n_sections:
+                    break
+            else:
+                # Try OR-combine sections
+                def or_sections(grid, n, bg_val):
+                    rows = len(grid); sec_h = rows // n; cols = len(grid[0])
+                    result = [[bg_val]*cols for _ in range(sec_h)]
+                    for s_idx in range(n):
+                        for r in range(sec_h):
+                            for c in range(cols):
+                                val = grid[s_idx * sec_h + r][c]
+                                if val != bg_val:
+                                    result[r][c] = val
+                    return result
+                
+                if all(or_sections(ex["input"], n_sections, bg) == ex["output"] for ex in train):
+                    return or_sections(test_input, n_sections, bg)
+                
+                # Try AND-combine
+                def and_sections(grid, n, bg_val):
+                    rows = len(grid); sec_h = rows // n; cols = len(grid[0])
+                    result = [[bg_val]*cols for _ in range(sec_h)]
+                    for r in range(sec_h):
+                        for c in range(cols):
+                            vals = [grid[s * sec_h + r][c] for s in range(n)]
+                            non_bg = [v for v in vals if v != bg_val]
+                            if len(non_bg) == n:  # All sections have non-bg
+                                result[r][c] = non_bg[0]
+                    return result
+                
+                if all(and_sections(ex["input"], n_sections, bg) == ex["output"] for ex in train):
+                    return and_sections(test_input, n_sections, bg)
+        
+        # Same for horizontal sections
+        for n_sections in [2, 3, 4]:
+            for ex in train:
+                cols = len(ex["input"][0])
+                if cols % n_sections != 0:
+                    break
+                if len(ex["output"][0]) != cols // n_sections:
+                    break
+            else:
+                def or_sections_h(grid, n, bg_val):
+                    rows = len(grid); cols = len(grid[0]); sec_w = cols // n
+                    result = [[bg_val]*sec_w for _ in range(rows)]
+                    for s_idx in range(n):
+                        for r in range(rows):
+                            for c in range(sec_w):
+                                val = grid[r][s_idx * sec_w + c]
+                                if val != bg_val:
+                                    result[r][c] = val
+                    return result
+                
+                if all(or_sections_h(ex["input"], n_sections, bg) == ex["output"] for ex in train):
+                    return or_sections_h(test_input, n_sections, bg)
+        
+        return None
+
+    def _try_color_by_quadrant(self, train, test_input):
+        """Different quadrants of the grid get different colors."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        # Check if output color depends on which quadrant (r < mid_r, c < mid_c)
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        lookup = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            mr, mc = rows // 2, cols // 2
+            for r in range(rows):
+                for c in range(cols):
+                    q = (0 if r < mr else 1, 0 if c < mc else 1)
+                    key = (inp[r][c], q)
+                    if key in lookup and lookup[key] != out[r][c]:
+                        return None
+                    lookup[key] = out[r][c]
+        
+        if not lookup:
+            return None
+        
+        rows, cols = len(test_input), len(test_input[0])
+        mr, mc = rows // 2, cols // 2
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                q = (0 if r < mr else 1, 0 if c < mc else 1)
+                key = (test_input[r][c], q)
+                if key in lookup:
+                    result[r][c] = lookup[key]
+                else:
+                    return None
+        return result
+
+    def _try_surround_with_color(self, train, test_input):
+        """Non-bg cells get surrounded by a specific color."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find the surround color
+        surround_colors = set()
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        # Check if adjacent to non-bg in input
+                        adj = False
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0<=nr<rows and 0<=nc<cols and inp[nr][nc] != bg:
+                                adj = True; break
+                        if adj:
+                            surround_colors.add(out[r][c])
+        
+        if len(surround_colors) != 1:
+            return None
+        sc = list(surround_colors)[0]
+        
+        def surround(grid, bg_val, color):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == bg_val:
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0<=nr<rows and 0<=nc<cols and grid[nr][nc] != bg_val:
+                                result[r][c] = color
+                                break
+            return result
+        
+        if all(surround(ex["input"], bg, sc) == ex["output"] for ex in train):
+            return surround(test_input, bg, sc)
+        return None
+
+    def _try_expand_pixels(self, train, test_input):
+        """Each non-bg pixel expands into a 3x3 or NxN block, grid grows."""
+        from collections import Counter
+        
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ % ir != 0 or oc % ic != 0:
+                return None
+        
+        factors = set()
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            factors.add((or_ // ir, oc // ic))
+        
+        if len(factors) != 1:
+            return None
+        
+        fr, fc = list(factors)[0]
+        if fr == 1 and fc == 1:
+            return None
+        
+        # Already handled by tile_scale/upscale — but try with different fill rules
+        # Check if only non-bg cells expand (bg stays as single cells)
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def expand(grid, fr_, fc_, bg_val):
+            ir, ic = len(grid), len(grid[0])
+            result = [[bg_val]*(ic*fc_) for _ in range(ir*fr_)]
+            for r in range(ir):
+                for c in range(ic):
+                    if grid[r][c] != bg_val:
+                        for dr in range(fr_):
+                            for dc in range(fc_):
+                                result[r*fr_+dr][c*fc_+dc] = grid[r][c]
+            return result
+        
+        if all(expand(ex["input"], fr, fc, bg) == ex["output"] for ex in train):
+            return expand(test_input, fr, fc, bg)
+        
+        return None
+
+    def _try_shrink_to_unique_pattern(self, train, test_input):
+        """Output is the unique non-repeating subpattern of the input."""
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if ir % or_ != 0 or ic % oc != 0:
+                return None
+        
+        # Check if input is just output tiled
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            or_, oc = len(out), len(out[0])
+            for r in range(len(inp)):
+                for c in range(len(inp[0])):
+                    if inp[r][c] != out[r % or_][c % oc]:
+                        return None
+        
+        ir, ic = len(test_input), len(test_input[0])
+        or_ = len(train[0]["output"])
+        oc = len(train[0]["output"][0])
+        
+        if ir % or_ != 0 or ic % oc != 0:
+            return None
+        
+        return [row[:oc] for row in test_input[:or_]]
+
+    def _try_count_per_row_col(self, train, test_input):
+        """Output is count of non-bg cells per row or column."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Output = 1 column with count per row
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"]):
+                return None
+            if len(ex["output"][0]) != 1:
+                return None
+        
+        def count_rows(grid, bg_val):
+            return [[sum(1 for c in row if c != bg_val)] for row in grid]
+        
+        if all(count_rows(ex["input"], bg) == ex["output"] for ex in train):
+            return count_rows(test_input, bg)
+        
+        return None
