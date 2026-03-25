@@ -138,7 +138,86 @@ def make_fill_enclosed(train: list[dict]):
     return f
 
 
-DYNAMIC_MAKERS = [make_value_map, make_bbox_extract, make_color_swap, make_fill_enclosed]
+
+def make_keep_color(train: list[dict]):
+    """Keep only the most common non-bg color, replace rest with bg."""
+    av = []
+    for e in train:
+        for r in e["input"]: av.extend(r)
+    if not av: return None
+    bg = Counter(av).most_common(1)[0][0]
+    non_bg = [c for c in av if c != bg]
+    if not non_bg: return None
+    keep = Counter(non_bg).most_common(1)[0][0]
+    return lambda g: [[c if c == keep else bg for c in row] for row in g]
+
+
+def make_gravity_down(train: list[dict]):
+    """Non-bg cells fall to bottom of each column."""
+    av = []
+    for e in train:
+        for r in e["input"]: av.extend(r)
+    if not av: return None
+    bg = Counter(av).most_common(1)[0][0]
+    def f(g):
+        R, C = len(g), len(g[0]); res = [[bg]*C for _ in range(R)]
+        for c in range(C):
+            nb = [g[r][c] for r in range(R) if g[r][c] != bg]
+            for i, v in enumerate(nb): res[R-len(nb)+i][c] = v
+        return res
+    return f
+
+
+def make_gravity_left(train: list[dict]):
+    """Non-bg cells slide to left of each row."""
+    av = []
+    for e in train:
+        for r in e["input"]: av.extend(r)
+    if not av: return None
+    bg = Counter(av).most_common(1)[0][0]
+    def f(g):
+        R, C = len(g), len(g[0]); res = [[bg]*C for _ in range(R)]
+        for r in range(R):
+            nb = [g[r][c] for c in range(C) if g[r][c] != bg]
+            for i, v in enumerate(nb): res[r][i] = v
+        return res
+    return f
+
+
+def make_surround(train: list[dict]):
+    """Surround non-bg cells with a specific color."""
+    av = []
+    for e in train:
+        for r in e["input"]: av.extend(r)
+    if not av: return None
+    bg = Counter(av).most_common(1)[0][0]
+    scs = set()
+    for e in train:
+        inp, out = e["input"], e["output"]
+        R, C = len(inp), len(inp[0])
+        for r in range(R):
+            for c in range(C):
+                if inp[r][c] == bg and out[r][c] != bg:
+                    for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                        nr, nc = r+dr, c+dc
+                        if 0<=nr<R and 0<=nc<C and inp[nr][nc] != bg:
+                            scs.add(out[r][c]); break
+    if len(scs) != 1: return None
+    sc = list(scs)[0]
+    def f(g):
+        R, C = len(g), len(g[0]); res = [r[:] for r in g]
+        for r in range(R):
+            for c in range(C):
+                if g[r][c] == bg:
+                    for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                        nr, nc = r+dr, c+dc
+                        if 0<=nr<R and 0<=nc<C and g[nr][nc] != bg:
+                            res[r][c] = sc; break
+        return res
+    return f
+
+
+DYNAMIC_MAKERS = [make_value_map, make_bbox_extract, make_color_swap, make_fill_enclosed, make_keep_color, make_gravity_down, make_gravity_left, make_surround]
 
 
 class ProgramSynthesizer:
