@@ -4164,3 +4164,141 @@ class ARCSolverV14(ARCSolverV13):
             return count_rows(test_input, bg)
         
         return None
+
+
+class ARCSolverV15(ARCSolverV14):
+    """V15: separator panels, frequency remap, object removal."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v15 = [
+            self._try_separator_panels,
+            self._try_frequency_rank_remap,
+        ]
+        for s in v15:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_separator_panels(self, train, test_input):
+        """Split grid by separator lines, combine panels with OR/AND/XOR."""
+        from collections import Counter
+        av = []
+        for ex in train:
+            for row in ex["input"]: av.extend(row)
+        bg = Counter(av).most_common(1)[0][0]
+        
+        def find_h_seps(grid):
+            return [r for r, row in enumerate(grid) if len(set(row)) == 1 and row[0] != bg]
+        
+        def find_v_seps(grid):
+            cols = len(grid[0])
+            return [c for c in range(cols) if len(set(grid[r][c] for r in range(len(grid)))) == 1 and grid[0][c] != bg]
+        
+        def split_h(grid, seps):
+            panels = []; prev = 0
+            for r in seps:
+                if r > prev: panels.append(grid[prev:r])
+                prev = r + 1
+            if prev < len(grid): panels.append(grid[prev:])
+            return [p for p in panels if p]
+        
+        def split_v(grid, seps):
+            panels = []; prev = 0
+            for c in seps:
+                if c > prev: panels.append([row[prev:c] for row in grid])
+                prev = c + 1
+            if prev < len(grid[0]): panels.append([row[prev:] for row in grid])
+            return [p for p in panels if p]
+        
+        def combine(panels, op, bg_val):
+            if not panels: return None
+            h, w = len(panels[0]), len(panels[0][0])
+            result = [[bg_val]*w for _ in range(h)]
+            for r in range(h):
+                for c in range(w):
+                    if op == "or":
+                        for panel in panels:
+                            if r < len(panel) and c < len(panel[0]) and panel[r][c] != bg_val:
+                                result[r][c] = panel[r][c]
+                    elif op == "and":
+                        vals = [panel[r][c] for panel in panels if r < len(panel) and c < len(panel[0]) and panel[r][c] != bg_val]
+                        if len(vals) == len(panels): result[r][c] = vals[0]
+                    elif op == "xor":
+                        vals = set()
+                        for panel in panels:
+                            if r < len(panel) and c < len(panel[0]) and panel[r][c] != bg_val:
+                                vals.add(panel[r][c])
+                        if len(vals) == 1: result[r][c] = list(vals)[0]
+            return result
+        
+        for split_fn, sep_fn in [(split_h, find_h_seps), (split_v, find_v_seps)]:
+            seps0 = sep_fn(train[0]["input"])
+            if not seps0: continue
+            
+            for op in ["or", "and", "xor"]:
+                works = True
+                for ex in train:
+                    seps = sep_fn(ex["input"])
+                    panels = split_fn(ex["input"], seps)
+                    if len(panels) < 2 or len(set((len(p), len(p[0])) for p in panels)) != 1:
+                        works = False; break
+                    result = combine(panels, op, bg)
+                    if result != ex["output"]:
+                        works = False; break
+                
+                if works:
+                    seps = sep_fn(test_input)
+                    panels = split_fn(test_input, seps)
+                    if panels and len(set((len(p), len(p[0])) for p in panels)) == 1:
+                        return combine(panels, op, bg)
+        
+        return None
+
+    def _try_frequency_rank_remap(self, train, test_input):
+        """Remap colors by frequency rank."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        remap_template = None
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            ic = Counter(); oc = Counter()
+            for row in inp: ic.update(row)
+            for row in out: oc.update(row)
+            
+            in_ranked = [c for c, _ in ic.most_common()]
+            out_ranked = [c for c, _ in oc.most_common()]
+            
+            if len(in_ranked) != len(out_ranked):
+                return None
+            
+            remap = dict(zip(in_ranked, out_ranked))
+            predicted = [[remap.get(c, c) for c in row] for row in inp]
+            if predicted != out:
+                return None
+            
+            if remap_template is None:
+                remap_template = out_ranked
+        
+        if remap_template is None:
+            return None
+        
+        ic = Counter()
+        for row in test_input: ic.update(row)
+        in_ranked = [c for c, _ in ic.most_common()]
+        
+        if len(in_ranked) != len(remap_template):
+            return None
+        
+        remap = dict(zip(in_ranked, remap_template))
+        return [[remap.get(c, c) for c in row] for row in test_input]
