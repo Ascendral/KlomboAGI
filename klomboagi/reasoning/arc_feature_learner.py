@@ -115,6 +115,33 @@ def extract_mega_features(grid: Grid, r: int, c: int, bg: int) -> tuple:
     bd = min(r, c, rows-1-r, cols-1-c)
     return (val, n[0], n[1], n[2], n[3], n8_nonbg, min(bd,3), val==bg)
 
+
+
+def extract_row_col_position(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + unique color counts in row and column."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    row_colors = len(set(grid[r][c2] for c2 in range(cols) if grid[r][c2] != bg))
+    col_colors = len(set(grid[r2][c] for r2 in range(rows) if grid[r2][c] != bg))
+    return (val, row_colors, col_colors)
+
+
+def extract_val_and_col(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + entire column as context."""
+    rows = len(grid)
+    val = grid[r][c]
+    return (val, tuple(grid[r2][c] for r2 in range(rows)))
+
+
+def extract_cross_2(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + what is 2 cells away in each cardinal direction."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    def g(dr, dc):
+        nr, nc = r+dr, c+dc
+        return grid[nr][nc] if 0<=nr<rows and 0<=nc<cols else -1
+    return (val, g(-2,0), g(2,0), g(0,-2), g(0,2))
+
 FEATURE_EXTRACTORS = [
     ("v1_basic", extract_features_v1),
     ("v2_8neighbors", extract_features_v2),
@@ -123,6 +150,9 @@ FEATURE_EXTRACTORS = [
     ("v5_compact", extract_compact_features),
     ("v6_directional", extract_directional),
     ("v7_mega", extract_mega_features),
+    ("v8_row_col_pos", extract_row_col_position),
+    ("v9_val_col", extract_val_and_col),
+    ("v10_cross2", extract_cross_2),
 ]
 
 
