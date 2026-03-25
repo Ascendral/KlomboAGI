@@ -2941,3 +2941,420 @@ class ARCSolverV9(ARCSolverV8):
     def _try_per_object_extract(self, train, test_input):
         """Each object in input produces one row/column in output."""
         return None  # Complex
+
+
+class ARCSolverV10(ARCSolverV9):
+    """V10: deeper pattern analysis — pixel rules, grid algebra, shape detection."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v10 = [
+            self._try_pixelwise_rule_8neighbors,
+            self._try_color_at_intersection,
+            self._try_spread_color,
+            self._try_shift_grid,
+            self._try_copy_paste_object,
+            self._try_remove_duplicate_rows_cols,
+            self._try_sort_rows_by_color_count,
+            self._try_min_bounding_box_all_colors,
+            self._try_paint_enclosed_regions_multi,
+            self._try_overlay_two_objects,
+        ]
+        for s in v10:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_pixelwise_rule_8neighbors(self, train, test_input):
+        """Output depends on the 8-neighbor pattern (Moore neighborhood hash)."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Build: (center_is_bg, count_of_non_bg_neighbors) -> output_color
+        lookup = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    is_bg = inp[r][c] == bg
+                    n_count = 0
+                    for dr in [-1,0,1]:
+                        for dc in [-1,0,1]:
+                            if dr == 0 and dc == 0:
+                                continue
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols and inp[nr][nc] != bg:
+                                n_count += 1
+                    key = (is_bg, n_count)
+                    if key in lookup and lookup[key] != out[r][c]:
+                        return None
+                    lookup[key] = out[r][c]
+        
+        if not lookup:
+            return None
+        
+        rows, cols = len(test_input), len(test_input[0])
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                is_bg = test_input[r][c] == bg
+                n_count = 0
+                for dr in [-1,0,1]:
+                    for dc in [-1,0,1]:
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = r+dr, c+dc
+                        if 0 <= nr < rows and 0 <= nc < cols and test_input[nr][nc] != bg:
+                            n_count += 1
+                key = (is_bg, n_count)
+                if key in lookup:
+                    result[r][c] = lookup[key]
+        return result
+
+    def _try_color_at_intersection(self, train, test_input):
+        """Where a row-color and col-color intersect, output gets a specific color."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find row-dominant and col-dominant colors
+        def get_row_color(grid, r, bg_val):
+            non_bg = [c for c in grid[r] if c != bg_val]
+            if non_bg:
+                return Counter(non_bg).most_common(1)[0][0]
+            return bg_val
+        
+        def get_col_color(grid, c, bg_val):
+            non_bg = [grid[r][c] for r in range(len(grid)) if grid[r][c] != bg_val]
+            if non_bg:
+                return Counter(non_bg).most_common(1)[0][0]
+            return bg_val
+        
+        # Build lookup: (row_color, col_color) -> output_color
+        lookup = {}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        rc = get_row_color(inp, r, bg)
+                        cc = get_col_color(inp, c, bg)
+                        if rc != bg and cc != bg:
+                            key = (rc, cc)
+                            if key in lookup and lookup[key] != out[r][c]:
+                                return None
+                            lookup[key] = out[r][c]
+        
+        if not lookup:
+            return None
+        
+        rows, cols = len(test_input), len(test_input[0])
+        result = [row[:] for row in test_input]
+        for r in range(rows):
+            for c in range(cols):
+                if test_input[r][c] == bg:
+                    rc = get_row_color(test_input, r, bg)
+                    cc = get_col_color(test_input, c, bg)
+                    key = (rc, cc)
+                    if key in lookup:
+                        result[r][c] = lookup[key]
+        return result
+
+    def _try_spread_color(self, train, test_input):
+        """Non-bg cells spread their color to adjacent bg cells."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Try N iterations of spreading
+        for iterations in [1, 2, 3]:
+            def spread(grid, bg_val, n):
+                result = [row[:] for row in grid]
+                for _ in range(n):
+                    new = [row[:] for row in result]
+                    rows, cols = len(result), len(result[0])
+                    for r in range(rows):
+                        for c in range(cols):
+                            if result[r][c] == bg_val:
+                                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                    nr, nc = r+dr, c+dc
+                                    if 0 <= nr < rows and 0 <= nc < cols and result[nr][nc] != bg_val:
+                                        new[r][c] = result[nr][nc]
+                                        break
+                    result = new
+                return result
+            
+            if all(spread(ex["input"], bg, iterations) == ex["output"] for ex in train):
+                return spread(test_input, bg, iterations)
+        
+        return None
+
+    def _try_shift_grid(self, train, test_input):
+        """Grid is shifted by N rows or columns (with wrap or zero fill)."""
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        rows, cols = len(train[0]["input"]), len(train[0]["input"][0])
+        
+        # Try all shift amounts
+        for dr in range(-rows+1, rows):
+            for dc in range(-cols+1, cols):
+                if dr == 0 and dc == 0:
+                    continue
+                
+                def shift(grid, dr_, dc_):
+                    r, c = len(grid), len(grid[0])
+                    result = [[0]*c for _ in range(r)]
+                    for ri in range(r):
+                        for ci in range(c):
+                            sr, sc = ri - dr_, ci - dc_
+                            if 0 <= sr < r and 0 <= sc < c:
+                                result[ri][ci] = grid[sr][sc]
+                    return result
+                
+                if all(shift(ex["input"], dr, dc) == ex["output"] for ex in train):
+                    return shift(test_input, dr, dc)
+        
+        return None
+
+    def _try_copy_paste_object(self, train, test_input):
+        """A small object is copied to specific positions."""
+        return None  # Complex
+
+    def _try_remove_duplicate_rows_cols(self, train, test_input):
+        """Remove rows/cols that are exact copies of adjacent rows/cols."""
+        def dedup_rows(grid):
+            result = [grid[0]]
+            for i in range(1, len(grid)):
+                if grid[i] != grid[i-1]:
+                    result.append(grid[i])
+            return result
+        
+        def dedup_cols(grid):
+            if not grid:
+                return grid
+            t = list(map(list, zip(*grid)))
+            dt = [t[0]]
+            for i in range(1, len(t)):
+                if t[i] != t[i-1]:
+                    dt.append(t[i])
+            return list(map(list, zip(*dt))) if dt else grid
+        
+        for fn in [dedup_rows, dedup_cols]:
+            if all(fn(ex["input"]) == ex["output"] for ex in train):
+                return fn(test_input)
+        return None
+
+    def _try_sort_rows_by_color_count(self, train, test_input):
+        """Sort rows by number of non-bg cells."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        def sort_by_nonbg(grid, bg_val):
+            return sorted(grid, key=lambda row: sum(1 for c in row if c != bg_val))
+        
+        def sort_by_nonbg_desc(grid, bg_val):
+            return sorted(grid, key=lambda row: sum(1 for c in row if c != bg_val), reverse=True)
+        
+        if all(sort_by_nonbg(ex["input"], bg) == ex["output"] for ex in train):
+            return sort_by_nonbg(test_input, bg)
+        if all(sort_by_nonbg_desc(ex["input"], bg) == ex["output"] for ex in train):
+            return sort_by_nonbg_desc(test_input, bg)
+        return None
+
+    def _try_min_bounding_box_all_colors(self, train, test_input):
+        """Extract the minimum bounding box that contains ALL non-bg cells."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def min_bbox(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            min_r, max_r, min_c, max_c = rows, -1, cols, -1
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg_val:
+                        min_r, max_r = min(min_r, r), max(max_r, r)
+                        min_c, max_c = min(min_c, c), max(max_c, c)
+            if max_r == -1:
+                return grid
+            return [row[min_c:max_c+1] for row in grid[min_r:max_r+1]]
+        
+        if all(min_bbox(ex["input"], bg) == ex["output"] for ex in train):
+            return min_bbox(test_input, bg)
+        return None
+
+    def _try_paint_enclosed_regions_multi(self, train, test_input):
+        """Fill enclosed regions — each region gets color based on its enclosing shape's color."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def fill_enclosed(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            
+            # Find all bg regions
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] == bg_val:
+                        # BFS to find region
+                        region = []
+                        queue = [(r,c)]
+                        touches_border = False
+                        border_colors = Counter()
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc]:
+                                continue
+                            if grid[cr][cc] != bg_val:
+                                border_colors[grid[cr][cc]] += 1
+                                continue
+                            visited[cr][cc] = True
+                            region.append((cr,cc))
+                            if cr == 0 or cr == rows-1 or cc == 0 or cc == cols-1:
+                                touches_border = True
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc]:
+                                    queue.append((nr, nc))
+                        
+                        if not touches_border and border_colors:
+                            fill_color = border_colors.most_common(1)[0][0]
+                            for rr, cc in region:
+                                result[rr][cc] = fill_color
+            
+            return result
+        
+        if all(fill_enclosed(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_enclosed(test_input, bg)
+        return None
+
+    def _try_overlay_two_objects(self, train, test_input):
+        """Input has two separate objects — output is their overlay."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["output"]) > len(ex["input"]) or len(ex["output"][0]) > len(ex["input"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find two non-bg regions in input
+        def find_two_objects(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            objects = []
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        obj = []
+                        queue = [(r,c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc] or grid[cr][cc] == bg_val:
+                                continue
+                            visited[cr][cc] = True
+                            obj.append((cr,cc,grid[cr][cc]))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr,nc))
+                        objects.append(obj)
+            return objects
+        
+        for ex in train:
+            objs = find_two_objects(ex["input"], bg)
+            if len(objs) != 2:
+                return None
+        
+        # Try: output = overlay of both objects in smaller bounding box
+        def overlay(grid, bg_val):
+            objs = find_two_objects(grid, bg_val)
+            if len(objs) != 2:
+                return None
+            
+            # Get bounding boxes
+            def bbox(obj):
+                rs = [r for r,c,v in obj]
+                cs = [c for r,c,v in obj]
+                return min(rs), max(rs), min(cs), max(cs)
+            
+            b1 = bbox(objs[0])
+            b2 = bbox(objs[1])
+            
+            h1, w1 = b1[1]-b1[0]+1, b1[3]-b1[2]+1
+            h2, w2 = b2[1]-b2[0]+1, b2[3]-b2[2]+1
+            
+            if h1 != h2 or w1 != w2:
+                return None
+            
+            # Create overlay
+            result = [[bg_val]*w1 for _ in range(h1)]
+            for r, c, v in objs[0]:
+                result[r-b1[0]][c-b1[2]] = v
+            for r, c, v in objs[1]:
+                rr, cc = r-b2[0], c-b2[2]
+                if result[rr][cc] == bg_val:
+                    result[rr][cc] = v
+            return result
+        
+        if all(overlay(ex["input"], bg) == ex["output"] for ex in train):
+            return overlay(test_input, bg)
+        
+        return None
