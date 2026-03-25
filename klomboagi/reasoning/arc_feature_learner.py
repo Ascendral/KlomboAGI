@@ -11,6 +11,10 @@ The operator is INVENTED by the system, not programmed by a human.
 
 from __future__ import annotations
 from collections import Counter
+from klomboagi.reasoning.arc_objects import ObjectDetector
+
+_detector = ObjectDetector()
+_obj_cache: dict = {}
 
 Grid = list[list[int]]
 
@@ -218,6 +222,41 @@ def extract_val_dist_same(grid: Grid, r: int, c: int, bg: int) -> tuple:
                 if d < min_d: min_d = d
     return (val, min(min_d, 10))
 
+
+
+def _get_objs(grid: Grid, bg: int):
+    """Cached object detection."""
+    gt = id(grid)  # Use id for speed
+    if gt not in _obj_cache:
+        _obj_cache[gt] = _detector.detect(grid, bg)
+    return _obj_cache[gt]
+
+
+def extract_val_obj_size(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + size of containing object."""
+    objs = _get_objs(grid, bg)
+    for obj in objs:
+        if (r,c) in set(obj.cells):
+            return (grid[r][c], obj.size)
+    return (grid[r][c], 0)
+
+
+def extract_val_obj_smallest(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + is this the smallest object?"""
+    objs = _get_objs(grid, bg)
+    if not objs: return (grid[r][c], False)
+    min_size = min(o.size for o in objs)
+    for obj in objs:
+        if (r,c) in set(obj.cells):
+            return (grid[r][c], obj.size == min_size)
+    return (grid[r][c], False)
+
+
+def extract_val_num_objects(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + total number of objects in grid."""
+    objs = _get_objs(grid, bg)
+    return (grid[r][c], len(objs))
+
 FEATURE_EXTRACTORS = [
     ("v1_basic", extract_features_v1),
     ("v2_8neighbors", extract_features_v2),
@@ -238,6 +277,9 @@ FEATURE_EXTRACTORS = [
     ("v17_mirror_h", extract_val_mirror_h),
     ("v18_mirror_v", extract_val_mirror_v),
     ("v19_dist_same", extract_val_dist_same),
+    ("v20_obj_size", extract_val_obj_size),
+    ("v21_obj_smallest", extract_val_obj_smallest),
+    ("v22_num_objects", extract_val_num_objects),
 ]
 
 
@@ -248,6 +290,7 @@ class FeatureLearner:
     """
 
     def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        _obj_cache.clear()
         """Try to learn a feature-based rule from training examples."""
         # Same size required
         for ex in train:
