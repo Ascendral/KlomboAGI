@@ -4555,3 +4555,68 @@ class ARCSolverV17(ARCSolverV16):
         if all(rm(ex["input"])==ex["output"] for ex in train):
             return rm(test_input)
         return None
+
+
+class ARCSolverV18(ARCSolverV17):
+    """V18: tiled mirrors, subgrid extraction, wrap shift."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v18 = [
+            self._try_tile_mirror_2x2,
+            self._try_fixed_subgrid,
+        ]
+        for s in v18:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_tile_mirror_2x2(self, train, test_input):
+        """Tile input 2x2 with mirror variants."""
+        for ex in train:
+            if len(ex["output"]) != len(ex["input"])*2: return None
+            if len(ex["output"][0]) != len(ex["input"][0])*2: return None
+        
+        def tile_m(grid):
+            h = [row[::-1] for row in grid]
+            v = grid[::-1]
+            r = [row[::-1] for row in grid[::-1]]
+            top = [grid[i]+h[i] for i in range(len(grid))]
+            bot = [v[i]+r[i] for i in range(len(grid))]
+            return top+bot
+        
+        def tile_s(grid):
+            return [row+row for row in grid]+[row+row for row in grid]
+        
+        def tile_h(grid):
+            return [row+row[::-1] for row in grid]+[row+row[::-1] for row in grid]
+        
+        def tile_v(grid):
+            return [row+row for row in grid]+[row+row for row in grid[::-1]]
+        
+        for fn in [tile_m, tile_s, tile_h, tile_v]:
+            if all(fn(ex["input"])==ex["output"] for ex in train):
+                return fn(test_input)
+        return None
+
+    def _try_fixed_subgrid(self, train, test_input):
+        """Output is a subgrid at a fixed position."""
+        or_ = len(train[0]["output"])
+        oc = len(train[0]["output"][0])
+        ir = len(train[0]["input"])
+        ic = len(train[0]["input"][0])
+        
+        if or_ >= ir or oc >= ic: return None
+        
+        for sr in range(ir-or_+1):
+            for sc in range(ic-oc+1):
+                if all([row[sc:sc+oc] for row in ex["input"][sr:sr+or_]]==ex["output"] for ex in train):
+                    return [row[sc:sc+oc] for row in test_input[sr:sr+or_]]
+        return None
