@@ -66,11 +66,63 @@ def extract_features_v4(grid: Grid, r: int, c: int, bg: int) -> tuple:
     return (val, val == bg, n_nonbg, min(border_dist, 5))
 
 
+
+
+def extract_compact_features(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Compact: value + abstract neighbor summary."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    n_same = 0; n_bg = 0; n_other = 0
+    for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+        nr, nc = r+dr, c+dc
+        if 0<=nr<rows and 0<=nc<cols:
+            nv = grid[nr][nc]
+            if nv == val: n_same += 1
+            elif nv == bg: n_bg += 1
+            else: n_other += 1
+        else:
+            n_bg += 1
+    return (val, n_same, n_bg, n_other)
+
+
+def extract_directional(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + first non-bg color in each cardinal direction."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    def first_nonbg(dr, dc):
+        cr, cc = r+dr, c+dc
+        while 0<=cr<rows and 0<=cc<cols:
+            if grid[cr][cc] != bg: return grid[cr][cc]
+            cr += dr; cc += dc
+        return -1
+    return (val, first_nonbg(-1,0), first_nonbg(1,0), first_nonbg(0,-1), first_nonbg(0,1))
+
+
+def extract_mega_features(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Kitchen sink: value + all cardinal + 8-neighbor count + border dist."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    def g(dr, dc):
+        nr, nc = r+dr, c+dc
+        return grid[nr][nc] if 0<=nr<rows and 0<=nc<cols else -1
+    n = g(-1,0), g(1,0), g(0,-1), g(0,1)
+    n8_nonbg = 0
+    for dr in [-1,0,1]:
+        for dc in [-1,0,1]:
+            if dr==0 and dc==0: continue
+            v = g(dr, dc)
+            if v != bg and v != -1: n8_nonbg += 1
+    bd = min(r, c, rows-1-r, cols-1-c)
+    return (val, n[0], n[1], n[2], n[3], n8_nonbg, min(bd,3), val==bg)
+
 FEATURE_EXTRACTORS = [
     ("v1_basic", extract_features_v1),
     ("v2_8neighbors", extract_features_v2),
     ("v3_cardinal_pos", extract_features_v3),
     ("v4_border_dist", extract_features_v4),
+    ("v5_compact", extract_compact_features),
+    ("v6_directional", extract_directional),
+    ("v7_mega", extract_mega_features),
 ]
 
 
