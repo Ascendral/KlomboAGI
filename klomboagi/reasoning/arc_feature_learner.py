@@ -142,6 +142,56 @@ def extract_cross_2(grid: Grid, r: int, c: int, bg: int) -> tuple:
         return grid[nr][nc] if 0<=nr<rows and 0<=nc<cols else -1
     return (val, g(-2,0), g(2,0), g(0,-2), g(0,2))
 
+
+
+# ── Auto-discovered feature extractors ──
+
+def extract_val_n4(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + cardinal non-bg neighbor count. Discovered: +5 puzzles."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    n = sum(1 for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]
+            if 0<=r+dr<rows and 0<=c+dc<cols and grid[r+dr][c+dc]!=bg)
+    return (val, n)
+
+
+def extract_val_n8(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + 8-neighbor non-bg count."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    n = sum(1 for dr in [-1,0,1] for dc in [-1,0,1]
+            if (dr or dc) and 0<=r+dr<rows and 0<=c+dc<cols and grid[r+dr][c+dc]!=bg)
+    return (val, n)
+
+
+def extract_val_cmod3(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + column modulo 3. Discovers column-periodic patterns."""
+    return (grid[r][c], c % 3)
+
+
+def extract_val_north(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + cell directly above."""
+    return (grid[r][c], grid[r-1][c] if r > 0 else -1)
+
+
+def extract_val_n4_n8(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + cardinal count + 8-neighbor count."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    n4 = sum(1 for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]
+             if 0<=r+dr<rows and 0<=c+dc<cols and grid[r+dr][c+dc]!=bg)
+    n8 = sum(1 for dr in [-1,0,1] for dc in [-1,0,1]
+             if (dr or dc) and 0<=r+dr<rows and 0<=c+dc<cols and grid[r+dr][c+dc]!=bg)
+    return (val, n4, n8)
+
+
+def extract_val_west_east(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + west neighbor + east neighbor."""
+    cols = len(grid[0])
+    return (grid[r][c],
+            grid[r][c-1] if c > 0 else -1,
+            grid[r][c+1] if c < cols-1 else -1)
+
 FEATURE_EXTRACTORS = [
     ("v1_basic", extract_features_v1),
     ("v2_8neighbors", extract_features_v2),
@@ -153,6 +203,12 @@ FEATURE_EXTRACTORS = [
     ("v8_row_col_pos", extract_row_col_position),
     ("v9_val_col", extract_val_and_col),
     ("v10_cross2", extract_cross_2),
+    ("v11_val_n4", extract_val_n4),
+    ("v12_val_n8", extract_val_n8),
+    ("v13_val_cmod3", extract_val_cmod3),
+    ("v14_val_north", extract_val_north),
+    ("v15_val_n4_n8", extract_val_n4_n8),
+    ("v16_val_west_east", extract_val_west_east),
 ]
 
 
