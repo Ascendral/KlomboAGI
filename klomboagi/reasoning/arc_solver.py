@@ -4302,3 +4302,133 @@ class ARCSolverV15(ARCSolverV14):
         
         remap = dict(zip(in_ranked, remap_template))
         return [[remap.get(c, c) for c in row] for row in test_input]
+
+
+class ARCSolverV16(ARCSolverV15):
+    """V16: downsampling, histogram, non-bg filtering."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v16 = [
+            self._try_downsample,
+            self._try_color_histogram,
+            self._try_non_bg_rows,
+            self._try_non_bg_cols,
+            self._try_every_nth_row,
+        ]
+        for s in v16:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_downsample(self, train, test_input):
+        """Downsample grid by factor N (majority or top-left per block)."""
+        from collections import Counter
+        for ex in train:
+            ir,ic = len(ex["input"]),len(ex["input"][0])
+            or_,oc = len(ex["output"]),len(ex["output"][0])
+            if ir <= or_ or ic <= oc: return None
+            if ir % or_ != 0 or ic % oc != 0: return None
+        
+        fr = len(train[0]["input"]) // len(train[0]["output"])
+        fc = len(train[0]["input"][0]) // len(train[0]["output"][0])
+        
+        def ds_majority(grid):
+            R,C=len(grid),len(grid[0]); result=[]
+            for br in range(0,R,fr):
+                row=[]
+                for bc in range(0,C,fc):
+                    vals=[grid[br+dr][bc+dc] for dr in range(min(fr,R-br)) for dc in range(min(fc,C-bc))]
+                    row.append(Counter(vals).most_common(1)[0][0])
+                result.append(row)
+            return result
+        
+        def ds_topleft(grid):
+            R,C=len(grid),len(grid[0])
+            return [[grid[br][bc] for bc in range(0,C,fc)] for br in range(0,R,fr)]
+        
+        for fn in [ds_majority, ds_topleft]:
+            if all(fn(ex["input"])==ex["output"] for ex in train):
+                return fn(test_input)
+        return None
+
+    def _try_color_histogram(self, train, test_input):
+        """Output = color histogram as rows."""
+        from collections import Counter
+        av=[]
+        for ex in train:
+            for row in ex["input"]: av.extend(row)
+        bg = Counter(av).most_common(1)[0][0]
+        
+        def histogram(grid, bg_val):
+            counts = Counter()
+            for row in grid:
+                for c in row:
+                    if c != bg_val: counts[c] += 1
+            if not counts: return None
+            result = []
+            for color, count in sorted(counts.items()):
+                result.append([color]*count)
+            max_len = max(len(r) for r in result) if result else 0
+            return [r + [bg_val]*(max_len-len(r)) for r in result]
+        
+        if all(histogram(ex["input"], bg)==ex["output"] for ex in train):
+            return histogram(test_input, bg)
+        return None
+
+    def _try_non_bg_rows(self, train, test_input):
+        """Keep only rows containing non-bg cells."""
+        from collections import Counter
+        av=[]
+        for ex in train:
+            for row in ex["input"]: av.extend(row)
+        bg = Counter(av).most_common(1)[0][0]
+        
+        for ex in train:
+            if len(ex["input"][0]) != len(ex["output"][0]): return None
+        
+        def non_bg(grid, bg_val):
+            return [row for row in grid if any(c != bg_val for c in row)]
+        
+        if all(non_bg(ex["input"], bg)==ex["output"] for ex in train):
+            return non_bg(test_input, bg)
+        return None
+
+    def _try_non_bg_cols(self, train, test_input):
+        """Keep only columns containing non-bg cells."""
+        from collections import Counter
+        av=[]
+        for ex in train:
+            for row in ex["input"]: av.extend(row)
+        bg = Counter(av).most_common(1)[0][0]
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]): return None
+        
+        def non_bg(grid, bg_val):
+            if not grid: return grid
+            C=len(grid[0])
+            keep=[c for c in range(C) if any(grid[r][c]!=bg_val for r in range(len(grid)))]
+            return [[grid[r][c] for c in keep] for r in range(len(grid))]
+        
+        if all(non_bg(ex["input"], bg)==ex["output"] for ex in train):
+            return non_bg(test_input, bg)
+        return None
+
+    def _try_every_nth_row(self, train, test_input):
+        """Keep every Nth row."""
+        for ex in train:
+            if len(ex["input"][0]) != len(ex["output"][0]): return None
+        
+        for step in [2, 3, 4, 5]:
+            if all(ex["input"][::step]==ex["output"] for ex in train):
+                result = test_input[::step]
+                return result if result else None
+        return None
