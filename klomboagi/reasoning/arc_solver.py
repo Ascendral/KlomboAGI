@@ -2415,3 +2415,529 @@ class ARCSolverV8(ARCSolverV7):
         if all(fill_rects(ex["input"], bg) == ex["output"] for ex in train):
             return fill_rects(test_input, bg)
         return None
+
+
+class ARCSolverV9(ARCSolverV8):
+    """V9: smarter object detection, pattern matching, grid operations."""
+
+    def solve(self, train: list[dict], test_input: Grid) -> Grid | None:
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        v9 = [
+            self._try_recolor_by_count,
+            self._try_most_common_output,
+            self._try_xor_grids,
+            self._try_and_grids,
+            self._try_or_grids,
+            self._try_halve_grid,
+            self._try_quarter_grid,
+            self._try_input_contains_output,
+            self._try_output_constant,
+            self._try_line_extension,
+            self._try_color_histogram,
+            self._try_smallest_object,
+            self._try_count_objects,
+            self._try_per_object_extract,
+        ]
+        for s in v9:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_recolor_by_count(self, train, test_input):
+        """Recolor cells: most frequent non-bg → color A, second → color B, etc."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # For each example, rank non-bg colors by frequency
+        def recolor(grid, bg_val, rank_map):
+            counts = Counter()
+            for row in grid:
+                for c in row:
+                    if c != bg_val:
+                        counts[c] += 1
+            ranked = [c for c, _ in counts.most_common()]
+            cmap = {}
+            for i, c in enumerate(ranked):
+                if i < len(rank_map):
+                    cmap[c] = rank_map[i]
+                else:
+                    cmap[c] = c
+            return [[cmap.get(c, c) if c != bg_val else bg_val for c in row] for row in grid]
+        
+        # Discover rank_map from first example
+        ex = train[0]
+        inp_counts = Counter()
+        for row in ex["input"]:
+            for c in row:
+                if c != bg:
+                    inp_counts[c] += 1
+        inp_ranked = [c for c, _ in inp_counts.most_common()]
+        
+        out_counts = Counter()
+        for row in ex["output"]:
+            for c in row:
+                if c != bg:
+                    out_counts[c] += 1
+        out_ranked = [c for c, _ in out_counts.most_common()]
+        
+        if len(inp_ranked) != len(out_ranked):
+            return None
+        
+        rank_map = out_ranked
+        
+        if all(recolor(e["input"], bg, rank_map) == e["output"] for e in train):
+            return recolor(test_input, bg, rank_map)
+        return None
+
+    def _try_most_common_output(self, train, test_input):
+        """Output is always the same grid regardless of input."""
+        if len(train) < 2:
+            return None
+        outputs = [str(ex["output"]) for ex in train]
+        if len(set(outputs)) == 1:
+            return train[0]["output"]
+        return None
+
+    def _try_xor_grids(self, train, test_input):
+        """Output = XOR of two halves of the input (top/bottom or left/right)."""
+        for ex in train:
+            rows = len(ex["input"])
+            if rows % 2 != 0:
+                return None
+            half = rows // 2
+            out_rows = len(ex["output"])
+            if out_rows != half:
+                return None
+        
+        # Try top XOR bottom (where XOR means: if different, use non-bg; if same, use bg)
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def xor_halves(grid, bg_val):
+            rows = len(grid)
+            half = rows // 2
+            cols = len(grid[0])
+            result = []
+            for r in range(half):
+                row = []
+                for c in range(cols):
+                    a, b = grid[r][c], grid[r+half][c]
+                    if a != b:
+                        row.append(a if a != bg_val else b)
+                    else:
+                        row.append(bg_val)
+                result.append(row)
+            return result
+        
+        if all(xor_halves(ex["input"], bg) == ex["output"] for ex in train):
+            return xor_halves(test_input, bg)
+        return None
+
+    def _try_and_grids(self, train, test_input):
+        """Output = AND of two halves (keep only where both halves have non-bg)."""
+        for ex in train:
+            rows = len(ex["input"])
+            if rows % 2 != 0:
+                return None
+            if len(ex["output"]) != rows // 2:
+                return None
+        
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def and_halves(grid, bg_val):
+            rows = len(grid)
+            half = rows // 2
+            cols = len(grid[0])
+            result = []
+            for r in range(half):
+                row = []
+                for c in range(cols):
+                    a, b = grid[r][c], grid[r+half][c]
+                    if a != bg_val and b != bg_val:
+                        row.append(a)
+                    else:
+                        row.append(bg_val)
+                result.append(row)
+            return result
+        
+        if all(and_halves(ex["input"], bg) == ex["output"] for ex in train):
+            return and_halves(test_input, bg)
+        
+        # Try left/right halves
+        for ex in train:
+            cols = len(ex["input"][0])
+            if cols % 2 != 0:
+                return None
+            if len(ex["output"][0]) != cols // 2:
+                return None
+        
+        def and_halves_lr(grid, bg_val):
+            rows = len(grid)
+            cols = len(grid[0])
+            half = cols // 2
+            result = []
+            for r in range(rows):
+                row = []
+                for c in range(half):
+                    a, b = grid[r][c], grid[r][c+half]
+                    if a != bg_val and b != bg_val:
+                        row.append(a)
+                    else:
+                        row.append(bg_val)
+                result.append(row)
+            return result
+        
+        if all(and_halves_lr(ex["input"], bg) == ex["output"] for ex in train):
+            return and_halves_lr(test_input, bg)
+        
+        return None
+
+    def _try_or_grids(self, train, test_input):
+        """Output = OR of two halves (keep non-bg from either half)."""
+        for ex in train:
+            rows = len(ex["input"])
+            if rows % 2 != 0:
+                return None
+            if len(ex["output"]) != rows // 2:
+                return None
+        
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def or_halves(grid, bg_val):
+            rows = len(grid)
+            half = rows // 2
+            cols = len(grid[0])
+            result = []
+            for r in range(half):
+                row = []
+                for c in range(cols):
+                    a, b = grid[r][c], grid[r+half][c]
+                    if a != bg_val:
+                        row.append(a)
+                    elif b != bg_val:
+                        row.append(b)
+                    else:
+                        row.append(bg_val)
+                result.append(row)
+            return result
+        
+        if all(or_halves(ex["input"], bg) == ex["output"] for ex in train):
+            return or_halves(test_input, bg)
+        
+        # Left/right
+        for ex in train:
+            cols = len(ex["input"][0])
+            if cols % 2 != 0:
+                return None
+            if len(ex["output"][0]) != cols // 2:
+                return None
+        
+        def or_halves_lr(grid, bg_val):
+            rows = len(grid)
+            cols = len(grid[0])
+            half = cols // 2
+            result = []
+            for r in range(rows):
+                row = []
+                for c in range(half):
+                    a, b = grid[r][c], grid[r][c+half]
+                    if a != bg_val:
+                        row.append(a)
+                    elif b != bg_val:
+                        row.append(b)
+                    else:
+                        row.append(bg_val)
+                result.append(row)
+            return result
+        
+        if all(or_halves_lr(ex["input"], bg) == ex["output"] for ex in train):
+            return or_halves_lr(test_input, bg)
+        
+        return None
+
+    def _try_halve_grid(self, train, test_input):
+        """Output is one half of the input."""
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            # Top half
+            if or_ == ir // 2 and oc == ic:
+                pass
+            # Bottom half
+            elif or_ == ir // 2 and oc == ic:
+                pass
+            # Left half
+            elif or_ == ir and oc == ic // 2:
+                pass
+            else:
+                return None
+        
+        # Try each half
+        def top_half(g):
+            return g[:len(g)//2]
+        def bottom_half(g):
+            return g[len(g)//2:]
+        def left_half(g):
+            return [row[:len(row)//2] for row in g]
+        def right_half(g):
+            return [row[len(row)//2:] for row in g]
+        
+        for fn in [top_half, bottom_half, left_half, right_half]:
+            try:
+                if all(fn(ex["input"]) == ex["output"] for ex in train):
+                    return fn(test_input)
+            except:
+                continue
+        return None
+
+    def _try_quarter_grid(self, train, test_input):
+        """Output is one quarter of the input."""
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ != ir // 2 or oc != ic // 2:
+                return None
+        
+        def tl(g):
+            hr, hc = len(g)//2, len(g[0])//2
+            return [row[:hc] for row in g[:hr]]
+        def tr(g):
+            hr, hc = len(g)//2, len(g[0])//2
+            return [row[hc:] for row in g[:hr]]
+        def bl(g):
+            hr, hc = len(g)//2, len(g[0])//2
+            return [row[:hc] for row in g[hr:]]
+        def br(g):
+            hr, hc = len(g)//2, len(g[0])//2
+            return [row[hc:] for row in g[hr:]]
+        
+        for fn in [tl, tr, bl, br]:
+            if all(fn(ex["input"]) == ex["output"] for ex in train):
+                return fn(test_input)
+        return None
+
+    def _try_input_contains_output(self, train, test_input):
+        """Output is a specific sub-rectangle of input found by marker."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find unique color that appears exactly once per example (marker)
+        for ex in train:
+            colors = Counter()
+            for row in ex["input"]:
+                colors.update(row)
+            markers = [c for c, cnt in colors.items() if cnt == 1 and c != bg]
+            if not markers:
+                return None
+        return None  # Complex — skip for now
+
+    def _try_output_constant(self, train, test_input):
+        """Output is a constant grid (all same value)."""
+        from collections import Counter
+        
+        for ex in train:
+            vals = set()
+            for row in ex["output"]:
+                vals.update(row)
+            if len(vals) != 1:
+                return None
+        
+        # All outputs are single-color. What color?
+        # Check if it's the most common non-bg input color
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def get_output_color(ex):
+            return ex["output"][0][0]
+        
+        def get_most_common_nonbg(grid, bg_val):
+            c = Counter()
+            for row in grid:
+                for v in row:
+                    if v != bg_val:
+                        c[v] += 1
+            return c.most_common(1)[0][0] if c else bg_val
+        
+        if all(get_output_color(ex) == get_most_common_nonbg(ex["input"], bg) for ex in train):
+            color = get_most_common_nonbg(test_input, bg)
+            or_, oc = len(train[0]["output"]), len(train[0]["output"][0])
+            return [[color]*oc for _ in range(or_)]
+        
+        return None
+
+    def _try_line_extension(self, train, test_input):
+        """Extend lines to the edge of the grid."""
+        from collections import Counter
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def extend_lines(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            # Extend horizontal lines
+            for r in range(rows):
+                non_bg = [(c, grid[r][c]) for c in range(cols) if grid[r][c] != bg_val]
+                if len(non_bg) >= 2:
+                    color = non_bg[0][1]
+                    if all(v == color for _, v in non_bg):
+                        min_c = min(c for c, _ in non_bg)
+                        max_c = max(c for c, _ in non_bg)
+                        for c in range(cols):
+                            if result[r][c] == bg_val:
+                                result[r][c] = color
+            # Extend vertical lines
+            for c in range(cols):
+                non_bg = [(r, grid[r][c]) for r in range(rows) if grid[r][c] != bg_val]
+                if len(non_bg) >= 2:
+                    color = non_bg[0][1]
+                    if all(v == color for _, v in non_bg):
+                        for r in range(rows):
+                            if result[r][c] == bg_val:
+                                result[r][c] = color
+            return result
+        
+        if all(extend_lines(ex["input"], bg) == ex["output"] for ex in train):
+            return extend_lines(test_input, bg)
+        return None
+
+    def _try_color_histogram(self, train, test_input):
+        """Output encodes the color distribution of input."""
+        return None  # Complex
+
+    def _try_smallest_object(self, train, test_input):
+        """Extract the smallest connected component."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def find_objects(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            objects = []
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        obj = []
+                        color = grid[r][c]
+                        queue = [(r,c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc] or grid[cr][cc] != color:
+                                continue
+                            visited[cr][cc] = True
+                            obj.append((cr,cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr,nc))
+                        objects.append((color, obj))
+            return objects
+        
+        def extract(grid, cells):
+            min_r = min(r for r,c in cells)
+            max_r = max(r for r,c in cells)
+            min_c = min(c for r,c in cells)
+            max_c = max(c for r,c in cells)
+            s = set(cells)
+            return [[grid[r][c] if (r,c) in s else 0 for c in range(min_c,max_c+1)] for r in range(min_r,max_r+1)]
+        
+        for ex in train:
+            objs = find_objects(ex["input"], bg)
+            if not objs:
+                return None
+            smallest = min(objs, key=lambda o: len(o[1]))
+            if extract(ex["input"], smallest[1]) != ex["output"]:
+                return None
+        
+        objs = find_objects(test_input, bg)
+        if not objs:
+            return None
+        smallest = min(objs, key=lambda o: len(o[1]))
+        return extract(test_input, smallest[1])
+
+    def _try_count_objects(self, train, test_input):
+        """Output is 1x1 grid with count of objects."""
+        from collections import Counter
+        all_v = []
+        for ex in train:
+            for row in ex["input"]:
+                all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def count_objs(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            count = 0
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] != bg_val:
+                        count += 1
+                        queue = [(r,c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc]:
+                                continue
+                            visited[cr][cc] = True
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] != bg_val:
+                                    queue.append((nr,nc))
+            return count
+        
+        for ex in train:
+            if len(ex["output"]) != 1 or len(ex["output"][0]) != 1:
+                return None
+            if ex["output"][0][0] != count_objs(ex["input"], bg):
+                return None
+        
+        return [[count_objs(test_input, bg)]]
+
+    def _try_per_object_extract(self, train, test_input):
+        """Each object in input produces one row/column in output."""
+        return None  # Complex
