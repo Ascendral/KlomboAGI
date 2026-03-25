@@ -192,6 +192,32 @@ def extract_val_west_east(grid: Grid, r: int, c: int, bg: int) -> tuple:
             grid[r][c-1] if c > 0 else -1,
             grid[r][c+1] if c < cols-1 else -1)
 
+
+
+def extract_val_mirror_h(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + horizontally mirrored cell value. Discovers symmetry rules."""
+    cols = len(grid[0])
+    return (grid[r][c], grid[r][cols-1-c])
+
+
+def extract_val_mirror_v(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + vertically mirrored cell value."""
+    rows = len(grid)
+    return (grid[r][c], grid[rows-1-r][c])
+
+
+def extract_val_dist_same(grid: Grid, r: int, c: int, bg: int) -> tuple:
+    """Value + min distance to another cell of same color."""
+    rows, cols = len(grid), len(grid[0])
+    val = grid[r][c]
+    min_d = rows + cols
+    for r2 in range(rows):
+        for c2 in range(cols):
+            if (r2 != r or c2 != c) and grid[r2][c2] == val:
+                d = abs(r-r2) + abs(c-c2)
+                if d < min_d: min_d = d
+    return (val, min(min_d, 10))
+
 FEATURE_EXTRACTORS = [
     ("v1_basic", extract_features_v1),
     ("v2_8neighbors", extract_features_v2),
@@ -209,6 +235,9 @@ FEATURE_EXTRACTORS = [
     ("v14_val_north", extract_val_north),
     ("v15_val_n4_n8", extract_val_n4_n8),
     ("v16_val_west_east", extract_val_west_east),
+    ("v17_mirror_h", extract_val_mirror_h),
+    ("v18_mirror_v", extract_val_mirror_v),
+    ("v19_dist_same", extract_val_dist_same),
 ]
 
 
