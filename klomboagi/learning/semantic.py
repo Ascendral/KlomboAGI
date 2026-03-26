@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from klomboagi.brain_core import retrieve_memory
 from klomboagi.storage.manager import StorageManager
 from klomboagi.utils.ids import new_id
 from klomboagi.utils.time import utc_now
@@ -57,15 +58,10 @@ class SemanticMemory:
         return entry
 
     def retrieve(self, query: str, limit: int = 3) -> list[str]:
-        query_tags = set(self._extract_tags(query))
-        scored = []
-        for entry in self.load_all():
-            tags = set(entry.get("tags", []))
-            overlap = len(query_tags.intersection(tags))
-            if overlap:
-                scored.append((overlap, float(entry.get("confidence", 0.0)), entry["statement"]))
-        scored.sort(reverse=True)
-        return [statement for _, _, statement in scored[:limit]]
+        entries = self.load_all()
+        statements = [str(entry["statement"]) for entry in entries]
+        ranked = retrieve_memory(query, statements, limit=limit)
+        return [statement for statement, _score in ranked]
 
     def _find_statement(self, statement: str) -> dict[str, object] | None:
         for entry in self.load_all():

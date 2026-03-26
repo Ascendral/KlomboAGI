@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from klomboagi.brain_core import retrieve_memory
 from klomboagi.core.state import Procedure
 from klomboagi.storage.manager import StorageManager
 from klomboagi.utils.time import utc_now
@@ -60,13 +61,23 @@ class MemoryConsolidator:
         return procedure.to_dict()
 
     def retrieve(self, mission_description: str) -> list[str]:
-        words = {word.lower() for word in mission_description.split() if len(word) > 3}
+        procedures = self.load_all()
+        memory_texts = [
+            self._memory_text(procedure)
+            for procedure in procedures
+        ]
+        ranked = retrieve_memory(mission_description, memory_texts, limit=3)
         matches = []
-        for procedure in self.load_all():
-            haystack = f"{procedure['title']} {procedure['trigger']}".lower()
-            if any(word in haystack for word in words):
-                matches.append(f"{procedure['title']}: {procedure['steps'][1]}")
-        return matches[:3]
+        for memory_text, _score in ranked:
+            procedure = next(
+                (item for item in procedures if self._memory_text(item) == memory_text),
+                None,
+            )
+            if procedure is None:
+                continue
+            step = procedure["steps"][1] if len(procedure.get("steps", [])) > 1 else procedure["steps"][0]
+            matches.append(f"{procedure['title']}: {step}")
+        return matches
 
     def _find_by_trigger(self, trigger: str) -> dict[str, object] | None:
         for procedure in self.load_all():
@@ -82,3 +93,7 @@ class MemoryConsolidator:
     def _derive_title(self, mission_description: str, action_outcome: dict[str, object]) -> str:
         action_type = str(action_outcome["action_type"]).replace("_", " ")
         return f"{action_type.title()} procedure for {mission_description}"
+
+    def _memory_text(self, procedure: dict[str, object]) -> str:
+        steps = " ".join(str(step) for step in procedure.get("steps", []))
+        return f"{procedure['title']} {procedure['trigger']} {steps}".strip()

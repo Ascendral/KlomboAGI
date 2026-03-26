@@ -19,7 +19,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      - name: Build native brain_core module
+        run: python scripts/build_brain_core.py --release --require-native
       - name: Run tests
         run: python -m pytest tests/ -v

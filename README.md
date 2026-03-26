@@ -46,6 +46,13 @@ python3 -m pip install --user .
 python3 -m pytest tests/ -v
 ```
 
+Optional native kernel build:
+
+```bash
+python3 scripts/build_brain_core.py
+python3 scripts/benchmark_brain_core.py
+```
+
 ## Quick Start
 
 ### 1. Configure storage and workspace roots

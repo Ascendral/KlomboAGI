@@ -12,3 +12,10 @@ build/
 .mypy_cache/
 .venv/
 venv/
+brain_core/target/
+datasets/failure_cases/
+datasets/memory_events/
+datasets/nightly/
+datasets/skills/
+datasets/trajectories/
+evals/reports/
