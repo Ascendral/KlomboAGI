@@ -40,3 +40,7 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["klomboagi*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

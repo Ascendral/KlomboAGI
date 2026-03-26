@@ -9,7 +9,7 @@ Configuration via environment variables:
                            OpenAI default: https://api.openai.com/v1
   KLOMBOAGI_LLM_MODEL     — Model name (default: claude-sonnet-4-20250514)
   KLOMBOAGI_LLM_API_KEY   — API key (checks KLOMBOAGI_LLM_API_KEY, then ANTHROPIC_API_KEY, then OPENAI_API_KEY)
-  KLOMBOAGI_LLM_ENABLED   — Set to "1" to enable LLM calls (default: "1")
+  KLOMBOAGI_LLM_ENABLED   — Set to "1" to enable LLM calls (default: "0" — disabled)
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def _base_url() -> str:
 
 
 def _enabled() -> bool:
-    return os.getenv("KLOMBOAGI_LLM_ENABLED", "1") == "1"
+    return os.getenv("KLOMBOAGI_LLM_ENABLED", "0") == "1"
 
 
 def _complete_claude(system_prompt: str, user_prompt: str, temperature: float) -> str:
