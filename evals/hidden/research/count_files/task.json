@@ -1,0 +1,1 @@
+{"id":"research_count_files","domain":"research","description":"Count Python files, test files, and large files from a directory listing","expected":{"python_files":7,"test_files":3,"large_files":2},"scorer":"exact_match"}

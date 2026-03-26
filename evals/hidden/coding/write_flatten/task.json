@@ -1,0 +1,1 @@
+{"id":"coding_write_flatten","domain":"coding","description":"Write flatten(nested_list) that flattens arbitrarily nested lists","scorer":"function_passes_tests"}

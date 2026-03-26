@@ -1,0 +1,1 @@
+{"id":"ops_parse_logs","domain":"ops","description":"Extract unique error types and counts from a log","expected":{"ConnectionTimeout":3,"AuthFailure":1,"DiskFull":1},"scorer":"exact_match"}
