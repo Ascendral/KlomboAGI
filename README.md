@@ -42,9 +42,8 @@ The test suite currently covers:
 Run it locally:
 
 ```bash
-cd klomboagi
 python3 -m pip install --user .
-python3 -m unittest discover -s tests -v
+python3 -m pytest tests/ -v
 ```
 
 ## Quick Start
