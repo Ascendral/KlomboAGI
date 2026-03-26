@@ -1,0 +1,102 @@
+{
+  "skill_id": "skill_writing_extract_dates_1774511677",
+  "name": "Procedure for: Extract all dates from this text in YYYY-MM-DD format",
+  "domain": "writing",
+  "description": "Extract all dates from this text in YYYY-MM-DD format",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Extract all dates from this text in YYYY-MM-DD format"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract all dates from this text in YYYY-MM-DD format"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract action items from this meeting notes text. Return as"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract action items from this meeting notes text. Return as"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract action items from this meeting notes text. Return as"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 4
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract action items from this meeting notes text. Return as"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 4
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "act",
+      "args": {
+        "description": "Extract action items from this meeting notes text. Return as a list of strings."
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract action items from this meeting notes text."
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "writing_extract_dates"
+  ],
+  "created_at": "2026-03-26T00:54:37",
+  "updated_at": "2026-03-26T00:54:37",
+  "reliability": 1.0
+}

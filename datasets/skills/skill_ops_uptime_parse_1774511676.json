@@ -1,0 +1,123 @@
+{
+  "skill_id": "skill_ops_uptime_parse_1774511676",
+  "name": "Procedure for: Parse this uptime output and return days, hours, minutes",
+  "domain": "ops",
+  "description": "Parse this uptime output and return days, hours, minutes",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Parse this uptime output and return days, hours, minutes"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Parse this uptime output and return days, hours, minutes"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Parse this df output and return partitions that are more tha"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Parse this df output and return partitions that are more tha"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 4
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 3
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 2
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "act",
+      "args": {
+        "description": "Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract unique error types and counts from a log"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "ops_uptime_parse"
+  ],
+  "created_at": "2026-03-26T00:54:36",
+  "updated_at": "2026-03-26T00:54:36",
+  "reliability": 1.0
+}

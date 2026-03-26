@@ -114,12 +114,8 @@ class IntegratedAgent:
         error = ""
         
         try:
-            if skill and skill.steps:
-                # Execute using known skill
-                output, success = self._execute_skill(skill, task, traj)
-            else:
-                # Execute from scratch
-                output, success = self._execute_from_scratch(task, traj)
+            # Always use pure reasoning executor — it's the actual brain
+            output, success = self._execute_from_scratch(task, traj)
         except Exception as e:
             error = str(e)
             traj.mark_failure(traj.total_steps - 1, error)

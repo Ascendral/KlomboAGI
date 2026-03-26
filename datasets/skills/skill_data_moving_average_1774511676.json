@@ -1,0 +1,102 @@
+{
+  "skill_id": "skill_data_moving_average_1774511676",
+  "name": "Procedure for: Compute the 3-period moving average of this data",
+  "domain": "data",
+  "description": "Compute the 3-period moving average of this data",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Compute the 3-period moving average of this data"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Compute the 3-period moving average of this data"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Compute the mean, median, and mode of this dataset"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Compute the mean, median, and mode of this dataset"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Compute the mean, median, and mode of this dataset"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 4
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Compute the mean, median, and mode of this dataset"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 4
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "act",
+      "args": {
+        "description": "Compute the mean, median, and mode of this dataset"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Compute the mean, median, and mode of this dataset"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "data_moving_average"
+  ],
+  "created_at": "2026-03-26T00:54:36",
+  "updated_at": "2026-03-26T00:54:36",
+  "reliability": 1.0
+}
