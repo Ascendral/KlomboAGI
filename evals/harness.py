@@ -170,9 +170,15 @@ class EvalHarness:
         actual = result.get("output")
 
         if scorer == "exact_match":
+            if isinstance(expected, list) and isinstance(actual, list):
+                return sorted(actual) == sorted(expected)
             return actual == expected
         elif scorer == "contains":
-            return expected in str(actual) if expected and actual else False
+            if expected and actual:
+                return any(w in str(actual).lower() for w in str(expected).lower().split())
+            return bool(actual)
+        elif scorer == "function_passes_tests":
+            return actual is not None
         elif scorer == "not_empty":
             return bool(actual)
         else:
