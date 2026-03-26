@@ -1,0 +1,14 @@
+{
+  "id": "unseen_extract_numbers",
+  "domain": "research",
+  "description": "Extract all numbers from this text as a list of integers",
+  "inputs": {
+    "text": "I have 3 dogs and 12 cats. My house has 4 rooms."
+  },
+  "expected": [
+    3,
+    12,
+    4
+  ],
+  "scorer": "exact_match"
+}

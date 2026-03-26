@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_ops_parse_logs_1774531795",
+  "name": "Procedure for: Extract unique error types and counts from a log",
+  "domain": "ops",
+  "description": "Extract unique error types and counts from a log",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Extract unique error types and counts from a log"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract unique error types and counts from a log"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "ops_parse_logs"
+  ],
+  "created_at": "2026-03-26T06:29:55",
+  "updated_at": "2026-03-26T06:29:55",
+  "reliability": 1.0
+}

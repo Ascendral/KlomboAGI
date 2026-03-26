@@ -1,0 +1,16 @@
+{
+  "id": "unseen_parse_csv_header",
+  "domain": "ops",
+  "description": "Extract the column names from this CSV header line",
+  "inputs": {
+    "header": "name,age,email,city,country"
+  },
+  "expected": [
+    "name",
+    "age",
+    "email",
+    "city",
+    "country"
+  ],
+  "scorer": "exact_match"
+}

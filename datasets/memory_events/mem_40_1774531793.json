@@ -1,0 +1,15 @@
+{
+  "event_id": "mem_40_1774531793",
+  "timestamp": "2026-03-26T06:29:53",
+  "task_id": "writing_title_case",
+  "phase": "planning",
+  "query": "Convert this text to title case (capitalize first letter of each word except articles/prepositions)",
+  "retrieved": [
+    "Procedure for: Convert this text to title case (capitalize first letter of "
+  ],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "use_skill:skill_writing_title_case_1774511677",
+  "decision_changed": true,
+  "outcome": "success",
+  "outcome_improved": true
+}

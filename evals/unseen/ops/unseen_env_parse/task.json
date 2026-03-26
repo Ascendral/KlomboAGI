@@ -1,0 +1,14 @@
+{
+  "id": "unseen_env_parse",
+  "domain": "ops",
+  "description": "Parse this env file and return key-value pairs",
+  "inputs": {
+    "env": "DB_HOST=localhost\nDB_PORT=5432\nDB_NAME=myapp"
+  },
+  "expected": {
+    "DB_HOST": "localhost",
+    "DB_PORT": "5432",
+    "DB_NAME": "myapp"
+  },
+  "scorer": "exact_match"
+}

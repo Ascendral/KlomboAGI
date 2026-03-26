@@ -1,0 +1,16 @@
+{
+  "id": "unseen_max_difference",
+  "domain": "data",
+  "description": "Find the maximum difference between any two consecutive elements",
+  "inputs": {
+    "data": [
+      1,
+      5,
+      2,
+      8,
+      3
+    ]
+  },
+  "expected": 6,
+  "scorer": "exact_match"
+}

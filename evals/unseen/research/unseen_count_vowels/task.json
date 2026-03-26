@@ -1,0 +1,10 @@
+{
+  "id": "unseen_count_vowels",
+  "domain": "research",
+  "description": "Count the number of vowels in this text",
+  "inputs": {
+    "text": "The quick brown fox jumps over the lazy dog"
+  },
+  "expected": 11,
+  "scorer": "exact_match"
+}

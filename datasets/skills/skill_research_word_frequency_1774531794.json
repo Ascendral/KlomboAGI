@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_research_word_frequency_1774531794",
+  "name": "Procedure for: Find the 3 most common words in this text (case insensitive,",
+  "domain": "research",
+  "description": "Find the 3 most common words in this text (case insensitive, exclude 'the', 'a', 'is', 'in', 'of', 'and', 'to')",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Find the 3 most common words in this text (case insensitive,"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Find the 3 most common words in this text (case insensitive, exclude 'the', 'a', 'is', 'in', 'of', 'and', 'to')"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Find the 3 most common words in this text (case in"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "research_word_frequency"
+  ],
+  "created_at": "2026-03-26T06:29:54",
+  "updated_at": "2026-03-26T06:29:54",
+  "reliability": 1.0
+}

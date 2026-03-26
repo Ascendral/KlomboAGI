@@ -1,0 +1,15 @@
+{
+  "event_id": "mem_10_1774531825",
+  "timestamp": "2026-03-26T06:30:25",
+  "task_id": "unseen_parse_csv_header",
+  "phase": "planning",
+  "query": "Extract the column names from this CSV header line",
+  "retrieved": [
+    "Procedure for: Extract all unique IP addresses from this log"
+  ],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "use_skill:skill_ops_extract_ips_1774511784",
+  "decision_changed": true,
+  "outcome": "failure",
+  "outcome_improved": false
+}

@@ -1,0 +1,10 @@
+{
+  "id": "unseen_count_lines",
+  "domain": "writing",
+  "description": "Count the number of non-empty lines in this text",
+  "inputs": {
+    "text": "Hello\n\nWorld\n\nHow are you?\n\n"
+  },
+  "expected": 3,
+  "scorer": "exact_match"
+}

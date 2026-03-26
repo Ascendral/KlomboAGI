@@ -1,0 +1,22 @@
+{
+  "id": "unseen_cumulative_sum",
+  "domain": "data",
+  "description": "Compute the cumulative sum of this list",
+  "inputs": {
+    "data": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "expected": [
+    1,
+    3,
+    6,
+    10,
+    15
+  ],
+  "scorer": "exact_match"
+}

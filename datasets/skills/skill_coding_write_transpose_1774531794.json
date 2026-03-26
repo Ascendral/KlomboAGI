@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_coding_write_transpose_1774531794",
+  "name": "Procedure for: Write a function transpose(matrix) that transposes a 2D list",
+  "domain": "coding",
+  "description": "Write a function transpose(matrix) that transposes a 2D list",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Write a function transpose(matrix) that transposes a 2D list"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 14
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Write a function transpose(matrix) that transposes a 2D list"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Write a function transpose(matrix) that transposes"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "coding_write_transpose"
+  ],
+  "created_at": "2026-03-26T06:29:54",
+  "updated_at": "2026-03-26T06:29:54",
+  "reliability": 1.0
+}
