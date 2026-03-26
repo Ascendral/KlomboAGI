@@ -1,0 +1,13 @@
+{
+  "pattern_id": "anti_data_find_outliers_1774509593",
+  "description": "Failed during: attempt_solution",
+  "domain": "data",
+  "trigger": "",
+  "failed_action": "attempt_solution",
+  "error_type": "",
+  "frequency": 1,
+  "avoidance": "",
+  "seen_in": [
+    "data_find_outliers"
+  ]
+}
