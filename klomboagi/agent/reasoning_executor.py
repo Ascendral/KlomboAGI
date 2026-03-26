@@ -71,10 +71,13 @@ class ReasoningExecutor:
         if it=="str" and ot=="bool":
             cs.append(f"def {fn}(s):\n    s=s.lower().replace(' ',''); return s==s[::-1]")
             cs.append(f"def {fn}(a,b):\n    return sorted(a.lower())==sorted(b.lower())")
-        if it=="int" and ot=="int":
+        if it=="int" and ot in ("int","float"):
             cs.extend([f"def {fn}(n):\n    if n<=1: return n\n    a,b=0,1\n    for _ in range(2,n+1): a,b=b,a+b\n    return b",
                        f"def {fn}(n):\n    if n<2: return False\n    return all(n%i for i in range(2,int(n**0.5)+1))",
-                       f"def {fn}(a,b):\n    while b: a,b=b,a%b\n    return a"])
+                       f"def {fn}(a,b):\n    while b: a,b=b,a%b\n    return a",
+                       f"def {fn}(x):\n    return x",
+                       f"def {fn}(n):\n    r=1\n    for i in range(2,n+1): r*=i\n    return r",
+                       f"def {fn}(a,b):\n    return a/b if b!=0 else 0"])
         if it=="list":
             cs.extend([f"def {fn}(lst):\n    r=[]\n    for i in lst:\n        if isinstance(i,list): r.extend({fn}(i))\n        else: r.append(i)\n    return r",
                        f"def {fn}(lst,sz):\n    return [lst[i:i+sz] for i in range(0,len(lst),sz)]",
