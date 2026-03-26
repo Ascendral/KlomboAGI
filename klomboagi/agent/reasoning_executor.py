@@ -95,7 +95,7 @@ class ReasoningExecutor:
         data=inputs.get("data",[]); text=inputs.get("text",""); header=inputs.get("header","")
         url=inputs.get("url",""); env=inputs.get("env",""); name=inputs.get("name",""); title=inputs.get("title","")
         attempts=[]
-        if data:
+        if data and isinstance(data, list) and all(isinstance(v,(int,float)) for v in data):
             n=len(data); mean=sum(data)/n; std=(sum((v-mean)**2 for v in data)/n)**0.5
             attempts.extend([round(std,2),round(std,1),[sum(data[:i+1]) for i in range(n)],
                 max(abs(data[i]-data[i-1]) for i in range(1,n)) if n>1 else 0,
