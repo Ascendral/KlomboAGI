@@ -13,7 +13,7 @@ class LineSolver:
         bg = get_bg(train)
         for fn in [self._fill_h, self._fill_v, self._fill_per_color_h, self._fill_per_color_v,
                    self._fill_both, self._voronoi, self._draw_cross, self._draw_diag,
-                   self._connect_pairs_h, self._connect_pairs_v]:
+                   self._connect_pairs_h, self._connect_pairs_v, self._connect_l]:
             try:
                 ir,ic=len(train[0]["input"]),len(train[0]["input"][0])
                 or_,oc=len(train[0]["output"]),len(train[0]["output"][0])
@@ -148,4 +148,21 @@ class LineSolver:
                         for i2 in range(seen[color]+1,i):
                             if r[i2][c]==bg: r[i2][c]=color
                     seen[color]=i
+        return r
+
+    def _connect_l(self, g, bg):
+        """Connect same-color pairs with L-shaped path."""
+        from collections import defaultdict
+        R,C=len(g),len(g[0]); r=[row[:] for row in g]
+        by_color=defaultdict(list)
+        for i in range(R):
+            for j in range(C):
+                if g[i][j]!=bg: by_color[g[i][j]].append((i,j))
+        for color, cells in by_color.items():
+            if len(cells)==2:
+                (r1,c1),(r2,c2)=cells
+                for c in range(min(c1,c2),max(c1,c2)+1):
+                    if r[r1][c]==bg: r[r1][c]=color
+                for i in range(min(r1,r2),max(r1,r2)+1):
+                    if r[i][c2]==bg: r[i][c2]=color
         return r
