@@ -1,0 +1,14 @@
+/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/deps/pyo3_build_config-0371e0422c35c125.d: /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/lib.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/errors.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/impl_.rs /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config-file.txt /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config.txt
+
+/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/deps/libpyo3_build_config-0371e0422c35c125.rlib: /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/lib.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/errors.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/impl_.rs /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config-file.txt /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config.txt
+
+/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/deps/libpyo3_build_config-0371e0422c35c125.rmeta: /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/lib.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/errors.rs /Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/impl_.rs /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config-file.txt /Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config.txt
+
+/Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/lib.rs:
+/Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/errors.rs:
+/Users/zanderone/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pyo3-build-config-0.28.2/src/impl_.rs:
+/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config-file.txt:
+/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out/pyo3-build-config.txt:
+
+# env-dep:CARGO_PKG_VERSION=0.28.2
+# env-dep:OUT_DIR=/Users/zanderone/ClaudeWork/KlomboAGI/brain_core/target/debug/build/pyo3-build-config-4c8a3515cc35c00d/out
