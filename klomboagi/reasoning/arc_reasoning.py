@@ -36,7 +36,7 @@ class ReasoningSolver:
     def solve(self, train, ti):
         for s in [self._remove_smallest, self._keep_largest, self._remove_border,
                   self._keep_border, self._recolor_nearest, self._remove_by_color_count,
-                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows]:
+                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern]:
             try:
                 r = s(train, ti)
                 if r is not None: return r
@@ -220,4 +220,51 @@ class ReasoningSolver:
             return result
         if all(fn(e["input"])==e["output"] for e in train):
             return fn(ti)
+        return None
+
+    def _stamp_pattern(self, train, ti):
+        """Each non-bg color generates a consistent pattern around it."""
+        bg = bg_of(train)
+        for e in train:
+            if len(e["input"])!=len(e["output"]): return None
+        
+        for radius in [1, 2, 3]:
+            patterns={}; ok=True
+            for e in train:
+                inp,out=e["input"],e["output"]
+                R,C=len(inp),len(inp[0])
+                for r in range(R):
+                    for c in range(C):
+                        if inp[r][c]!=bg:
+                            color=inp[r][c]; pat=[]
+                            for dr in range(-radius,radius+1):
+                                for dc in range(-radius,radius+1):
+                                    if dr==0 and dc==0: continue
+                                    nr,nc=r+dr,c+dc
+                                    if 0<=nr<R and 0<=nc<C:
+                                        if inp[nr][nc]==bg and out[nr][nc]!=bg:
+                                            pat.append((dr,dc,out[nr][nc]))
+                            if pat:
+                                pk=tuple(sorted(pat))
+                                if color in patterns:
+                                    if patterns[color]!=pk: ok=False; break
+                                else: patterns[color]=pk
+                    if not ok: break
+                if not ok: break
+            
+            if ok and patterns:
+                def apply_p(g,pats,bg_val):
+                    R,C=len(g),len(g[0]); result=[row[:] for row in g]
+                    for r in range(R):
+                        for c in range(C):
+                            if g[r][c] in pats:
+                                for dr,dc,col in pats[g[r][c]]:
+                                    nr,nc=r+dr,c+dc
+                                    if 0<=nr<R and 0<=nc<C and result[nr][nc]==bg_val:
+                                        result[nr][nc]=col
+                    return result
+                try:
+                    if all(apply_p(e["input"],patterns,bg)==e["output"] for e in train):
+                        return apply_p(ti,patterns,bg)
+                except: pass
         return None
