@@ -58,7 +58,7 @@ class TransformSolver:
         
         # Self-symmetry operations
         if ir==or_ and ic==oc:
-            for fn in [self._xor_rot180, self._or_rot180, self._or_hflip, self._or_vflip]:
+            for fn in [self._xor_rot180, self._or_rot180, self._or_hflip, self._or_vflip, self._shift_by_col, self._shift_by_row]:
                 try:
                     if all(fn(e['input'],bg)==e['output'] for e in train):
                         return fn(ti,bg)
@@ -86,3 +86,17 @@ class TransformSolver:
         R,C=len(g),len(g[0])
         vf=g[::-1]
         return [[g[r][c] if g[r][c]!=bg else vf[r][c] for c in range(C)] for r in range(R)]
+
+    def _shift_by_col(self, g, bg):
+        """Each column cyclically shifted down by its column index."""
+        R,C=len(g),len(g[0]); result=[[0]*C for _ in range(R)]
+        for c in range(C):
+            col=[g[r][c] for r in range(R)]
+            s=c%R
+            shifted=col[s:]+col[:s]
+            for r in range(R): result[r][c]=shifted[r]
+        return result
+
+    def _shift_by_row(self, g, bg):
+        """Each row cyclically shifted right by its row index."""
+        return [row[i%len(row):]+row[:i%len(row)] for i,row in enumerate(g)]
