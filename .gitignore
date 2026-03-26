@@ -12,3 +12,4 @@ build/
 .mypy_cache/
 .venv/
 venv/
+brain_core/target/
