@@ -1,0 +1,10 @@
+{
+  "id": "research_count_unique_words",
+  "domain": "research",
+  "description": "Count the number of unique words in this text (case insensitive)",
+  "inputs": {
+    "text": "the quick brown fox jumps over the lazy dog the fox"
+  },
+  "expected": 8,
+  "scorer": "exact_match"
+}

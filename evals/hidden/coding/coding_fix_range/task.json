@@ -1,0 +1,41 @@
+{
+  "id": "coding_fix_range",
+  "domain": "coding",
+  "description": "Fix the function that should return numbers 1 to n inclusive but misses the last one",
+  "inputs": {
+    "code": "def one_to_n(n):\n    return list(range(1, n))",
+    "test_cases": [
+      {
+        "input": [
+          5
+        ],
+        "expected": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "input": [
+          1
+        ],
+        "expected": [
+          1
+        ]
+      },
+      {
+        "input": [
+          3
+        ],
+        "expected": [
+          1,
+          2,
+          3
+        ]
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

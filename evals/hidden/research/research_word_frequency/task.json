@@ -1,0 +1,14 @@
+{
+  "id": "research_word_frequency",
+  "domain": "research",
+  "description": "Find the 3 most common words in this text (case insensitive, exclude 'the', 'a', 'is', 'in', 'of', 'and', 'to')",
+  "inputs": {
+    "text": "The cat sat on the mat. The cat is a very good cat. A mat is good for a cat to sit on."
+  },
+  "expected": [
+    "cat",
+    "mat",
+    "good"
+  ],
+  "scorer": "exact_match"
+}

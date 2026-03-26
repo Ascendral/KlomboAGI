@@ -1,0 +1,13 @@
+{
+  "id": "ops_disk_usage",
+  "domain": "ops",
+  "description": "Parse this df output and return partitions that are more than 80% full",
+  "inputs": {
+    "df_output": "/dev/sda1 100G 85G 15G 85%\n/dev/sda2 50G 10G 40G 20%\n/dev/sda3 200G 190G 10G 95%\n/tmp 10G 2G 8G 20%"
+  },
+  "expected": [
+    "/dev/sda1",
+    "/dev/sda3"
+  ],
+  "scorer": "exact_match"
+}

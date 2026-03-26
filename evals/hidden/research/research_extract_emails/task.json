@@ -1,0 +1,14 @@
+{
+  "id": "research_extract_emails",
+  "domain": "research",
+  "description": "Extract all email addresses from this text",
+  "inputs": {
+    "text": "Contact john@example.com or jane.doe@company.org for info. Support: help@support.io"
+  },
+  "expected": [
+    "john@example.com",
+    "jane.doe@company.org",
+    "help@support.io"
+  ],
+  "scorer": "exact_match"
+}

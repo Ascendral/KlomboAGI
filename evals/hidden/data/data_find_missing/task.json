@@ -1,0 +1,20 @@
+{
+  "id": "data_find_missing",
+  "domain": "data",
+  "description": "Find the missing number in a sequence from 1 to N",
+  "inputs": {
+    "sequence": [
+      1,
+      2,
+      3,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ]
+  },
+  "expected": 4,
+  "scorer": "exact_match"
+}

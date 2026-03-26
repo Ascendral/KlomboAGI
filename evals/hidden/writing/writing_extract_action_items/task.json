@@ -1,0 +1,14 @@
+{
+  "id": "writing_extract_action_items",
+  "domain": "writing",
+  "description": "Extract action items from this meeting notes text. Return as a list of strings.",
+  "inputs": {
+    "text": "Meeting notes: TODO: Update the database schema. ACTION: John to review PR #42. TASK: Deploy to staging by Friday. Note: Good progress on the frontend."
+  },
+  "expected": [
+    "Update the database schema",
+    "John to review PR #42",
+    "Deploy to staging by Friday"
+  ],
+  "scorer": "exact_match"
+}

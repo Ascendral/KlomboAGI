@@ -1,0 +1,35 @@
+{
+  "id": "coding_fix_index_error",
+  "domain": "coding",
+  "description": "Fix the function that crashes with IndexError on empty lists",
+  "inputs": {
+    "code": "def get_last(lst):\n    return lst[-1]",
+    "test_cases": [
+      {
+        "input": [
+          [
+            1,
+            2,
+            3
+          ]
+        ],
+        "expected": 3
+      },
+      {
+        "input": [
+          []
+        ],
+        "expected": null
+      },
+      {
+        "input": [
+          [
+            "a"
+          ]
+        ],
+        "expected": "a"
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

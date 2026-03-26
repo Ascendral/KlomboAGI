@@ -1,0 +1,34 @@
+{
+  "id": "coding_write_fibonacci",
+  "domain": "coding",
+  "description": "Write a function fibonacci(n) that returns the nth fibonacci number (0-indexed, fib(0)=0, fib(1)=1)",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          0
+        ],
+        "expected": 0
+      },
+      {
+        "input": [
+          1
+        ],
+        "expected": 1
+      },
+      {
+        "input": [
+          10
+        ],
+        "expected": 55
+      },
+      {
+        "input": [
+          20
+        ],
+        "expected": 6765
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}
