@@ -1,0 +1,31 @@
+{
+  "id": "coding_write_anagram",
+  "domain": "coding",
+  "description": "Write a function is_anagram(a,b) that returns True if b is an anagram of a",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          "listen",
+          "silent"
+        ],
+        "expected": true
+      },
+      {
+        "input": [
+          "hello",
+          "world"
+        ],
+        "expected": false
+      },
+      {
+        "input": [
+          "",
+          ""
+        ],
+        "expected": true
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

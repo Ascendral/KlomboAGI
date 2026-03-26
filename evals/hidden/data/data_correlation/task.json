@@ -1,0 +1,23 @@
+{
+  "id": "data_correlation",
+  "domain": "data",
+  "description": "Are these two variables positively correlated, negatively correlated, or uncorrelated? Return 'positive', 'negative', or 'none'",
+  "inputs": {
+    "x": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "y": [
+      2,
+      4,
+      6,
+      8,
+      10
+    ]
+  },
+  "expected": "positive",
+  "scorer": "exact_match"
+}

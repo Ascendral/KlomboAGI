@@ -1,0 +1,34 @@
+{
+  "id": "coding_write_prime_check",
+  "domain": "coding",
+  "description": "Write a function is_prime(n) that returns True if n is prime",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          7
+        ],
+        "expected": true
+      },
+      {
+        "input": [
+          4
+        ],
+        "expected": false
+      },
+      {
+        "input": [
+          1
+        ],
+        "expected": false
+      },
+      {
+        "input": [
+          2
+        ],
+        "expected": true
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

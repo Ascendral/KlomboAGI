@@ -1,0 +1,22 @@
+{
+  "id": "data_moving_average",
+  "domain": "data",
+  "description": "Compute the 3-period moving average of this data",
+  "inputs": {
+    "data": [
+      10,
+      20,
+      30,
+      40,
+      50,
+      60
+    ]
+  },
+  "expected": [
+    20.0,
+    30.0,
+    40.0,
+    50.0
+  ],
+  "scorer": "exact_match"
+}

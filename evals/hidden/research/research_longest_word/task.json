@@ -1,0 +1,10 @@
+{
+  "id": "research_longest_word",
+  "domain": "research",
+  "description": "Find the longest word in this text",
+  "inputs": {
+    "text": "The quick brown fox jumps over the extraordinarily lazy dog"
+  },
+  "expected": "extraordinarily",
+  "scorer": "exact_match"
+}

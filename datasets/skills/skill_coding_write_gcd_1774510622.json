@@ -1,0 +1,165 @@
+{
+  "skill_id": "skill_coding_write_gcd_1774510622",
+  "name": "Procedure for: Write a function gcd(a,b) that returns the greatest common d",
+  "domain": "coding",
+  "description": "Write a function gcd(a,b) that returns the greatest common divisor",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Write a function fibonacci(n) that returns the nth fibonacci"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 14
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function fibonacci(n) that returns the nth fibonacci"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function fibonacci(n) that returns the nth fibonacci"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 11
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function fibonacci(n) that returns the nth fibonacci"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 11
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 11
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 8
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Write a function flatten(nested_list) that flattens arbitrar"
+      }
+    },
+    {
+      "action": "retrieve_skill",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Fix the binary_search function off-by-one error"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "start_skill_execution",
+      "phase": "act",
+      "args": {
+        "skill": "Procedure for: Fix the binary_search function off-by-one error"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "act",
+      "args": {
+        "count": 5
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "act",
+      "args": {
+        "description": "Fix the binary_search function off-by-one error"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Fix the binary_search function off-by-one error"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "coding_write_gcd"
+  ],
+  "created_at": "2026-03-26T00:37:02",
+  "updated_at": "2026-03-26T00:37:02",
+  "reliability": 1.0
+}

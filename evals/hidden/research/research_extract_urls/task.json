@@ -1,0 +1,14 @@
+{
+  "id": "research_extract_urls",
+  "domain": "research",
+  "description": "Extract all URLs from this text",
+  "inputs": {
+    "text": "Visit https://example.com or http://test.org for info. Also check https://api.github.com/repos"
+  },
+  "expected": [
+    "https://example.com",
+    "http://test.org",
+    "https://api.github.com/repos"
+  ],
+  "scorer": "exact_match"
+}

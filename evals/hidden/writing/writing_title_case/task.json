@@ -1,0 +1,10 @@
+{
+  "id": "writing_title_case",
+  "domain": "writing",
+  "description": "Convert this text to title case (capitalize first letter of each word except articles/prepositions)",
+  "inputs": {
+    "text": "the quick brown fox jumps over the lazy dog"
+  },
+  "expected": "The Quick Brown Fox Jumps Over the Lazy Dog",
+  "scorer": "exact_match"
+}
