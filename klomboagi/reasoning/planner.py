@@ -96,16 +96,16 @@ class Planner:
 
         description = str(mission["description"])
         lower = description.lower()
-        if "search" in lower and "repo" in lower:
+        if "search" in lower:
             raw_pattern = self._extract_after(description, "for ") or self._extract_after(description, "search ") or "TODO"
             pattern = self._normalize_search_pattern(raw_pattern)
             return {
                 "description": f"Search workspace for pattern: {pattern}",
                 "action_kind": "search_files",
-                "action_payload": {"path": "repo", "pattern": pattern.strip()},
+                "action_payload": {"path": ".", "pattern": pattern.strip()},
             }
         if "patch" in lower or "replace" in lower:
-            path = self._extract_path(description) or "repo/main.txt"
+            path = self._extract_path(description) or "main.txt"
             old_text = self._extract_between(lower, "replace ", " with") or "old"
             new_text = self._extract_after(description, "with ") or "new"
             return {
@@ -119,7 +119,7 @@ class Planner:
                 },
             }
         if "write" in lower and "file" in lower:
-            path = self._extract_path(description) or "repo/note.txt"
+            path = self._extract_path(description) or "note.txt"
             return {
                 "description": f"Write file {path}",
                 "action_kind": "write_file",
