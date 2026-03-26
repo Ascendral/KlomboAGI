@@ -1,0 +1,13 @@
+{
+  "event_id": "mem_1_1774508998",
+  "timestamp": "2026-03-26T00:09:58",
+  "task_id": "test_1",
+  "phase": "planning",
+  "query": "Fix a bug",
+  "retrieved": [],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "plan_from_scratch",
+  "decision_changed": false,
+  "outcome": "failure",
+  "outcome_improved": false
+}

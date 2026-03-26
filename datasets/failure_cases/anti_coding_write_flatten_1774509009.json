@@ -1,0 +1,13 @@
+{
+  "pattern_id": "anti_coding_write_flatten_1774509009",
+  "description": "Failed during: attempt_solution",
+  "domain": "coding",
+  "trigger": "",
+  "failed_action": "attempt_solution",
+  "error_type": "",
+  "frequency": 1,
+  "avoidance": "",
+  "seen_in": [
+    "coding_write_flatten"
+  ]
+}

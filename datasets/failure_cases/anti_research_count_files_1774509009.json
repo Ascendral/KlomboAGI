@@ -1,0 +1,13 @@
+{
+  "pattern_id": "anti_research_count_files_1774509009",
+  "description": "Failed during: attempt_solution",
+  "domain": "research",
+  "trigger": "",
+  "failed_action": "attempt_solution",
+  "error_type": "",
+  "frequency": 1,
+  "avoidance": "",
+  "seen_in": [
+    "research_count_files"
+  ]
+}
