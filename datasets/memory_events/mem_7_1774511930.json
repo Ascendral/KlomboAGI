@@ -1,0 +1,15 @@
+{
+  "event_id": "mem_7_1774511930",
+  "timestamp": "2026-03-26T00:58:50",
+  "task_id": "train_sort_numbers",
+  "phase": "planning",
+  "query": "Sort this list of numbers in descending order",
+  "retrieved": [
+    "Procedure for: Count occurrences of each category in this list"
+  ],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "use_skill:skill_test_count_categories_1774511930",
+  "decision_changed": true,
+  "outcome": "success",
+  "outcome_improved": true
+}

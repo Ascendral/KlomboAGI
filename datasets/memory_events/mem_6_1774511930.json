@@ -1,0 +1,15 @@
+{
+  "event_id": "mem_6_1774511930",
+  "timestamp": "2026-03-26T00:58:50",
+  "task_id": "test_filter_processes",
+  "phase": "planning",
+  "query": "Filter this list to only processes using more than 50MB memory",
+  "retrieved": [
+    "Procedure for: Filter this list to only words longer than 4 characters"
+  ],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "use_skill:skill_train_filter_words_1774511930",
+  "decision_changed": true,
+  "outcome": "success",
+  "outcome_improved": true
+}

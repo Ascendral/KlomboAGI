@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_train_filter_words_1774511930",
+  "name": "Procedure for: Filter this list to only words longer than 4 characters",
+  "domain": "unknown",
+  "description": "Filter this list to only words longer than 4 characters",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Count occurrences of each category in this list"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 10
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Filter this list to only words longer than 4 characters"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Filter this list to only words longer than 4 chara"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "train_filter_words"
+  ],
+  "created_at": "2026-03-26T00:58:50",
+  "updated_at": "2026-03-26T00:58:50",
+  "reliability": 1.0
+}

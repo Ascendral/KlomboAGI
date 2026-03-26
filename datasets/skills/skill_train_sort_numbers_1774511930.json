@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_train_sort_numbers_1774511930",
+  "name": "Procedure for: Sort this list of numbers in descending order",
+  "domain": "unknown",
+  "description": "Sort this list of numbers in descending order",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Count occurrences of each category in this list"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 10
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Sort this list of numbers in descending order"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Sort this list of numbers in descending order"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "train_sort_numbers"
+  ],
+  "created_at": "2026-03-26T00:58:50",
+  "updated_at": "2026-03-26T00:58:50",
+  "reliability": 1.0
+}

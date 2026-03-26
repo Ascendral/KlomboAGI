@@ -1,0 +1,13 @@
+{
+  "event_id": "mem_2_1774511897",
+  "timestamp": "2026-03-26T00:58:17",
+  "task_id": "test_parse_log_field",
+  "phase": "planning",
+  "query": "Parse this log line and extract the 'level' field",
+  "retrieved": [],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "plan_from_scratch",
+  "decision_changed": false,
+  "outcome": "failure",
+  "outcome_improved": false
+}

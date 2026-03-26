@@ -1,0 +1,15 @@
+{
+  "event_id": "mem_9_1774511930",
+  "timestamp": "2026-03-26T00:58:50",
+  "task_id": "train_unique_ips",
+  "phase": "planning",
+  "query": "Return unique values from this list, preserving order",
+  "retrieved": [
+    "Procedure for: Sort this list of numbers in descending order"
+  ],
+  "decision_before": "plan_from_scratch",
+  "decision_after": "use_skill:skill_train_sort_numbers_1774511930",
+  "decision_changed": true,
+  "outcome": "success",
+  "outcome_improved": true
+}

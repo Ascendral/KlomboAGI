@@ -25,7 +25,7 @@ class PureReasoningExecutor:
                        self._disk_usage, self._parse_cron, self._count_status_codes,
                        self._extract_action_items, self._fix_index_error,
                        self._write_palindrome, self._write_fibonacci, self._fix_range,
-                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs]:
+                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs, self._parse_json_field, self._count_items, self._filter_by_threshold, self._sort_items, self._unique_items]:
             try:
                 output = solver(desc, inputs)
                 if output is not None:
@@ -464,3 +464,68 @@ class PureReasoningExecutor:
         if "paragraph" not in desc: return None
         text = inputs.get("text","")
         return len([p.strip() for p in text.split("\n\n") if p.strip()])
+
+    def _parse_json_field(self, desc, inputs):
+        if "parse" not in desc or "extract" not in desc: return None
+        if "field" not in desc and "name" not in desc and "level" not in desc: return None
+        data = inputs.get("data", "")
+        import json as j
+        try:
+            parsed = j.loads(data)
+            # Find the field mentioned in description
+            for field in ["name", "level", "value", "type", "status"]:
+                if field in desc.lower() and field in parsed:
+                    return parsed[field]
+            # Return first non-trivial field
+            for k, v in parsed.items():
+                if isinstance(v, str) and len(v) < 50:
+                    return v
+        except: pass
+        return None
+
+    def _count_items(self, desc, inputs):
+        if "count" not in desc or ("occurrences" not in desc and "category" not in desc and "character" not in desc):
+            return None
+        text = inputs.get("text", "")
+        items = inputs.get("items", [])
+        if text:
+            return dict(Counter(text))
+        if items:
+            return dict(Counter(items))
+        return None
+
+    def _filter_by_threshold(self, desc, inputs):
+        if "filter" not in desc: return None
+        words = inputs.get("words", [])
+        processes = inputs.get("processes", [])
+        if words and "longer than" in desc:
+            import re
+            m = re.search(r"(\d+)", desc)
+            if m:
+                thresh = int(m.group(1))
+                return [w for w in words if len(w) > thresh]
+        if processes and "more than" in desc:
+            import re
+            m = re.search(r"(\d+)", desc)
+            if m:
+                thresh = int(m.group(1))
+                return [p for p in processes if p.get("mb", 0) > thresh]
+        return None
+
+    def _sort_items(self, desc, inputs):
+        if "sort" not in desc: return None
+        data = inputs.get("data", [])
+        words = inputs.get("words", [])
+        if data and "descending" in desc:
+            return sorted(data, reverse=True)
+        if words and "length" in desc and "longest" in desc:
+            return sorted(words, key=len, reverse=True)
+        return None
+
+    def _unique_items(self, desc, inputs):
+        if "unique" not in desc or "preserving order" not in desc: return None
+        items = inputs.get("items", [])
+        seen = []
+        for item in items:
+            if item not in seen: seen.append(item)
+        return seen

@@ -1,0 +1,232 @@
+[
+  {
+    "id": "transfer_parse_coding_to_ops",
+    "train_domain": "coding",
+    "train_task": {
+      "id": "train_parse_json",
+      "description": "Parse this JSON string and extract the 'name' field",
+      "inputs": {
+        "data": "{\"name\": \"Alice\", \"age\": 30, \"city\": \"NYC\"}"
+      },
+      "expected": "Alice",
+      "scorer": "exact_match"
+    },
+    "test_domain": "ops",
+    "test_task": {
+      "id": "test_parse_log_field",
+      "description": "Parse this log line and extract the 'level' field",
+      "inputs": {
+        "data": "{\"timestamp\": \"2026-03-26\", \"level\": \"ERROR\", \"msg\": \"timeout\"}"
+      },
+      "expected": "ERROR",
+      "scorer": "exact_match"
+    },
+    "transfer_type": "structural",
+    "description": "JSON field extraction transfers from coding to ops"
+  },
+  {
+    "id": "transfer_count_coding_to_data",
+    "train_domain": "coding",
+    "train_task": {
+      "id": "train_count_chars",
+      "description": "Count occurrences of each character in this string",
+      "inputs": {
+        "text": "hello"
+      },
+      "expected": {
+        "h": 1,
+        "e": 1,
+        "l": 2,
+        "o": 1
+      },
+      "scorer": "exact_match"
+    },
+    "test_domain": "data",
+    "test_task": {
+      "id": "test_count_categories",
+      "description": "Count occurrences of each category in this list",
+      "inputs": {
+        "items": [
+          "A",
+          "B",
+          "A",
+          "C",
+          "B",
+          "A"
+        ]
+      },
+      "expected": {
+        "A": 3,
+        "B": 2,
+        "C": 1
+      },
+      "scorer": "exact_match"
+    },
+    "transfer_type": "structural",
+    "description": "Counting/frequency transfers from string to list"
+  },
+  {
+    "id": "transfer_filter_research_to_ops",
+    "train_domain": "research",
+    "train_task": {
+      "id": "train_filter_words",
+      "description": "Filter this list to only words longer than 4 characters",
+      "inputs": {
+        "words": [
+          "the",
+          "quick",
+          "brown",
+          "fox",
+          "jumps",
+          "over"
+        ]
+      },
+      "expected": [
+        "quick",
+        "brown",
+        "jumps"
+      ],
+      "scorer": "exact_match"
+    },
+    "test_domain": "ops",
+    "test_task": {
+      "id": "test_filter_processes",
+      "description": "Filter this list to only processes using more than 50MB memory",
+      "inputs": {
+        "processes": [
+          {
+            "name": "nginx",
+            "mb": 30
+          },
+          {
+            "name": "postgres",
+            "mb": 200
+          },
+          {
+            "name": "redis",
+            "mb": 45
+          },
+          {
+            "name": "java",
+            "mb": 500
+          }
+        ]
+      },
+      "expected": [
+        {
+          "name": "postgres",
+          "mb": 200
+        },
+        {
+          "name": "java",
+          "mb": 500
+        }
+      ],
+      "scorer": "exact_match"
+    },
+    "transfer_type": "structural",
+    "description": "Filtering by threshold transfers from words to processes"
+  },
+  {
+    "id": "transfer_sort_data_to_writing",
+    "train_domain": "data",
+    "train_task": {
+      "id": "train_sort_numbers",
+      "description": "Sort this list of numbers in descending order",
+      "inputs": {
+        "data": [
+          3,
+          1,
+          4,
+          1,
+          5,
+          9,
+          2,
+          6
+        ]
+      },
+      "expected": [
+        9,
+        6,
+        5,
+        4,
+        3,
+        2,
+        1,
+        1
+      ],
+      "scorer": "exact_match"
+    },
+    "test_domain": "writing",
+    "test_task": {
+      "id": "test_sort_words_by_length",
+      "description": "Sort these words by length, longest first",
+      "inputs": {
+        "words": [
+          "cat",
+          "elephant",
+          "dog",
+          "hippopotamus",
+          "ant"
+        ]
+      },
+      "expected": [
+        "hippopotamus",
+        "elephant",
+        "cat",
+        "dog",
+        "ant"
+      ],
+      "scorer": "exact_match"
+    },
+    "transfer_type": "structural",
+    "description": "Sorting transfers from numbers to words-by-length"
+  },
+  {
+    "id": "transfer_dedupe_ops_to_research",
+    "train_domain": "ops",
+    "train_task": {
+      "id": "train_unique_ips",
+      "description": "Return unique values from this list, preserving order",
+      "inputs": {
+        "items": [
+          "192.168.1.1",
+          "10.0.0.1",
+          "192.168.1.1",
+          "10.0.0.1",
+          "172.16.0.1"
+        ]
+      },
+      "expected": [
+        "192.168.1.1",
+        "10.0.0.1",
+        "172.16.0.1"
+      ],
+      "scorer": "exact_match"
+    },
+    "test_domain": "research",
+    "test_task": {
+      "id": "test_unique_authors",
+      "description": "Return unique values from this list, preserving order",
+      "inputs": {
+        "items": [
+          "Smith",
+          "Jones",
+          "Smith",
+          "Williams",
+          "Jones",
+          "Brown"
+        ]
+      },
+      "expected": [
+        "Smith",
+        "Jones",
+        "Williams",
+        "Brown"
+      ],
+      "scorer": "exact_match"
+    },
+    "transfer_type": "identical_structure",
+    "description": "Deduplication transfers directly \u2014 same structure, different content"
+  }
+]
