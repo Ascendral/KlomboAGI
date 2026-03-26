@@ -219,3 +219,98 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── Programmatic API (used by tests and CI) ──
+
+from dataclasses import dataclass, field
+
+@dataclass
+class NightlyResult:
+    processed_trajectories: int = 0
+    skipped_trajectories: int = 0
+    extracted_skills: int = 0
+    extracted_anti_patterns: int = 0
+    eval_summary: dict = field(default_factory=dict)
+
+
+def run_nightly(
+    trajectory_dir=None,
+    skill_dir=None,
+    failure_dir=None,
+    memory_dir=None,
+    eval_dir=None,
+    eval_report_dir=None,
+    nightly_dir=None,
+    agent=None,
+    skip_evals=False,
+):
+    """Programmatic entry point for the nightly cycle."""
+    from klomboagi.learning.skill_extraction import SkillExtractor
+    import json
+
+    result = NightlyResult()
+
+    # Track processed trajectories
+    nightly_path = Path(nightly_dir) if nightly_dir else Path("datasets/nightly")
+    nightly_path.mkdir(parents=True, exist_ok=True)
+    processed_file = nightly_path / "processed.json"
+    already_processed = set()
+    if processed_file.exists():
+        try:
+            already_processed = set(json.loads(processed_file.read_text()))
+        except:
+            pass
+
+    # Learn from trajectories
+    traj_dir = Path(trajectory_dir) if trajectory_dir else Path("datasets/trajectories")
+    extractor = SkillExtractor(
+        skill_dir=str(skill_dir) if skill_dir else "datasets/skills",
+        failure_dir=str(failure_dir) if failure_dir else "datasets/failure_cases",
+    )
+
+    if traj_dir.exists():
+        for traj_file in sorted(traj_dir.glob("*.json")):
+            if traj_file.name in already_processed:
+                result.skipped_trajectories += 1
+                continue
+
+            try:
+                with open(traj_file) as f:
+                    traj = json.load(f)
+
+                result.processed_trajectories += 1
+                already_processed.add(traj_file.name)
+
+                if traj.get("success"):
+                    skill = extractor.extract_skill(traj)
+                    if skill:
+                        result.extracted_skills += 1
+                else:
+                    anti = extractor.extract_anti_pattern(traj)
+                    if anti:
+                        result.extracted_anti_patterns += 1
+            except:
+                pass
+
+    # Save processed list
+    processed_file.write_text(json.dumps(sorted(already_processed)))
+
+    # Run evals if not skipped
+    if not skip_evals:
+        from evals.harness import EvalHarness
+        from klomboagi.agent.integrated import IntegratedAgent
+
+        harness = EvalHarness(
+            eval_dir=str(eval_dir) if eval_dir else "evals/hidden",
+            report_dir=str(eval_report_dir) if eval_report_dir else "evals/reports",
+        )
+        eval_agent = agent if agent else IntegratedAgent()
+        report = harness.run_all(agent=eval_agent)
+        result.eval_summary = {
+            "tasks_attempted": report.tasks_attempted,
+            "tasks_succeeded": report.tasks_succeeded,
+            "success_rate": report.success_rate(),
+        }
+
+    return result
