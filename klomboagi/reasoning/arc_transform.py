@@ -56,4 +56,33 @@ class TransformSolver:
                     if all(fn(e["input"])==e["output"] for e in train): return fn(ti)
                 except: pass
         
+        # Self-symmetry operations
+        if ir==or_ and ic==oc:
+            for fn in [self._xor_rot180, self._or_rot180, self._or_hflip, self._or_vflip]:
+                try:
+                    if all(fn(e['input'],bg)==e['output'] for e in train):
+                        return fn(ti,bg)
+                except: pass
+        
         return None
+
+    # XOR with rotated self
+    def _xor_rot180(self, g, bg):
+        R,C=len(g),len(g[0])
+        rot=[row[::-1] for row in g[::-1]]
+        return [[g[r][c] if g[r][c]!=bg else rot[r][c] for c in range(C)] for r in range(R)]
+
+    def _or_rot180(self, g, bg):
+        R,C=len(g),len(g[0])
+        rot=[row[::-1] for row in g[::-1]]
+        return [[g[r][c] if g[r][c]!=bg else rot[r][c] for c in range(C)] for r in range(R)]
+
+    def _or_hflip(self, g, bg):
+        R,C=len(g),len(g[0])
+        hf=[row[::-1] for row in g]
+        return [[g[r][c] if g[r][c]!=bg else hf[r][c] for c in range(C)] for r in range(R)]
+
+    def _or_vflip(self, g, bg):
+        R,C=len(g),len(g[0])
+        vf=g[::-1]
+        return [[g[r][c] if g[r][c]!=bg else vf[r][c] for c in range(C)] for r in range(R)]
