@@ -102,3 +102,424 @@ class SmartARCSolver(ARCSolverV18):
                 continue
 
         return None
+
+
+class SmartARCSolverV2(SmartARCSolver):
+    """V2: targeted strategies for the biggest unsolved categories."""
+
+    def solve(self, train, test_input):
+        # Try parent first
+        result = super().solve(train, test_input)
+        if result is not None:
+            return result
+        
+        # V2 targeted strategies
+        v2 = [
+            self._try_paint_shape_with_color,
+            self._try_grid_diff_overlay,
+            self._try_stamp_template,
+            self._try_color_at_grid_intersections,
+            self._try_separate_and_combine,
+            self._try_replicate_subgrid,
+            self._try_count_unique_colors,
+            self._try_border_color_determines,
+            self._try_fill_holes_in_objects,
+            self._try_extend_pattern_to_edge,
+        ]
+        for s in v2:
+            try:
+                r = s(train, test_input)
+                if r is not None and self._cross_validate(s, train):
+                    return r
+            except:
+                continue
+        return None
+
+    def _try_paint_shape_with_color(self, train, test_input):
+        """A shape outline exists, fill interior with a specific color found elsewhere."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find: which bg cells become non-bg in output?
+        # And what determines their color?
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            
+            # Find filled cells
+            filled = {}
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        filled[(r,c)] = out[r][c]
+            
+            if not filled:
+                return None
+            
+            # Check: are filled cells enclosed by a single non-bg color?
+            fill_colors = set(filled.values())
+            if len(fill_colors) != 1:
+                return None  # Multiple fill colors — too complex for this strategy
+        
+        # Simple case: fill enclosed bg regions with the enclosing color
+        def fill_enclosed(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            
+            for r in range(rows):
+                for c in range(cols):
+                    if not visited[r][c] and grid[r][c] == bg_val:
+                        region = []
+                        queue = [(r,c)]
+                        touches_border = False
+                        adj_colors = Counter()
+                        
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            if visited[cr][cc]: continue
+                            if grid[cr][cc] != bg_val:
+                                adj_colors[grid[cr][cc]] += 1
+                                continue
+                            visited[cr][cc] = True
+                            region.append((cr,cc))
+                            if cr==0 or cr==rows-1 or cc==0 or cc==cols-1:
+                                touches_border = True
+                            for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr,nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc]:
+                                    queue.append((nr,nc))
+                        
+                        if not touches_border and adj_colors:
+                            fill_color = adj_colors.most_common(1)[0][0]
+                            for rr,cc in region:
+                                result[rr][cc] = fill_color
+            return result
+        
+        if all(fill_enclosed(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_enclosed(test_input, bg)
+        return None
+
+    def _try_grid_diff_overlay(self, train, test_input):
+        """Output = input with changes from a second 'layer' overlaid."""
+        # Check if input has a divider line splitting it into two regions
+        from collections import Counter
+        
+        for ex in train:
+            inp = ex["input"]
+            rows, cols = len(inp), len(inp[0])
+            
+            # Check for horizontal divider
+            for r in range(1, rows-1):
+                if len(set(inp[r])) == 1 and inp[r][0] != 0:
+                    # Row r is a divider
+                    top = [row[:] for row in inp[:r]]
+                    bot = [row[:] for row in inp[r+1:]]
+                    if len(top) == len(bot) and len(top[0]) == len(bot[0]):
+                        pass  # Could be an overlay puzzle
+            
+            # Check for vertical divider
+            for c in range(1, cols-1):
+                col_vals = [inp[r][c] for r in range(rows)]
+                if len(set(col_vals)) == 1 and col_vals[0] != 0:
+                    pass
+        
+        return None  # Complex — skip detailed impl for now
+
+    def _try_stamp_template(self, train, test_input):
+        """A small template is stamped/copied to locations marked by a specific color."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Find non-bg colors
+        colors = set(all_v) - {bg}
+        if len(colors) < 2:
+            return None
+        
+        return None  # Complex
+
+    def _try_color_at_grid_intersections(self, train, test_input):
+        """Grid lines exist, color cells at intersections."""
+        return None  # Complex
+
+    def _try_separate_and_combine(self, train, test_input):
+        """Input has separator (line of one color), output combines the two halves."""
+        from collections import Counter
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        # Check for horizontal separator
+        def find_h_separator(grid):
+            rows = len(grid)
+            for r in range(rows):
+                vals = set(grid[r])
+                if len(vals) == 1 and list(vals)[0] != bg:
+                    return r, list(vals)[0]
+            return None, None
+        
+        def find_v_separator(grid):
+            rows, cols = len(grid), len(grid[0])
+            for c in range(cols):
+                vals = set(grid[r][c] for r in range(rows))
+                if len(vals) == 1 and list(vals)[0] != bg:
+                    return c, list(vals)[0]
+            return None, None
+        
+        # Check horizontal separator + OR combine
+        sep_r, sep_c_val = find_h_separator(train[0]["input"])
+        if sep_r is not None:
+            def combine_h_or(grid, bg_val):
+                r, _ = find_h_separator(grid)
+                if r is None: return None
+                top = grid[:r]
+                bot = grid[r+1:]
+                if len(top) != len(bot): return None
+                if len(top[0]) != len(bot[0]): return None
+                result = []
+                for i in range(len(top)):
+                    row = []
+                    for j in range(len(top[i])):
+                        a, b = top[i][j], bot[i][j]
+                        if a != bg_val: row.append(a)
+                        elif b != bg_val: row.append(b)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            def combine_h_xor(grid, bg_val):
+                r, _ = find_h_separator(grid)
+                if r is None: return None
+                top = grid[:r]
+                bot = grid[r+1:]
+                if len(top) != len(bot) or len(top[0]) != len(bot[0]): return None
+                result = []
+                for i in range(len(top)):
+                    row = []
+                    for j in range(len(top[i])):
+                        a, b = top[i][j], bot[i][j]
+                        if a != bg_val and b == bg_val: row.append(a)
+                        elif a == bg_val and b != bg_val: row.append(b)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            def combine_h_and(grid, bg_val):
+                r, _ = find_h_separator(grid)
+                if r is None: return None
+                top = grid[:r]
+                bot = grid[r+1:]
+                if len(top) != len(bot) or len(top[0]) != len(bot[0]): return None
+                result = []
+                for i in range(len(top)):
+                    row = []
+                    for j in range(len(top[i])):
+                        a, b = top[i][j], bot[i][j]
+                        if a != bg_val and b != bg_val: row.append(a)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            for fn in [combine_h_or, combine_h_xor, combine_h_and]:
+                try:
+                    if all(fn(ex["input"], bg) == ex["output"] for ex in train):
+                        return fn(test_input, bg)
+                except:
+                    continue
+        
+        # Check vertical separator
+        sep_c, _ = find_v_separator(train[0]["input"])
+        if sep_c is not None:
+            def combine_v_or(grid, bg_val):
+                c, _ = find_v_separator(grid)
+                if c is None: return None
+                rows = len(grid)
+                left = [grid[r][:c] for r in range(rows)]
+                right = [grid[r][c+1:] for r in range(rows)]
+                if len(left[0]) != len(right[0]): return None
+                result = []
+                for r in range(rows):
+                    row = []
+                    for j in range(len(left[r])):
+                        a, b = left[r][j], right[r][j]
+                        if a != bg_val: row.append(a)
+                        elif b != bg_val: row.append(b)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            def combine_v_xor(grid, bg_val):
+                c, _ = find_v_separator(grid)
+                if c is None: return None
+                rows = len(grid)
+                left = [grid[r][:c] for r in range(rows)]
+                right = [grid[r][c+1:] for r in range(rows)]
+                if len(left[0]) != len(right[0]): return None
+                result = []
+                for r in range(rows):
+                    row = []
+                    for j in range(len(left[r])):
+                        a, b = left[r][j], right[r][j]
+                        if a != bg_val and b == bg_val: row.append(a)
+                        elif a == bg_val and b != bg_val: row.append(b)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            def combine_v_and(grid, bg_val):
+                c, _ = find_v_separator(grid)
+                if c is None: return None
+                rows = len(grid)
+                left = [grid[r][:c] for r in range(rows)]
+                right = [grid[r][c+1:] for r in range(rows)]
+                if len(left[0]) != len(right[0]): return None
+                result = []
+                for r in range(rows):
+                    row = []
+                    for j in range(len(left[r])):
+                        a, b = left[r][j], right[r][j]
+                        if a != bg_val and b != bg_val: row.append(a)
+                        else: row.append(bg_val)
+                    result.append(row)
+                return result
+            
+            for fn in [combine_v_or, combine_v_xor, combine_v_and]:
+                try:
+                    if all(fn(ex["input"], bg) == ex["output"] for ex in train):
+                        return fn(test_input, bg)
+                except:
+                    continue
+        
+        return None
+
+    def _try_replicate_subgrid(self, train, test_input):
+        """Find a small pattern in input and replicate it to fill the output."""
+        return None  # Complex
+
+    def _try_count_unique_colors(self, train, test_input):
+        """Output 1x1 = number of unique non-bg colors."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["output"]) != 1 or len(ex["output"][0]) != 1:
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        if all(ex["output"][0][0] == len(set(v for row in ex["input"] for v in row) - {bg}) for ex in train):
+            count = len(set(v for row in test_input for v in row) - {bg})
+            return [[count]]
+        return None
+
+    def _try_border_color_determines(self, train, test_input):
+        """Border color of a region determines what fills it."""
+        return None  # Complex
+
+    def _try_fill_holes_in_objects(self, train, test_input):
+        """Fill 'holes' (bg pixels surrounded by same color) in objects."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def fill_holes(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            
+            for r in range(1, rows-1):
+                for c in range(1, cols-1):
+                    if grid[r][c] == bg_val:
+                        neighbors = []
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0<=nr<rows and 0<=nc<cols and grid[nr][nc] != bg_val:
+                                neighbors.append(grid[nr][nc])
+                        if len(neighbors) >= 3:
+                            mc = Counter(neighbors).most_common(1)[0][0]
+                            result[r][c] = mc
+            return result
+        
+        if all(fill_holes(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_holes(test_input, bg)
+        
+        # Try iterative fill
+        def fill_holes_iter(grid, bg_val, max_iter=5):
+            result = [row[:] for row in grid]
+            for _ in range(max_iter):
+                new_result = fill_holes(result, bg_val)
+                if new_result == result:
+                    break
+                result = new_result
+            return result
+        
+        if all(fill_holes_iter(ex["input"], bg) == ex["output"] for ex in train):
+            return fill_holes_iter(test_input, bg)
+        
+        return None
+
+    def _try_extend_pattern_to_edge(self, train, test_input):
+        """Extend existing lines/patterns to the grid edges."""
+        from collections import Counter
+        
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+        
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        
+        def extend_all(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            
+            # Extend horizontal: if a row has non-bg cells, fill the whole row
+            for r in range(rows):
+                non_bg = [c for c in range(cols) if grid[r][c] != bg_val]
+                if len(non_bg) >= 2:
+                    color = grid[r][non_bg[0]]
+                    if all(grid[r][c] == color for c in non_bg):
+                        for c in range(cols):
+                            result[r][c] = color
+            
+            # Extend vertical
+            for c in range(cols):
+                non_bg = [r for r in range(rows) if grid[r][c] != bg_val]
+                if len(non_bg) >= 2:
+                    color = grid[non_bg[0]][c]
+                    if all(grid[r][c] == color for r in non_bg):
+                        for r in range(rows):
+                            result[r][c] = color
+            return result
+        
+        if all(extend_all(ex["input"], bg) == ex["output"] for ex in train):
+            return extend_all(test_input, bg)
+        return None
