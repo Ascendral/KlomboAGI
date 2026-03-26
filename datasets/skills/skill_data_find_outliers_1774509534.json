@@ -1,0 +1,39 @@
+{
+  "skill_id": "skill_data_find_outliers_1774509534",
+  "name": "Procedure for: Identify statistical outliers in monthly sales data (more th",
+  "domain": "data",
+  "description": "Identify statistical outliers in monthly sales data (more than 2 standard deviations from mean)",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 2
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Identify statistical outliers in monthly sales data (more than 2 standard deviations from mean)"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Identify statistical outliers in monthly sales dat"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "data_find_outliers"
+  ],
+  "created_at": "2026-03-26T00:18:54",
+  "updated_at": "2026-03-26T00:18:54",
+  "reliability": 1.0
+}

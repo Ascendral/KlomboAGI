@@ -20,6 +20,7 @@ from typing import Any, Callable
 from klomboagi.memory.causal_scoring import CausalMemoryTracker
 from klomboagi.learning.skill_extraction import SkillExtractor, Skill, AntiPattern
 from datasets.trajectory import Trajectory, TrajectoryStore
+from klomboagi.agent.executor import PureReasoningExecutor
 
 
 class IntegratedAgent:
@@ -193,24 +194,31 @@ class IntegratedAgent:
         return None, True
 
     def _execute_from_scratch(self, task: dict, traj: Trajectory) -> tuple[Any, bool]:
-        """Execute a task without a known skill."""
+        """Execute a task using pure reasoning — no LLM."""
         description = task.get("description", "")
         
         traj.add_step("plan", "analyze_task",
                       action_args={"description": description},
-                      observation="Planning from scratch — no matching skill found")
+                      observation="Planning from scratch — using pure reasoning executor")
         
-        # Simple execution: try to solve based on task type
-        inputs = task.get("inputs", {})
-        expected = task.get("expected")
-        scorer = task.get("scorer", "exact_match")
+        # Use the pure reasoning executor
+        executor = PureReasoningExecutor()
+        result = executor.execute(task)
         
-        # For now, return None — real execution requires tool use
-        traj.add_step("act", "attempt_solution",
-                      observation="No execution strategy available",
-                      outcome="failure")
+        output = result.get("output")
+        success = result.get("success", False)
         
-        return None, False
+        if success:
+            traj.add_step("act", "pure_reasoning",
+                         action_args={"task_type": description[:50]},
+                         observation=str(output)[:200],
+                         outcome="success")
+        else:
+            traj.add_step("act", "pure_reasoning",
+                         observation="Could not solve with available strategies",
+                         outcome="failure")
+        
+        return output, success
 
     def get_stats(self) -> dict:
         """Get agent statistics."""

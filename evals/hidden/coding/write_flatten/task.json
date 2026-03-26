@@ -1,1 +1,1 @@
-{"id":"coding_write_flatten","domain":"coding","description":"Write flatten(nested_list) that flattens arbitrarily nested lists","scorer":"function_passes_tests"}
+{"id":"coding_write_flatten","domain":"coding","description":"Write a function flatten(nested_list) that flattens arbitrarily nested lists","inputs":{"test_cases":[{"input":[[1,[2,[3,4]],5]],"expected":[1,2,3,4,5]},{"input":[[]],"expected":[]},{"input":[[[[[1]]]]],"expected":[1]},{"input":[[1,2,3]],"expected":[1,2,3]}]},"expected":"Function passes all test cases","scorer":"function_passes_tests"}
