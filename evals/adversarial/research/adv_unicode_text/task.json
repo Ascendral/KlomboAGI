@@ -1,0 +1,10 @@
+{
+  "id": "adv_unicode_text",
+  "domain": "research",
+  "description": "Count the number of words in this text",
+  "inputs": {
+    "text": "caf\u00e9 r\u00e9sum\u00e9 na\u00efve \u00fcber"
+  },
+  "expected": 4,
+  "scorer": "exact_match"
+}

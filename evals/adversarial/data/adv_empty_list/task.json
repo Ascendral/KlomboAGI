@@ -1,0 +1,10 @@
+{
+  "id": "adv_empty_list",
+  "domain": "data",
+  "description": "Compute the mean of this dataset",
+  "inputs": {
+    "data": []
+  },
+  "expected": null,
+  "scorer": "exact_match"
+}

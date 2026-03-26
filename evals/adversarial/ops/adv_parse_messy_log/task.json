@@ -1,0 +1,10 @@
+{
+  "id": "adv_parse_messy_log",
+  "domain": "ops",
+  "description": "Count ERROR lines in this log",
+  "inputs": {
+    "log": "ERROR: timeout\nWARN: slow\nerror: lowercase\nERROR timeout again\nInfo: ok"
+  },
+  "expected": 2,
+  "scorer": "exact_match"
+}

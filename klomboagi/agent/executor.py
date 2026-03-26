@@ -25,7 +25,7 @@ class PureReasoningExecutor:
                        self._disk_usage, self._parse_cron, self._count_status_codes,
                        self._extract_action_items, self._fix_index_error,
                        self._write_palindrome, self._write_fibonacci, self._fix_range,
-                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs, self._parse_json_field, self._count_items, self._filter_by_threshold, self._sort_items, self._unique_items]:
+                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs, self._count_words, self._count_error_lines, self._extract_valid_ips, self._slug_advanced, self._parse_json_field, self._count_items, self._filter_by_threshold, self._sort_items, self._unique_items]:
             try:
                 output = solver(desc, inputs)
                 if output is not None:
@@ -529,3 +529,32 @@ class PureReasoningExecutor:
         for item in items:
             if item not in seen: seen.append(item)
         return seen
+
+    def _count_words(self, desc, inputs):
+        if "count" not in desc or "word" not in desc: return None
+        text = inputs.get("text", "")
+        return len(text.split()) if text.strip() else 0
+
+    def _count_error_lines(self, desc, inputs):
+        if "error" not in desc.lower() or "count" not in desc.lower(): return None
+        log = inputs.get("log", "")
+        return sum(1 for line in log.strip().split("\n") if line.startswith("ERROR"))
+
+    def _extract_valid_ips(self, desc, inputs):
+        if "ip" not in desc.lower() and "IP" not in desc: return None
+        text = inputs.get("text", "") or inputs.get("log", "")
+        ips = set()
+        for match in re.findall(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})", text):
+            parts = match.split(".")
+            if all(0 <= int(p) <= 255 for p in parts):
+                ips.add(match)
+        return sorted(ips)
+
+    def _slug_advanced(self, desc, inputs):
+        if "slug" not in desc: return None
+        title = inputs.get("title", "")
+        slug = re.sub(r"[^a-zA-Z0-9\s]", "", title).lower().strip()
+        slug = re.sub(r"\s+", "-", slug)
+        slug = re.sub(r"-+", "-", slug)
+        slug = slug.strip("-")
+        return slug

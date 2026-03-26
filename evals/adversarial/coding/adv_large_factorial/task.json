@@ -1,0 +1,34 @@
+{
+  "id": "adv_large_factorial",
+  "domain": "coding",
+  "description": "Write a function factorial(n) that computes n factorial",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          0
+        ],
+        "expected": 1
+      },
+      {
+        "input": [
+          1
+        ],
+        "expected": 1
+      },
+      {
+        "input": [
+          10
+        ],
+        "expected": 3628800
+      },
+      {
+        "input": [
+          20
+        ],
+        "expected": 2432902008176640000
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "adv_count_empty_paragraphs",
+  "domain": "writing",
+  "description": "Count the number of non-empty paragraphs in this text",
+  "inputs": {
+    "text": "\n\n\n"
+  },
+  "expected": 0,
+  "scorer": "exact_match"
+}

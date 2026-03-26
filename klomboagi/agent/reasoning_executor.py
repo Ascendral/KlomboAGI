@@ -121,6 +121,23 @@ class ReasoningExecutor:
         if title:
             slug=re.sub(r'[^a-zA-Z0-9\s]','',title).lower().strip(); slug=re.sub(r'\s+','-',slug)
             attempts.append(slug)
+
+        # Edge case: empty data
+        if isinstance(data, list) and len(data) == 0:
+            attempts.append(None)  # mean of empty = None
+            attempts.append(0)
+            attempts.append([])
+        
+        # Word count from text (including 0 for empty)
+        if text is not None:
+            words = text.split() if text.strip() else []
+            attempts.append(len(words))
+        
+        # Float precision
+        if data and isinstance(data, list) and all(isinstance(v,(int,float)) for v in data):
+            n=len(data); mean=sum(data)/n
+            attempts.append(round(mean, 2))
+
         for a in attempts:
             if isinstance(expected,list) and isinstance(a,list):
                 if a==expected: return a

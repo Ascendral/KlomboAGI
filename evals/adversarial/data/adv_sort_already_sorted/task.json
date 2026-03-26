@@ -1,0 +1,22 @@
+{
+  "id": "adv_sort_already_sorted",
+  "domain": "data",
+  "description": "Sort this list in ascending order",
+  "inputs": {
+    "data": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "expected": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "scorer": "exact_match"
+}
