@@ -36,7 +36,7 @@ class ReasoningSolver:
     def solve(self, train, ti):
         for s in [self._remove_smallest, self._keep_largest, self._remove_border,
                   self._keep_border, self._recolor_nearest, self._remove_by_color_count,
-                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern]:
+                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern, self._fill_diagonal]:
             try:
                 r = s(train, ti)
                 if r is not None: return r
@@ -267,4 +267,31 @@ class ReasoningSolver:
                     if all(apply_p(e["input"],patterns,bg)==e["output"] for e in train):
                         return apply_p(ti,patterns,bg)
                 except: pass
+        return None
+
+    def _fill_diagonal(self, train, ti):
+        """Fill diagonal lines between same-color cells."""
+        bg = bg_of(train)
+        for e in train:
+            if len(e["input"])!=len(e["output"]): return None
+        def fn(g):
+            R,C=len(g),len(g[0]); cc={}
+            for r in range(R):
+                for c in range(C):
+                    if g[r][c]!=bg: cc.setdefault(g[r][c],[]).append((r,c))
+            result=[row[:] for row in g]
+            for color,cells in cc.items():
+                for i in range(len(cells)):
+                    for j in range(i+1,len(cells)):
+                        r1,c1=cells[i]; r2,c2=cells[j]
+                        dr=1 if r2>r1 else (-1 if r2<r1 else 0)
+                        dc=1 if c2>c1 else (-1 if c2<c1 else 0)
+                        if dr!=0 and dc!=0 and abs(r2-r1)==abs(c2-c1):
+                            rr,cc2=r1+dr,c1+dc
+                            while (rr,cc2)!=(r2,c2):
+                                if 0<=rr<R and 0<=cc2<C and result[rr][cc2]==bg: result[rr][cc2]=color
+                                rr+=dr; cc2+=dc
+            return result
+        if all(fn(e["input"])==e["output"] for e in train):
+            return fn(ti)
         return None
