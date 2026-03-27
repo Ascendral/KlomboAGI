@@ -36,7 +36,7 @@ class ReasoningSolver:
     def solve(self, train, ti):
         for s in [self._remove_smallest, self._keep_largest, self._remove_border,
                   self._keep_border, self._recolor_nearest, self._remove_by_color_count,
-                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern, self._fill_diagonal, self._recolor_by_rank, self._move_by_color]:
+                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern, self._fill_diagonal, self._recolor_by_rank, self._move_by_color, self._adj_recolor]:
             try:
                 r = s(train, ti)
                 if r is not None: return r
@@ -355,6 +355,49 @@ class ReasoningSolver:
                 for r,c in o["cells"]:
                     nr,nc=r+dr,c+dc
                     if 0<=nr<R and 0<=nc<C: result[nr][nc]=o["color"]
+            return result
+        if all(fn(e["input"])==e["output"] for e in train):
+            return fn(ti)
+        return None
+
+    def _adj_recolor(self, train, ti):
+        """Recolor objects based on adjacent object colors."""
+        bg = bg_of(train)
+        for e in train:
+            if len(e["input"])!=len(e["output"]): return None
+        def adj_colors(objs, o):
+            border=set()
+            for r,c in o["cells"]:
+                for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    border.add((r+dr,c+dc))
+            adj=set()
+            for other in objs:
+                if other is o: continue
+                for r,c in other["cells"]:
+                    if (r,c) in border: adj.add(other["color"])
+            return adj
+        arm={}; ok=True
+        for e in train:
+            objs=detect_objects(e["input"],bg)
+            for o in objs:
+                adj=adj_colors(objs, o)
+                if adj:
+                    key=(o["color"],tuple(sorted(adj)))
+                    r0,c0=list(o["cells"])[0]
+                    nc=e["output"][r0][c0]
+                    if key in arm and arm[key]!=nc: ok=False; break
+                    arm[key]=nc
+            if not ok: break
+        if not ok or not arm: return None
+        def fn(g):
+            R,C=len(g),len(g[0]); objs=detect_objects(g,bg)
+            result=[row[:] for row in g]
+            for o in objs:
+                adj=adj_colors(objs, o)
+                if adj:
+                    key=(o["color"],tuple(sorted(adj)))
+                    if key in arm:
+                        for r,c in o["cells"]: result[r][c]=arm[key]
             return result
         if all(fn(e["input"])==e["output"] for e in train):
             return fn(ti)
