@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_unseen_find_port_1774589482",
+  "name": "Procedure for: Extract the port number from this URL",
+  "domain": "ops",
+  "description": "Extract the port number from this URL",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Extract all unique IP addresses from this log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 6
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Extract the port number from this URL"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract the port number from this URL"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "unseen_find_port"
+  ],
+  "created_at": "2026-03-26T22:31:22",
+  "updated_at": "2026-03-26T22:31:22",
+  "reliability": 1.0
+}

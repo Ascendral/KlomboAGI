@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_writing_title_case_1774589482",
+  "name": "Procedure for: Convert this text to title case (capitalize first letter of ",
+  "domain": "writing",
+  "description": "Convert this text to title case (capitalize first letter of each word except articles/prepositions)",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Convert this text to title case (capitalize first letter of "
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 10
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Convert this text to title case (capitalize first letter of each word except articles/prepositions)"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Convert this text to title case (capitalize first "
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "writing_title_case"
+  ],
+  "created_at": "2026-03-26T22:31:22",
+  "updated_at": "2026-03-26T22:31:22",
+  "reliability": 1.0
+}

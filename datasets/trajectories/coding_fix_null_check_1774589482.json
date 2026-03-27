@@ -1,0 +1,88 @@
+{
+  "task_id": "coding_fix_null_check",
+  "domain": "coding",
+  "description": "Fix the function that crashes on None input",
+  "steps": [
+    {
+      "step_id": 0,
+      "phase": "plan",
+      "action": "retrieve_skill",
+      "action_args": {
+        "skill": "Procedure for: Fix the function that crashes on None input"
+      },
+      "observation": "Found skill: Procedure for: Fix the function that crashes on None input",
+      "decision_reason": "",
+      "memory_retrieved": [
+        "Procedure for: Fix the function that crashes on None input"
+      ],
+      "memory_useful": true,
+      "outcome": "",
+      "error": "",
+      "duration_s": 0.0,
+      "timestamp": "2026-03-26T22:31:22"
+    },
+    {
+      "step_id": 1,
+      "phase": "plan",
+      "action": "check_anti_patterns",
+      "action_args": {
+        "count": 23
+      },
+      "observation": "Found 23 anti-patterns to avoid",
+      "decision_reason": "",
+      "memory_retrieved": [],
+      "memory_useful": false,
+      "outcome": "",
+      "error": "",
+      "duration_s": 0.0,
+      "timestamp": "2026-03-26T22:31:22"
+    },
+    {
+      "step_id": 2,
+      "phase": "plan",
+      "action": "analyze_task",
+      "action_args": {
+        "description": "Fix the function that crashes on None input"
+      },
+      "observation": "Planning from scratch \u2014 using pure reasoning executor",
+      "decision_reason": "",
+      "memory_retrieved": [],
+      "memory_useful": false,
+      "outcome": "",
+      "error": "",
+      "duration_s": 0.0,
+      "timestamp": "2026-03-26T22:31:22"
+    },
+    {
+      "step_id": 3,
+      "phase": "act",
+      "action": "pure_reasoning",
+      "action_args": {
+        "task_type": "Fix the function that crashes on None input"
+      },
+      "observation": "def safe_len(s):\n    return len(s) if s else 0",
+      "decision_reason": "",
+      "memory_retrieved": [],
+      "memory_useful": false,
+      "outcome": "success",
+      "error": "",
+      "duration_s": 0.0,
+      "timestamp": "2026-03-26T22:31:22"
+    }
+  ],
+  "success": true,
+  "interventions": 0,
+  "total_steps": 4,
+  "failure_point": null,
+  "recovery_attempted": false,
+  "recovery_succeeded": false,
+  "skills_used": [
+    "skill_coding_fix_null_check_1774589482"
+  ],
+  "skills_learned": [
+    "skill_coding_fix_null_check_1774589482"
+  ],
+  "started_at": "2026-03-26T22:31:22",
+  "completed_at": "2026-03-26T22:31:22",
+  "duration_s": 0.4474029541015625
+}
