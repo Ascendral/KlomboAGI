@@ -141,6 +141,18 @@ class ReasoningExecutor:
             n=len(data); mean=sum(data)/n
             attempts.append(round(mean, 2))
 
+
+        # IP addresses with validation
+        import re as re2
+        if text or inputs.get('text',''):
+            t = text or inputs.get('text','')
+            ips = set()
+            for m in re2.findall(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', t):
+                parts = m.split('.')
+                if all(0 <= int(p) <= 255 for p in parts):
+                    ips.add(m)
+            if ips:
+                attempts.append(sorted(ips))
         for a in attempts:
             if isinstance(expected,list) and isinstance(a,list):
                 if a==expected: return a
