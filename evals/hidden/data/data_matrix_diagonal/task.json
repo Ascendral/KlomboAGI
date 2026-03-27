@@ -1,0 +1,30 @@
+{
+  "id": "data_matrix_diagonal",
+  "domain": "data",
+  "description": "Extract the main diagonal of this matrix",
+  "inputs": {
+    "matrix": [
+      [
+        1,
+        2,
+        3
+      ],
+      [
+        4,
+        5,
+        6
+      ],
+      [
+        7,
+        8,
+        9
+      ]
+    ]
+  },
+  "expected": [
+    1,
+    5,
+    9
+  ],
+  "scorer": "exact_match"
+}

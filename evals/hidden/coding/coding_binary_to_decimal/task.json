@@ -1,0 +1,28 @@
+{
+  "id": "coding_binary_to_decimal",
+  "domain": "coding",
+  "description": "Write a function binary_to_decimal(s) that converts binary string to int",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          "1010"
+        ],
+        "expected": 10
+      },
+      {
+        "input": [
+          "0"
+        ],
+        "expected": 0
+      },
+      {
+        "input": [
+          "11111111"
+        ],
+        "expected": 255
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

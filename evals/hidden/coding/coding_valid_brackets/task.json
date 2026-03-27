@@ -1,0 +1,34 @@
+{
+  "id": "coding_valid_brackets",
+  "domain": "coding",
+  "description": "Write a function valid_brackets(s) that returns True if brackets are balanced",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          "()[]{}"
+        ],
+        "expected": true
+      },
+      {
+        "input": [
+          "(]"
+        ],
+        "expected": false
+      },
+      {
+        "input": [
+          ""
+        ],
+        "expected": true
+      },
+      {
+        "input": [
+          "([)]"
+        ],
+        "expected": false
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

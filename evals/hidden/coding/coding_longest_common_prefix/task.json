@@ -1,0 +1,38 @@
+{
+  "id": "coding_longest_common_prefix",
+  "domain": "coding",
+  "description": "Write a function lcp(strings) that finds the longest common prefix",
+  "inputs": {
+    "test_cases": [
+      {
+        "input": [
+          [
+            "flower",
+            "flow",
+            "flight"
+          ]
+        ],
+        "expected": "fl"
+      },
+      {
+        "input": [
+          [
+            "dog",
+            "racecar",
+            "car"
+          ]
+        ],
+        "expected": ""
+      },
+      {
+        "input": [
+          [
+            "a"
+          ]
+        ],
+        "expected": "a"
+      }
+    ]
+  },
+  "scorer": "function_passes_tests"
+}

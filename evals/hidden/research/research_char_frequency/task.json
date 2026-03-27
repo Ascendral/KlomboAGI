@@ -1,0 +1,10 @@
+{
+  "id": "research_char_frequency",
+  "domain": "research",
+  "description": "Return the most frequent character in this string excluding spaces",
+  "inputs": {
+    "text": "hello world"
+  },
+  "expected": "l",
+  "scorer": "exact_match"
+}

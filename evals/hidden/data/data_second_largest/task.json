@@ -1,0 +1,17 @@
+{
+  "id": "data_second_largest",
+  "domain": "data",
+  "description": "Find the second largest unique value",
+  "inputs": {
+    "data": [
+      5,
+      3,
+      8,
+      8,
+      1,
+      5
+    ]
+  },
+  "expected": 5,
+  "scorer": "exact_match"
+}

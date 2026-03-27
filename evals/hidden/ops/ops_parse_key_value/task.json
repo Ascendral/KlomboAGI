@@ -1,0 +1,15 @@
+{
+  "id": "ops_parse_key_value",
+  "domain": "ops",
+  "description": "Parse this key=value config string into a dict",
+  "inputs": {
+    "config": "host=localhost;port=5432;db=myapp;ssl=true"
+  },
+  "expected": {
+    "host": "localhost",
+    "port": "5432",
+    "db": "myapp",
+    "ssl": "true"
+  },
+  "scorer": "exact_match"
+}

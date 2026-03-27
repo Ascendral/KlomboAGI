@@ -1,0 +1,10 @@
+{
+  "id": "writing_remove_duplicates",
+  "domain": "writing",
+  "description": "Remove duplicate words from this text preserving order",
+  "inputs": {
+    "text": "the the quick quick brown fox fox jumps"
+  },
+  "expected": "the quick brown fox jumps",
+  "scorer": "exact_match"
+}
