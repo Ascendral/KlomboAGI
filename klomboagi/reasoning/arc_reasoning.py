@@ -36,7 +36,7 @@ class ReasoningSolver:
     def solve(self, train, ti):
         for s in [self._remove_smallest, self._keep_largest, self._remove_border,
                   self._keep_border, self._recolor_nearest, self._remove_by_color_count,
-                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern, self._fill_diagonal]:
+                  self._keep_unique_shape, self._fill_color_bbox, self._fill_color_rows, self._stamp_pattern, self._fill_diagonal, self._recolor_by_rank, self._move_by_color]:
             try:
                 r = s(train, ti)
                 if r is not None: return r
@@ -291,6 +291,70 @@ class ReasoningSolver:
                             while (rr,cc2)!=(r2,c2):
                                 if 0<=rr<R and 0<=cc2<C and result[rr][cc2]==bg: result[rr][cc2]=color
                                 rr+=dr; cc2+=dc
+            return result
+        if all(fn(e["input"])==e["output"] for e in train):
+            return fn(ti)
+        return None
+
+    def _recolor_by_rank(self, train, ti):
+        """Recolor objects based on their size rank."""
+        bg = bg_of(train)
+        for e in train:
+            if len(e["input"])!=len(e["output"]): return None
+        rank_map={}; ok=True
+        for e in train:
+            objs=detect_objects(e["input"],bg)
+            sizes=sorted(set(o["size"] for o in objs))
+            for o in objs:
+                rank=sizes.index(o["size"])
+                r0,c0=list(o["cells"])[0]
+                nc=e["output"][r0][c0]
+                if rank in rank_map and rank_map[rank]!=nc: ok=False; break
+                rank_map[rank]=nc
+            if not ok: break
+        if not ok or not rank_map: return None
+        def fn(g):
+            R,C=len(g),len(g[0]); objs=detect_objects(g,bg)
+            sizes=sorted(set(o["size"] for o in objs))
+            result=[row[:] for row in g]
+            for o in objs:
+                rank=sizes.index(o["size"])
+                if rank in rank_map:
+                    for r,c in o["cells"]: result[r][c]=rank_map[rank]
+            return result
+        if all(fn(e["input"])==e["output"] for e in train):
+            return fn(ti)
+        return None
+
+    def _move_by_color(self, train, ti):
+        """Move objects based on their color."""
+        bg = bg_of(train)
+        for e in train:
+            if len(e["input"])!=len(e["output"]): return None
+        color_vec={}; ok=True
+        for e in train:
+            in_objs=detect_objects(e["input"],bg)
+            out_objs=detect_objects(e["output"],bg)
+            used=set()
+            for io in in_objs:
+                for j,oo in enumerate(out_objs):
+                    if j in used: continue
+                    if io["shape"]==oo["shape"]:
+                        dr=oo["bbox"][0]-io["bbox"][0]; dc=oo["bbox"][1]-io["bbox"][1]
+                        if io["color"] in color_vec:
+                            if color_vec[io["color"]]!=(dr,dc): ok=False; break
+                        else: color_vec[io["color"]]=(dr,dc)
+                        used.add(j); break
+            if not ok: break
+        if not ok or not color_vec: return None
+        def fn(g):
+            R,C=len(g),len(g[0]); objs=detect_objects(g,bg)
+            result=[[bg]*C for _ in range(R)]
+            for o in objs:
+                dr,dc=color_vec.get(o["color"],(0,0))
+                for r,c in o["cells"]:
+                    nr,nc=r+dr,c+dc
+                    if 0<=nr<R and 0<=nc<C: result[nr][nc]=o["color"]
             return result
         if all(fn(e["input"])==e["output"] for e in train):
             return fn(ti)
