@@ -1,0 +1,24 @@
+{
+  "id": "multi_parse_filter_count",
+  "domain": "ops",
+  "description": "Parse log lines, filter to errors only, count by type",
+  "steps": [
+    {
+      "action": "parse_log"
+    },
+    {
+      "action": "filter_errors"
+    },
+    {
+      "action": "group_count"
+    }
+  ],
+  "inputs": {
+    "log": "ERROR Auth: bad token\nINFO Request: /api\nERROR Auth: expired\nWARN Slow: 500ms\nERROR DB: timeout\nERROR Auth: bad token"
+  },
+  "expected": {
+    "Auth": 3,
+    "DB": 1
+  },
+  "scorer": "exact_match"
+}

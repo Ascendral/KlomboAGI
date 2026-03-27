@@ -1,0 +1,31 @@
+{
+  "id": "multi_extract_transform_load",
+  "domain": "data",
+  "description": "Extract numbers from text, compute their sum and average",
+  "steps": [
+    {
+      "action": "extract_numbers"
+    },
+    {
+      "action": "compute_sum"
+    },
+    {
+      "action": "compute_average"
+    }
+  ],
+  "inputs": {
+    "text": "Scores: 85, 92, 78, 95, 88"
+  },
+  "expected": {
+    "numbers": [
+      85,
+      92,
+      78,
+      95,
+      88
+    ],
+    "sum": 438,
+    "average": 87.6
+  },
+  "scorer": "exact_match"
+}
