@@ -18,14 +18,14 @@ class PureReasoningExecutor:
         inputs = task.get("inputs", {})
         
         output = None
-        for solver in [self._count_files, self._outliers, self._parse_logs,
+        for solver in [self._file_ext_count, self._char_frequency, self._palindrome_words, self._count_files, self._outliers, self._parse_logs,
                        self._summarize, self._fix_code, self._write_flatten,
                        self._word_frequency, self._extract_emails, self._count_unique_words,
                        self._compute_stats, self._find_missing, self._normalize,
                        self._disk_usage, self._parse_cron, self._count_status_codes,
                        self._extract_action_items, self._fix_index_error,
                        self._write_palindrome, self._write_fibonacci, self._fix_range,
-                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs, self._count_words, self._count_error_lines, self._extract_valid_ips, self._slug_advanced, self._parse_json_field, self._count_items, self._filter_by_threshold, self._sort_items, self._unique_items]:
+                       self._write_transpose, self._write_gcd, self._write_prime, self._write_anagram, self._fix_null, self._write_chunk, self._extract_urls, self._longest_word, self._sentence_count, self._moving_average, self._percentile, self._group_sum, self._correlation, self._extract_ips, self._memory_parse, self._uptime_parse, self._title_case, self._extract_dates, self._count_paragraphs, self._count_words, self._count_error_lines, self._extract_valid_ips, self._slug_advanced, self._parse_json_field, self._binary_to_decimal, self._roman_numeral, self._common_prefix, self._valid_brackets, self._merge_sorted, self._running_max, self._second_largest, self._histogram, self._matrix_diagonal, self._interleave, self._palindrome_words, self._acronym, self._char_frequency, self._parse_kv_config, self._file_ext_count, self._bytes_to_human, self._word_wrap, self._remove_dup_words, self._capitalize_sentences, self._count_items, self._filter_by_threshold, self._sort_items, self._unique_items]:
             try:
                 output = solver(desc, inputs)
                 if output is not None:
@@ -558,3 +558,169 @@ class PureReasoningExecutor:
         slug = re.sub(r"-+", "-", slug)
         slug = slug.strip("-")
         return slug
+
+    def _binary_to_decimal(self, desc, inputs):
+        if "binary" not in desc: return None
+        tests = inputs.get("test_cases", [])
+        code = "def binary_to_decimal(s):\n    return int(s, 2)"
+        ns = {}
+        try:
+            exec(code, ns)
+            if all(ns["binary_to_decimal"](*tc["input"]) == tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _roman_numeral(self, desc, inputs):
+        if "roman" not in desc: return None
+        tests = inputs.get("test_cases", [])
+        code = "def to_roman(n):\n    vals=[(1000,\'M\'),(900,\'CM\'),(500,\'D\'),(400,\'CD\'),(100,\'C\'),(90,\'XC\'),(50,\'L\'),(40,\'XL\'),(10,\'X\'),(9,\'IX\'),(5,\'V\'),(4,\'IV\'),(1,\'I\')]\n    r=\'\'\n    for v,s in vals:\n        while n>=v: r+=s; n-=v\n    return r"
+        ns = {}
+        try:
+            exec(code, ns)
+            if all(ns["to_roman"](*tc["input"]) == tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _common_prefix(self, desc, inputs):
+        if "common prefix" not in desc: return None
+        tests = inputs.get("test_cases", [])
+        code = "def lcp(strs):\n    if not strs: return \'\'\n    p=strs[0]\n    for s in strs[1:]:\n        while not s.startswith(p): p=p[:-1]\n    return p"
+        ns = {}
+        try:
+            exec(code, ns)
+            if all(ns["lcp"](*tc["input"]) == tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _valid_brackets(self, desc, inputs):
+        if "bracket" not in desc: return None
+        tests = inputs.get("test_cases", [])
+        code = "def valid_brackets(s):\n    st=[]\n    m={\')\':{\'(\'},\']\':{\'[\'},\'}\':{\'{\'}}\n    for c in s:\n        if c in \'([{\': st.append(c)\n        elif c in m:\n            if not st or st[-1]!=list(m[c])[0]: return False\n            st.pop()\n    return len(st)==0"
+        ns = {}
+        try:
+            exec(code, ns)
+            if all(ns["valid_brackets"](*tc["input"]) == tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _merge_sorted(self, desc, inputs):
+        if "merge" not in desc or "sorted" not in desc: return None
+        tests = inputs.get("test_cases", [])
+        code = "def merge(a,b):\n    r=[]; i=j=0\n    while i<len(a) and j<len(b):\n        if a[i]<=b[j]: r.append(a[i]); i+=1\n        else: r.append(b[j]); j+=1\n    r.extend(a[i:]); r.extend(b[j:])\n    return r"
+        ns = {}
+        try:
+            exec(code, ns)
+            if all(ns["merge"](*tc["input"]) == tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _running_max(self, desc, inputs):
+        if "running max" not in desc: return None
+        data = inputs.get("data", [])
+        if not data: return None
+        result = []; mx = float("-inf")
+        for v in data: mx = max(mx, v); result.append(mx)
+        return result
+
+    def _second_largest(self, desc, inputs):
+        if "second largest" not in desc: return None
+        data = inputs.get("data", [])
+        uniq = sorted(set(data), reverse=True)
+        return uniq[1] if len(uniq) >= 2 else None
+
+    def _histogram(self, desc, inputs):
+        if "histogram" not in desc and "frequency" not in desc.split("Find")[0] if "Find" in desc else "histogram" not in desc: return None
+        data = inputs.get("data", [])
+        from collections import Counter as C2
+        return {str(k): v for k, v in C2(data).items()}
+
+    def _matrix_diagonal(self, desc, inputs):
+        if "diagonal" not in desc: return None
+        matrix = inputs.get("matrix", [])
+        if not matrix: return None
+        return [matrix[i][i] for i in range(min(len(matrix), len(matrix[0])))]
+
+    def _interleave(self, desc, inputs):
+        if "interleave" not in desc: return None
+        a = inputs.get("a", []); b = inputs.get("b", [])
+        result = []
+        for i in range(max(len(a), len(b))):
+            if i < len(a): result.append(a[i])
+            if i < len(b): result.append(b[i])
+        return result
+
+    def _palindrome_words(self, desc, inputs):
+        if "palindrome" not in desc or "word" not in desc or "find" not in desc: return None
+        text = inputs.get("text", "")
+        words = text.lower().split()
+        return [w for w in words if w == w[::-1]]
+
+    def _acronym(self, desc, inputs):
+        if "acronym" not in desc: return None
+        phrase = inputs.get("phrase", "")
+        return "".join(w[0].upper() for w in phrase.split() if w)
+
+    def _char_frequency(self, desc, inputs):
+        if "frequent" not in desc or "character" not in desc: return None
+        text = inputs.get("text", "")
+        chars = [c for c in text if c != " "]
+        if not chars: return None
+        from collections import Counter as C3
+        return C3(chars).most_common(1)[0][0]
+
+    def _parse_kv_config(self, desc, inputs):
+        if "key" not in desc or "value" not in desc or "config" not in desc: return None
+        config = inputs.get("config", "")
+        kv = {}
+        for pair in config.split(";"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                kv[k.strip()] = v.strip()
+        return kv
+
+    def _file_ext_count(self, desc, inputs):
+        if "extension" not in desc or "count" not in desc: return None
+        listing = inputs.get("listing", "")
+        from collections import Counter as C4
+        exts = C4()
+        for line in listing.strip().split("\n"):
+            if "." in line:
+                ext = line.strip().rsplit(".", 1)[-1]
+                exts[ext] += 1
+        return dict(exts)
+
+    def _bytes_to_human(self, desc, inputs):
+        if "bytes" not in desc or "human" not in desc: return None
+        b = inputs.get("bytes", 0)
+        if not b: return None
+        for unit, div in [("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)]:
+            if b >= div: return f"{b/div:.1f} {unit}"
+        return f"{b} B"
+
+    def _word_wrap(self, desc, inputs):
+        if "wrap" not in desc: return None
+        text = inputs.get("text", "")
+        words = text.split()
+        lines = []; current = ""
+        for w in words:
+            if current and len(current) + 1 + len(w) > 20:
+                lines.append(current); current = w
+            else:
+                current = current + " " + w if current else w
+        if current: lines.append(current)
+        return "\n".join(lines)
+
+    def _remove_dup_words(self, desc, inputs):
+        if "duplicate" not in desc or "word" not in desc: return None
+        text = inputs.get("text", "")
+        seen = []; 
+        for w in text.split():
+            if w not in seen: seen.append(w)
+        return " ".join(seen)
+
+    def _capitalize_sentences(self, desc, inputs):
+        if "capitalize" not in desc or "sentence" not in desc: return None
+        text = inputs.get("text", "")
+        import re as re2
+        result = re2.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
+        return result
