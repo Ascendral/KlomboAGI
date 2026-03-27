@@ -35,6 +35,24 @@ class StorageManager:
     episode_index: JsonStateStore
     event_log: EpisodicEventLog
 
+
+    def load_json(self, key: str, default=None):
+        """Load JSON data by key name. Convenience method for reasoning modules."""
+        store = getattr(self, key, None)
+        if store and hasattr(store, 'load'):
+            try:
+                data = store.load(default=default)
+                return data if data is not None else (default if default is not None else {})
+            except:
+                return default if default is not None else {}
+        return default if default is not None else {}
+
+    def save_json(self, key: str, data):
+        """Save JSON data by key name."""
+        store = getattr(self, key, None)
+        if store and hasattr(store, 'save'):
+            store.save(data)
+
     @classmethod
     def bootstrap(cls) -> "StorageManager":
         paths = resolve_paths()
