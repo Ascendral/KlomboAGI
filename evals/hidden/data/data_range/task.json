@@ -1,0 +1,17 @@
+{
+  "id": "data_range",
+  "domain": "data",
+  "description": "Compute the range (max - min) of this dataset",
+  "inputs": {
+    "data": [
+      3,
+      7,
+      2,
+      9,
+      1,
+      5
+    ]
+  },
+  "expected": 8,
+  "scorer": "exact_match"
+}

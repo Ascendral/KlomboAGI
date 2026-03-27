@@ -1,0 +1,14 @@
+{
+  "id": "ops_split_path",
+  "domain": "ops",
+  "description": "Split this file path into directory, filename, and extension",
+  "inputs": {
+    "path": "/home/user/docs/report.pdf"
+  },
+  "expected": {
+    "dir": "/home/user/docs",
+    "name": "report",
+    "ext": "pdf"
+  },
+  "scorer": "exact_match"
+}

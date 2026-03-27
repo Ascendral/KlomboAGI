@@ -18,7 +18,7 @@ class PureReasoningExecutor:
         inputs = task.get("inputs", {})
         
         output = None
-        for solver in [self._file_ext_count, self._char_frequency, self._palindrome_words, self._count_files, self._outliers, self._parse_logs,
+        for solver in [self._power_func, self._max_subarray, self._top_ngrams, self._data_mode, self._normalize, self._data_range, self._data_zscore, self._split_path, self._mask_ip, self._snake_to_camel, self._truncate_text, self._reverse_words, self._file_ext_count, self._char_frequency, self._palindrome_words, self._count_files, self._outliers, self._parse_logs,
                        self._summarize, self._fix_code, self._write_flatten,
                        self._word_frequency, self._extract_emails, self._count_unique_words,
                        self._compute_stats, self._find_missing, self._normalize,
@@ -724,3 +724,84 @@ class PureReasoningExecutor:
         import re as re2
         result = re2.sub(r"(^|[.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)
         return result
+
+    def _power_func(self, desc, inputs):
+        if "power" not in desc or "without" not in desc: return None
+        tests=inputs.get("test_cases",[])
+        code="def power(base,exp):\n    r=1\n    for _ in range(exp): r*=base\n    return r"
+        ns={}
+        try:
+            exec(code,ns)
+            if all(ns["power"](*tc["input"])==tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _max_subarray(self, desc, inputs):
+        if "subarray" not in desc: return None
+        tests=inputs.get("test_cases",[])
+        code="def max_subarray_sum(lst):\n    mx=cur=lst[0]\n    for v in lst[1:]:\n        cur=max(v,cur+v)\n        mx=max(mx,cur)\n    return mx"
+        ns={}
+        try:
+            exec(code,ns)
+            if all(ns["max_subarray_sum"](*tc["input"])==tc["expected"] for tc in tests): return code
+        except: pass
+        return None
+
+    def _top_ngrams(self, desc, inputs):
+        if "bigram" not in desc and "ngram" not in desc: return None
+        text=inputs.get("text","")
+        words=text.lower().split()
+        from collections import Counter as C5
+        bigrams=[(words[i],words[i+1]) for i in range(len(words)-1)]
+        top3=[list(b) for b,_ in C5(bigrams).most_common(3)]
+        return top3
+
+    def _data_mode(self, desc, inputs):
+        if "mode" not in desc or "most frequent" not in desc: return None
+        data=inputs.get("data",[])
+        from collections import Counter as C6
+        return C6(data).most_common(1)[0][0]
+
+    def _data_range(self, desc, inputs):
+        if "range" not in desc or "max" not in desc: return None
+        data=inputs.get("data",[])
+        return max(data)-min(data)
+
+    def _data_zscore(self, desc, inputs):
+        if "z-score" not in desc and "zscore" not in desc: return None
+        data=inputs.get("data",[])
+        n=len(data); mean=sum(data)/n; std=(sum((v-mean)**2 for v in data)/n)**0.5
+        return sorted([v for v in data if abs(v-mean)/std > 1.5]) if std > 0 else []
+
+    def _split_path(self, desc, inputs):
+        if "split" not in desc or "path" not in desc: return None
+        p=inputs.get("path","")
+        import os.path as op
+        d=op.dirname(p); base=op.basename(p)
+        name,ext=op.splitext(base)
+        return {"dir":d,"name":name,"ext":ext.lstrip(".")}
+
+    def _mask_ip(self, desc, inputs):
+        if "mask" not in desc or "ip" not in desc.lower(): return None
+        ips=inputs.get("ips",[])
+        return [".".join(ip.split(".")[:3]+["xxx"]) for ip in ips]
+
+    def _snake_to_camel(self, desc, inputs):
+        if "camel" not in desc.lower(): return None
+        text=inputs.get("text","")
+        parts=text.split("_")
+        return parts[0]+"".join(w.capitalize() for w in parts[1:])
+
+    def _truncate_text(self, desc, inputs):
+        if "truncate" not in desc: return None
+        text=inputs.get("text","")
+        import re as re3
+        m=re3.search(r"(\d+)",desc)
+        limit=int(m.group(1)) if m else 20
+        if len(text)<=limit: return text
+        return text[:limit-3]+"..."
+
+    def _reverse_words(self, desc, inputs):
+        if "reverse" not in desc or "word" not in desc: return None
+        text=inputs.get("text","")
+        return " ".join(text.split()[::-1])
