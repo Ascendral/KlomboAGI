@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_research_extract_urls_1774623896",
+  "name": "Procedure for: Extract all URLs from this text",
+  "domain": "research",
+  "description": "Extract all URLs from this text",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Extract all URLs from this text"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 12
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Extract all URLs from this text"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract all URLs from this text"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "research_extract_urls"
+  ],
+  "created_at": "2026-03-27T08:04:56",
+  "updated_at": "2026-03-27T08:04:56",
+  "reliability": 1.0
+}

@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_ops_count_status_codes_1774623897",
+  "name": "Procedure for: Count HTTP status codes from this access log",
+  "domain": "ops",
+  "description": "Count HTTP status codes from this access log",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Count HTTP status codes from this access log"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 13
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Count HTTP status codes from this access log"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Count HTTP status codes from this access log"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "ops_count_status_codes"
+  ],
+  "created_at": "2026-03-27T08:04:57",
+  "updated_at": "2026-03-27T08:04:57",
+  "reliability": 1.0
+}

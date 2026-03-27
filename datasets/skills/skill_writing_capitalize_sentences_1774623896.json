@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_writing_capitalize_sentences_1774623896",
+  "name": "Procedure for: Capitalize the first letter of each sentence",
+  "domain": "writing",
+  "description": "Capitalize the first letter of each sentence",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Convert this text to title case (capitalize first letter of "
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 13
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Capitalize the first letter of each sentence"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Capitalize the first letter of each sentence"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "writing_capitalize_sentences"
+  ],
+  "created_at": "2026-03-27T08:04:56",
+  "updated_at": "2026-03-27T08:04:56",
+  "reliability": 1.0
+}

@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_unseen_slug_1774623896",
+  "name": "Procedure for: Convert this title to a URL slug (lowercase, hyphens, no spe",
+  "domain": "writing",
+  "description": "Convert this title to a URL slug (lowercase, hyphens, no special chars)",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Convert this text to title case (capitalize first letter of "
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 7
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Convert this title to a URL slug (lowercase, hyphens, no special chars)"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Convert this title to a URL slug (lowercase, hyphe"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "unseen_slug"
+  ],
+  "created_at": "2026-03-27T08:04:56",
+  "updated_at": "2026-03-27T08:04:56",
+  "reliability": 1.0
+}

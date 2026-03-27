@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_coding_fix_null_check_1774623897",
+  "name": "Procedure for: Fix the function that crashes on None input",
+  "domain": "coding",
+  "description": "Fix the function that crashes on None input",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Fix the function that crashes on None input"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 29
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Fix the function that crashes on None input"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Fix the function that crashes on None input"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "coding_fix_null_check"
+  ],
+  "created_at": "2026-03-27T08:04:57",
+  "updated_at": "2026-03-27T08:04:57",
+  "reliability": 1.0
+}

@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_writing_summarize_error_1774623896",
+  "name": "Procedure for: Summarize an error log in one non-technical sentence",
+  "domain": "writing",
+  "description": "Summarize an error log in one non-technical sentence",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Summarize an error log in one non-technical sentence"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 10
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Summarize an error log in one non-technical sentence"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Summarize an error log in one non-technical senten"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "writing_summarize_error"
+  ],
+  "created_at": "2026-03-27T08:04:56",
+  "updated_at": "2026-03-27T08:04:56",
+  "reliability": 1.0
+}

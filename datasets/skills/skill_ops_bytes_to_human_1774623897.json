@@ -1,0 +1,39 @@
+{
+  "skill_id": "skill_ops_bytes_to_human_1774623897",
+  "name": "Procedure for: Convert bytes to human readable format",
+  "domain": "ops",
+  "description": "Convert bytes to human readable format",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 13
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Convert bytes to human readable format"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Convert bytes to human readable format"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "ops_bytes_to_human"
+  ],
+  "created_at": "2026-03-27T08:04:57",
+  "updated_at": "2026-03-27T08:04:57",
+  "reliability": 1.0
+}

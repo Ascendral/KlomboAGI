@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_data_running_max_1774623897",
+  "name": "Procedure for: Compute the running maximum of this list",
+  "domain": "data",
+  "description": "Compute the running maximum of this list",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Compute the 3-period moving average of this data"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 16
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Compute the running maximum of this list"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Compute the running maximum of this list"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "data_running_max"
+  ],
+  "created_at": "2026-03-27T08:04:57",
+  "updated_at": "2026-03-27T08:04:57",
+  "reliability": 1.0
+}

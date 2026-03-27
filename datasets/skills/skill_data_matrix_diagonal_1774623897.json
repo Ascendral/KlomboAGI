@@ -1,0 +1,46 @@
+{
+  "skill_id": "skill_data_matrix_diagonal_1774623897",
+  "name": "Procedure for: Extract the main diagonal of this matrix",
+  "domain": "data",
+  "description": "Extract the main diagonal of this matrix",
+  "preconditions": [],
+  "steps": [
+    {
+      "action": "retrieve_skill",
+      "phase": "plan",
+      "args": {
+        "skill": "Procedure for: Find the 90th percentile of this dataset"
+      }
+    },
+    {
+      "action": "check_anti_patterns",
+      "phase": "plan",
+      "args": {
+        "count": 16
+      }
+    },
+    {
+      "action": "analyze_task",
+      "phase": "plan",
+      "args": {
+        "description": "Extract the main diagonal of this matrix"
+      }
+    },
+    {
+      "action": "pure_reasoning",
+      "phase": "act",
+      "args": {
+        "task_type": "Extract the main diagonal of this matrix"
+      }
+    }
+  ],
+  "success_count": 1,
+  "failure_count": 0,
+  "confidence": 0.5,
+  "learned_from": [
+    "data_matrix_diagonal"
+  ],
+  "created_at": "2026-03-27T08:04:57",
+  "updated_at": "2026-03-27T08:04:57",
+  "reliability": 1.0
+}
