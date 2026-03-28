@@ -51,6 +51,8 @@ from klomboagi.reasoning.failure_memory import FailureMemory
 from klomboagi.reasoning.concept_formation import ConceptFormation
 from klomboagi.core.archetype import Archetype
 from klomboagi.core.skill_growth import SkillGrowth
+from klomboagi.reasoning.memory_dynamics import ActivationDecay, ConflictDetector, ChunkCompiler
+from klomboagi.reasoning.global_workspace import GlobalWorkspace, SignalType
 
 
 @dataclass
@@ -239,6 +241,18 @@ class Genesis:
         # Archetype — CAPABLE: the immutable core identity
         self.archetype = Archetype()
 
+        # ACT-R temporal decay — memories fade with power law
+        self.memory_decay = ActivationDecay()
+
+        # NARS conflict detector — disagreements = highest priority
+        self.conflict_detector = ConflictDetector()
+
+        # SOAR chunking — compile reasoning into instant rules
+        self.chunker = ChunkCompiler()
+
+        # Global Workspace — competitive broadcast to all subsystems
+        self.workspace = GlobalWorkspace()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -360,10 +374,11 @@ class Genesis:
         # 2. Parse intent
         intent = self.base._parse_intent(resolved_message)
 
-        # 3. Working memory — attend to mentioned concepts
+        # 3. Working memory + ACT-R decay — attend to mentioned concepts
         for word in resolved_message.lower().split():
             if len(word) > 3 and word not in self.base.COMMON_WORDS:
                 self.working_memory.attend(word, "concept", "input")
+                self.memory_decay.access(word)  # ACT-R trace
 
         # 4. Check for surprise BEFORE learning
         surprise = self._check_surprise(intent)
@@ -426,7 +441,21 @@ class Genesis:
             self.base._beliefs, self.relations,
             self.base.memory.concepts, gaps)
 
-        # 12. Inner state — compute how we "feel" based on real metrics
+        # 12. NARS conflict check — disagreements become top priority
+        new_conflicts = self.conflict_detector.check(self.base._beliefs)
+        for c in new_conflicts:
+            self.workspace.submit(
+                f"Conflict: {c.belief_a} vs {c.belief_b}",
+                SignalType.CONFLICT, c.severity, "conflict_detector")
+
+        # 13. Global Workspace broadcast — most important signal to all systems
+        if self.context.current_topic:
+            self.workspace.submit(
+                self.context.current_topic, SignalType.PERCEPTION,
+                0.5, "dialog_context")
+        broadcast = self.workspace.compete()
+
+        # 14. Inner state — compute how we "feel" based on real metrics
         self.inner.record_success()  # made it through a cycle
         self.inner.compute(
             beliefs_in_focus=len(self.working_memory.get_active_items()),
@@ -668,9 +697,12 @@ class Genesis:
             steps = "\n  ".join(math_result.steps) if math_result.steps else ""
             return f"{math_result.result}\n  {steps}" if steps else str(math_result.result)
 
-        # Connection questions
+        # Connection questions — also compile chunks from discovered paths
         connection = self._parse_connection_question(query)
         if connection:
+            path = self.relations.find_path(connection[0], connection[1])
+            if path and len(path) >= 2:
+                self.chunker.compile_from_path(path)
             return self.relations.explain_connection(connection[0], connection[1])
 
         # Why questions
@@ -687,6 +719,13 @@ class Genesis:
         analogy = self._parse_analogy_question(query)
         if analogy:
             return self._answer_analogy(analogy)
+
+        # SOAR chunk lookup — instant compiled rules before full reasoning
+        chunks = self.chunker.lookup(query)
+        if chunks:
+            best = max(chunks, key=lambda c: c.confidence)
+            chunk_answer = f"From {best.condition} I know that {best.conclusion}."
+            # Still continue to full reasoning but this gives an instant first answer
 
         # Counterfactual questions: "what if there were no gravity?"
         if query.lower().startswith("what if") or query.lower().startswith("without"):
