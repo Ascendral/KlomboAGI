@@ -29,7 +29,7 @@ from klomboagi.core.curriculum import (
     get_curriculum, get_all_domains, curriculum_stats,
     get_relation_curriculum, get_all_relation_domains,
 )
-from klomboagi.core.relations import RelationStore, RelationType
+from klomboagi.core.relations import RelationStore, RelationType, INVERSE_RELATIONS
 
 
 @dataclass
@@ -484,75 +484,190 @@ class Genesis:
 
     def _think_deep(self, message: str, intent: dict) -> str:
         """
-        Fire the full CognitionLoop for a question.
+        Full reasoning pipeline for questions.
 
-        Instead of simple belief lookup, runs the 10-phase pipeline:
-        perceive → remember → transfer → inquire → hypothesize → evaluate → act → observe → learn
-
-        Falls back to base system if CognitionLoop adds nothing.
+        1. Parse relational questions (what causes X? what uses X?)
+        2. Gather beliefs + relations about the topic
+        3. Run CognitionLoop for pattern detection
+        4. Run ReasoningEngine for dimensional analysis
+        5. Combine into a unified answer
         """
         self.deep_thinks += 1
         query = intent.get("query", message)
 
-        # Gather known facts about the topic
+        # 1. Check for relational questions first
+        relational = self._parse_relational_question(query)
+        if relational:
+            return self._answer_relational(relational)
+
+        # 2. Gather known facts
+        stop_words = {"is", "a", "an", "the", "what", "who", "where", "how",
+                      "when", "which", "why", "are", "was", "do", "does",
+                      "can", "could", "about", "tell", "me", "explain"}
+        query_words = set(query.lower().split()) - stop_words
         known_facts = []
-        query_words = set(query.lower().split())
         for statement, belief in self.base._beliefs.items():
-            stmt_words = set(statement.lower().split())
-            if stmt_words & query_words:
+            stmt_words = set(statement.lower().split()) - stop_words
+            if query_words & stmt_words:
                 known_facts.append(statement)
 
-        # Build problem for CognitionLoop
+        # 3. Gather relations about the topic
+        relation_lines = []
+        for word in query_words:
+            rels = self.relations.get_all_about(word)
+            for r in rels[:5]:
+                if r.source == word:
+                    relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
+                else:
+                    relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
+
+        # 4. Run CognitionLoop
         problem = {
             "description": query,
             "known_facts": known_facts[:20],
-            "known_entities": self.context.entities_mentioned,
-            "referenced_entities": [w for w in query_words if len(w) > 2],
+            "known_entities": list(query_words),
             "expected_outcome": f"answer to: {query}",
         }
-
-        # Run CognitionLoop
         state = self.cognition.think(problem)
 
-        # Extract insights from the trace
-        insights = []
-        for entry in state.trace:
-            if entry["phase"] == "learn" and entry.get("data"):
-                insights.append(entry["message"])
-            if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
-                insights.append(f"Transfer: {entry['message']}")
-
-        # Also try ReasoningEngine for dimensional/property questions
+        # 5. Run ReasoningEngine
         reasoning_result = ""
         if known_facts:
             try:
                 chain = self.reasoning_engine.reason(query, known_facts[:10])
                 if chain.confidence > 0.3:
-                    reasoning_result = f"\nReasoning: {chain.conclusion} (confidence: {chain.confidence:.0%})"
-                    if chain.frameworks_used:
-                        reasoning_result += f" [frameworks: {', '.join(chain.frameworks_used)}]"
+                    reasoning_result = chain.conclusion
             except Exception:
                 pass
 
-        # Get base response (belief lookup + curiosity search)
-        base_response = self.base.hear(message)
+        # 6. Build response
+        parts = []
 
-        # Combine if CognitionLoop added value
-        if insights or reasoning_result:
-            parts = [base_response]
-            if reasoning_result:
-                parts.append(reasoning_result)
-            if insights:
-                parts.append("\nDeep analysis:")
-                for insight in insights[:3]:
-                    parts.append(f"  {insight}")
-            # Record to cognition episodes for future transfer
-            parts.append(f"\n[CognitionLoop: {len(state.trace)} steps, "
-                        f"{state.attempts} attempts, "
-                        f"{'transferred' if state.transfer_plan else 'novel'}]")
-            return "\n".join(parts)
+        # Beliefs
+        if known_facts:
+            parts.append("What I know:")
+            for f in known_facts[:10]:
+                b = self.base._beliefs.get(f)
+                conf = f" ({b.truth.confidence:.0%})" if b else ""
+                parts.append(f"  {f}{conf}")
 
-        return base_response
+        # Relations
+        if relation_lines:
+            # Deduplicate
+            unique_rels = list(dict.fromkeys(relation_lines))
+            parts.append("\nConnections:")
+            for line in unique_rels[:10]:
+                parts.append(line)
+
+        # Reasoning
+        if reasoning_result:
+            parts.append(f"\nReasoning: {reasoning_result}")
+
+        # CognitionLoop insights
+        for entry in state.trace:
+            if entry["phase"] == "learn" and entry.get("data"):
+                parts.append(f"\nPattern: {entry['message']}")
+                break
+            if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
+                parts.append(f"\nTransfer: {entry['message']}")
+                break
+
+        if not parts:
+            # Fall back to base system (which will search)
+            return self.base.hear(message)
+
+        return "\n".join(parts)
+
+    def _parse_relational_question(self, query: str) -> dict | None:
+        """
+        Parse relational questions:
+          "what causes acceleration?" → {relation: CAUSES, target: "acceleration", direction: "backward"}
+          "what does gravity cause?" → {relation: CAUSES, source: "gravity", direction: "forward"}
+          "what uses mathematics?" → {relation: USES, target: "mathematics", direction: "backward"}
+          "what is energy part of?" → {relation: PART_OF, source: "energy", direction: "forward"}
+        """
+        q = query.lower().strip().rstrip("?").strip()
+
+        # Pattern: "what causes X" / "what causes X"
+        patterns = [
+            # Backward: "what causes X?" → find things that cause X
+            (r"what (?:causes|cause) (.+)", RelationType.CAUSES, "backward"),
+            (r"what (?:requires|require) (.+)", RelationType.REQUIRES, "backward"),
+            (r"what (?:enables|enable) (.+)", RelationType.ENABLES, "backward"),
+            (r"what (?:uses|use) (.+)", RelationType.USES, "backward"),
+            (r"what (?:measures|measure) (.+)", RelationType.MEASURES, "backward"),
+            (r"what is (.+) part of", RelationType.PART_OF, "forward"),
+            (r"what is (.+) opposite of", RelationType.OPPOSITE_OF, "forward"),
+            (r"what is opposite of (.+)", RelationType.OPPOSITE_OF, "backward"),
+            (r"what are the parts of (.+)", RelationType.PART_OF, "backward"),
+
+            # Forward: "what does X cause?" → find things X causes
+            (r"what does (.+) cause", RelationType.CAUSES, "forward"),
+            (r"what does (.+) require", RelationType.REQUIRES, "forward"),
+            (r"what does (.+) enable", RelationType.ENABLES, "forward"),
+            (r"what does (.+) use", RelationType.USES, "forward"),
+            (r"what does (.+) measure", RelationType.MEASURES, "forward"),
+        ]
+
+        for pattern, rel_type, direction in patterns:
+            m = re.match(pattern, q)
+            if m:
+                concept = m.group(1).strip()
+                return {"relation": rel_type, "concept": concept, "direction": direction}
+
+        return None
+
+    def _answer_relational(self, parsed: dict) -> str:
+        """Answer a relational question using the relation store."""
+        rel_type = parsed["relation"]
+        concept = parsed["concept"]
+        direction = parsed["direction"]
+
+        if direction == "forward":
+            rels = self.relations.get_forward(concept, rel_type)
+            if not rels:
+                # Try without article
+                for prefix in ("a ", "an ", "the "):
+                    rels = self.relations.get_forward(prefix + concept, rel_type)
+                    if rels:
+                        break
+            if rels:
+                lines = [f"{concept} {rel_type.value}:"]
+                for r in rels:
+                    lines.append(f"  → {r.target} ({r.confidence:.0%})"
+                                + (" [inferred]" if r.derived else ""))
+                return "\n".join(lines)
+        else:  # backward
+            rels = self.relations.get_backward(concept, rel_type)
+            if not rels:
+                for prefix in ("a ", "an ", "the "):
+                    rels = self.relations.get_backward(prefix + concept, rel_type)
+                    if rels:
+                        break
+            if rels:
+                inverse = INVERSE_RELATIONS.get(rel_type, f"inverse of {rel_type.value}")
+                lines = [f"{concept} {inverse}:"]
+                for r in rels:
+                    lines.append(f"  ← {r.source} ({r.confidence:.0%})"
+                                + (" [inferred]" if r.derived else ""))
+                return "\n".join(lines)
+
+        # For symmetric relations (opposite_of, analogous_to), try the other direction too
+        if rel_type in (RelationType.OPPOSITE_OF, RelationType.ANALOGOUS_TO):
+            other_dir = self.relations.get_forward(concept, rel_type) if direction == "backward" else self.relations.get_backward(concept, rel_type)
+            if not other_dir:
+                for prefix in ("a ", "an ", "the "):
+                    other_dir = self.relations.get_forward(prefix + concept, rel_type) if direction == "backward" else self.relations.get_backward(prefix + concept, rel_type)
+                    if other_dir:
+                        break
+            if other_dir:
+                lines = [f"{concept} {rel_type.value}:"]
+                for r in other_dir:
+                    other = r.target if r.source.endswith(concept) or r.source == concept else r.source
+                    lines.append(f"  ↔ {other} ({r.confidence:.0%})")
+                return "\n".join(lines)
+
+        return f"I don't know what {rel_type.value} {concept}. Teach me?"
 
     def _handle_cognition_inquiry(self, gap) -> str | None:
         """
@@ -881,5 +996,15 @@ class Genesis:
 
         lines.append(f"\n  Active traits: {trait_stats['active_traits']}")
         lines.append(f"  Total skills: {trait_stats['total_skills']}")
+
+        # Relation stats
+        r_stats = self.relations.stats()
+        if r_stats["total_relations"] > 0:
+            lines.append(f"\nRelation Graph:")
+            lines.append(f"  Total relations: {r_stats['total_relations']}")
+            lines.append(f"  Connected concepts: {r_stats['unique_concepts']}")
+            lines.append(f"  Taught: {r_stats['taught']} | Inferred: {r_stats['derived']}")
+            for rtype, count in sorted(r_stats["by_type"].items(), key=lambda x: -x[1]):
+                lines.append(f"    {rtype:15s} {count}")
 
         return "\n".join(lines)

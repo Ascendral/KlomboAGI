@@ -397,6 +397,88 @@ CURRICULA["biology"] = [
 ]
 
 
+# ── ALGEBRA ──
+
+CURRICULA["algebra"] = [
+    ("algebra", "the branch of mathematics using symbols to represent numbers and operations"),
+    ("a variable", "a symbol that represents an unknown quantity"),
+    ("a constant", "a value that does not change"),
+    ("a coefficient", "a number multiplied by a variable"),
+    ("an expression", "a combination of numbers, variables, and operations"),
+    ("an equation", "a statement that two expressions are equal"),
+    ("an inequality", "a statement that one expression is greater or less than another"),
+    ("solving an equation", "finding the value of the variable that makes the equation true"),
+    ("a linear equation", "an equation where the highest power of the variable is 1"),
+    ("a quadratic equation", "an equation where the highest power of the variable is 2"),
+    ("the quadratic formula", "x equals negative b plus or minus square root of b squared minus 4ac over 2a"),
+    ("a polynomial", "an expression with multiple terms of different powers"),
+    ("factoring", "breaking an expression into a product of simpler expressions"),
+    ("a system of equations", "two or more equations with the same variables"),
+    ("substitution", "replacing a variable with an equivalent expression"),
+    ("a matrix", "a rectangular array of numbers arranged in rows and columns"),
+    ("a determinant", "a scalar value computed from a square matrix"),
+    ("a vector", "a quantity with both magnitude and direction"),
+    ("a linear transformation", "a function that maps vectors to vectors preserving addition and scaling"),
+    ("an eigenvalue", "a scalar that satisfies Av equals lambda v for a matrix A"),
+]
+
+
+# ── CALCULUS ──
+
+CURRICULA["calculus"] = [
+    ("calculus", "the mathematics of continuous change"),
+    ("a limit", "the value a function approaches as the input approaches a point"),
+    ("continuity", "a function is continuous if its limit equals its value at every point"),
+    ("a derivative", "the instantaneous rate of change of a function"),
+    ("differentiation", "the process of finding a derivative"),
+    ("the power rule", "the derivative of x to the n is n times x to the n minus 1"),
+    ("the chain rule", "the derivative of a composite function is the outer derivative times the inner derivative"),
+    ("the product rule", "the derivative of f times g is f prime g plus f g prime"),
+    ("a critical point", "a point where the derivative is zero or undefined"),
+    ("a maximum", "the highest value of a function in a region"),
+    ("a minimum", "the lowest value of a function in a region"),
+    ("an integral", "the accumulation of a quantity, the reverse of differentiation"),
+    ("integration", "the process of finding an integral"),
+    ("the fundamental theorem of calculus", "integration and differentiation are inverse operations"),
+    ("a definite integral", "an integral with specific upper and lower bounds giving a number"),
+    ("an indefinite integral", "an integral without bounds giving a family of functions"),
+    ("area under a curve", "calculated by the definite integral of a function"),
+    ("a differential equation", "an equation involving a function and its derivatives"),
+    ("convergence", "a sequence or series approaching a finite limit"),
+    ("divergence", "a sequence or series growing without bound"),
+    ("a taylor series", "an infinite polynomial approximation of a function"),
+]
+
+
+# ── STATISTICS & PROBABILITY ──
+
+CURRICULA["statistics"] = [
+    ("statistics", "the science of collecting, analyzing, and interpreting data"),
+    ("probability", "a measure of how likely an event is to occur, between 0 and 1"),
+    ("a population", "the complete set of items being studied"),
+    ("a sample", "a subset of the population used for analysis"),
+    ("the mean", "the average value, sum of all values divided by count"),
+    ("the median", "the middle value when data is ordered"),
+    ("the mode", "the most frequently occurring value"),
+    ("variance", "the average of squared differences from the mean"),
+    ("standard deviation", "the square root of variance, measuring spread"),
+    ("a normal distribution", "a bell-shaped distribution where most values cluster around the mean"),
+    ("the central limit theorem", "sample means approach a normal distribution as sample size grows"),
+    ("correlation", "a measure of how two variables move together"),
+    ("causation", "a direct cause-and-effect relationship between variables"),
+    ("regression", "a method for modeling the relationship between variables"),
+    ("a hypothesis test", "a procedure to determine if data supports a claim"),
+    ("the null hypothesis", "the default assumption that there is no effect or difference"),
+    ("a p-value", "the probability of observing the data if the null hypothesis were true"),
+    ("statistical significance", "when a p-value falls below a chosen threshold"),
+    ("a confidence interval", "a range of values likely to contain the true parameter"),
+    ("bayes theorem", "a formula for updating probability based on new evidence"),
+    ("conditional probability", "the probability of an event given another event occurred"),
+    ("expected value", "the long-run average outcome of a random variable"),
+    ("the law of large numbers", "sample averages converge to the population mean as sample size grows"),
+]
+
+
 # ── CATEGORY THEORY (for conflict detection) ──
 
 CURRICULA["categories"] = [
@@ -569,6 +651,56 @@ RELATION_CURRICULA["part-whole"] = [
     ("a plane", "part_of", "space"),
     ("a side", "part_of", "a polygon"),
     ("an angle", "part_of", "a triangle"),
+]
+
+
+RELATION_CURRICULA["math-hierarchy"] = [
+    # Algebra uses/requires
+    ("algebra", "part_of", "mathematics"),
+    ("algebra", "uses", "an equation"),
+    ("a quadratic equation", "uses", "the quadratic formula"),
+    ("a system of equations", "uses", "substitution"),
+    ("a matrix", "uses", "a determinant"),
+    ("a linear transformation", "uses", "a matrix"),
+    ("a linear transformation", "uses", "a vector"),
+    ("an eigenvalue", "requires", "a matrix"),
+
+    # Calculus uses/requires
+    ("calculus", "part_of", "mathematics"),
+    ("calculus", "requires", "algebra"),
+    ("a derivative", "measures", "rate of change"),
+    ("an integral", "measures", "accumulation"),
+    ("differentiation", "opposite_of", "integration"),
+    ("the fundamental theorem of calculus", "uses", "differentiation"),
+    ("the fundamental theorem of calculus", "uses", "integration"),
+    ("a taylor series", "uses", "a derivative"),
+    ("a differential equation", "uses", "a derivative"),
+    ("a differential equation", "uses", "a function"),
+    ("convergence", "opposite_of", "divergence"),
+
+    # Statistics uses/requires
+    ("statistics", "part_of", "mathematics"),
+    ("statistics", "uses", "probability"),
+    ("variance", "uses", "the mean"),
+    ("standard deviation", "uses", "variance"),
+    ("the central limit theorem", "requires", "a sample"),
+    ("regression", "uses", "correlation"),
+    ("a hypothesis test", "uses", "a p-value"),
+    ("a hypothesis test", "uses", "the null hypothesis"),
+    ("bayes theorem", "uses", "conditional probability"),
+    ("the law of large numbers", "uses", "the mean"),
+
+    # Cross-math connections
+    ("calculus", "uses", "a limit"),
+    ("a limit", "requires", "continuity"),
+    ("a normal distribution", "uses", "the mean"),
+    ("a normal distribution", "uses", "standard deviation"),
+    ("physics", "uses", "calculus"),
+    ("physics", "uses", "a differential equation"),
+    ("economics", "uses", "statistics"),
+    ("economics", "uses", "calculus"),
+    ("quantum mechanics", "uses", "a differential equation"),
+    ("quantum mechanics", "uses", "probability"),
 ]
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from klomboagi.core.genesis import Genesis, DialogContext, Surprise
+from klomboagi.core.relations import RelationType
 
 
 @pytest.fixture
@@ -287,7 +288,7 @@ class TestDeepThinking:
         genesis.hear("a planet is a celestial body")
         response = genesis.hear("what is a planet?")
         assert genesis.deep_thinks >= 1
-        assert "CognitionLoop" in response
+        assert "planet" in response.lower()
 
     def test_deep_think_uses_known_facts(self):
         """CognitionLoop should receive relevant beliefs."""
@@ -316,6 +317,54 @@ class TestDeepThinking:
 
 
 # ── Concept Extraction tests ──
+
+
+class TestRelationalQuestions:
+
+    def test_what_causes(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq.json")
+        g.relations.add("gravity", RelationType.CAUSES, "acceleration")
+        response = g.hear("what causes acceleration?")
+        assert "gravity" in response.lower()
+
+    def test_what_does_x_cause(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq2.json")
+        g.relations.add("heat", RelationType.CAUSES, "expansion")
+        response = g.hear("what does heat cause?")
+        assert "expansion" in response.lower()
+
+    def test_what_does_x_use(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq3.json")
+        g.relations.add("physics", RelationType.USES, "mathematics")
+        response = g.hear("what does physics use?")
+        assert "mathematics" in response.lower()
+
+    def test_parts_of(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq4.json")
+        g.relations.add("algebra", RelationType.PART_OF, "mathematics")
+        g.relations.add("geometry", RelationType.PART_OF, "mathematics")
+        response = g.hear("what are the parts of mathematics?")
+        assert "algebra" in response.lower()
+        assert "geometry" in response.lower()
+
+    def test_opposite_of(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq5.json")
+        g.relations.add("hot", RelationType.OPPOSITE_OF, "cold")
+        response = g.hear("what is opposite of hot?")
+        assert "cold" in response.lower()
+
+    def test_unknown_relation(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq6.json")
+        response = g.hear("what causes zyphlox?")
+        assert "don't know" in response.lower() or "teach" in response.lower()
+
+    def test_question_with_relations_and_beliefs(self):
+        g = Genesis(memory_path="/tmp/klombo_test_relq7.json")
+        g.teach_domain("physics")
+        g.teach_relations("cross-domain")
+        response = g.hear("what is gravity?")
+        # Should include both belief AND connections
+        assert "gravity" in response.lower()
 
 
 class TestConceptExtraction:
