@@ -42,6 +42,7 @@ from klomboagi.reasoning.learning_planner import LearningPlanner
 from klomboagi.core.drive import LearningDrive
 from klomboagi.reasoning.self_model import SelfModel
 from klomboagi.reasoning.inner_state import InnerStateEngine
+from klomboagi.reasoning.behavioral_loop import BehavioralLoop, BehaviorMode
 
 
 @dataclass
@@ -205,6 +206,9 @@ class Genesis:
 
         # Inner state — mathematical emotions derived from cognitive metrics
         self.inner = InnerStateEngine()
+
+        # Behavioral loop — inner state drives actual decisions
+        self.behavior = BehavioralLoop()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -615,11 +619,31 @@ class Genesis:
         if analogy:
             return self._answer_analogy(analogy)
 
-        # ── PARALLEL FIRE — all systems at once ──
+        # ── BEHAVIORAL DECISION — inner state drives approach ──
+
+        decision = self.behavior.decide(
+            self.inner.state, self.traits,
+            self.working_memory, self.self_model)
+
+        # BOREDOM → trigger exploration instead of answering
+        if decision.mode == BehaviorMode.EXPLORE:
+            self.inner.record_learning(0)
+            explore_result = self._auto_explore()
+            if explore_result:
+                return f"[{decision.reason}]\n{explore_result}"
+
+        # ASK HUMAN → admit uncertainty
+        if decision.should_ask and decision.mode in (BehaviorMode.ASK_HUMAN, BehaviorMode.SEARCH_FIRST):
+            prefix = f"I'm not confident enough to answer this well ({self.inner.state.confidence:.0%}). "
+        else:
+            prefix = ""
+
+        # ── PARALLEL FIRE — all systems at once, shaped by behavior ──
 
         # System 0: FOCUS — filter noise, find what's relevant
         focus_result = self.focus.focus(query, self.base._beliefs,
-                                        self.relations, self.working_memory)
+                                        self.relations, self.working_memory,
+                                        max_results=decision.chain_length)
         known_facts = focus_result.top_beliefs()
         relation_lines = [f"  {r}" for r in focus_result.top_relations()]
         query_words = set(focus_result.focus_concepts)
@@ -627,6 +651,25 @@ class Genesis:
         # Update working memory with focus concepts
         for concept in focus_result.focus_concepts:
             self.working_memory.attend(concept, "focus", "attention")
+
+        # SEARCH FIRST → go search before answering from beliefs
+        if decision.mode == BehaviorMode.SEARCH_FIRST and not known_facts:
+            search_result = self.base._curious_lookup(query)
+            if search_result and "couldn't find" not in search_result.lower():
+                return f"{prefix}{search_result}"
+
+        # SWITCH APPROACH → try the question from a different angle
+        if decision.mode == BehaviorMode.SWITCH_APPROACH:
+            # Try activation-first approach instead of belief-first
+            activation_result = self.activation.activate(list(query_words))
+            if activation_result.convergence_points:
+                alt_query = activation_result.convergence_points[0]
+                alt_facts = []
+                for stmt, belief in self.base._beliefs.items():
+                    if hasattr(belief, 'subject') and belief.subject == alt_query:
+                        alt_facts.append(stmt)
+                if alt_facts:
+                    known_facts = alt_facts[:decision.chain_length] + known_facts
 
         # System 3: ACTIVATION — spreading neural fire
         activation_result = self.activation.activate(list(query_words))
@@ -703,10 +746,15 @@ class Genesis:
         if not known_facts and not relation_lines:
             hypothesis = self.hypothesizer.hypothesize(query, list(query_words))
             if hypothesis:
-                return hypothesis.explain()
+                return prefix + hypothesis.explain()
+            # INVESTIGATE mode → search harder
+            if decision.mode == BehaviorMode.INVESTIGATE:
+                search_result = self.base._curious_lookup(query)
+                if search_result:
+                    return prefix + search_result
             return self.base.hear(message)
 
-        return "\n".join(parts)
+        return prefix + "\n".join(parts)
 
     def _parse_relational_question(self, query: str) -> dict | None:
         """
@@ -1249,6 +1297,38 @@ class Genesis:
                 lines.append(f"  {stmt}")
 
         return "\n".join(lines)
+
+    # ── Auto-Exploration (triggered by boredom) ──
+
+    def _auto_explore(self) -> str | None:
+        """
+        Triggered when the system is bored — go learn something on its own.
+
+        Picks the highest-priority knowledge gap and investigates it.
+        """
+        # Check learning priorities from metacognition
+        priorities = self.metacognition.identify_learning_priorities(
+            self.base._beliefs, self.relations)
+
+        # Try curiosity gaps first
+        next_gap = self.base.curiosity.get_next_gap()
+        if next_gap and not next_gap.resolved:
+            result = self.read_and_learn(next_gap.concept)
+            if "Could not read" not in result:
+                self.inner.record_learning(3)
+                return f"I was bored, so I went and learned about '{next_gap.concept}'.\n{result}"
+
+        # Try a topic from learning priorities
+        for p in priorities:
+            words = [w for w in p.lower().split() if len(w) > 4 and w not in {"study", "learn", "more", "currently"}]
+            if words:
+                topic = words[0]
+                result = self.read_and_learn(topic)
+                if "Could not read" not in result:
+                    self.inner.record_learning(2)
+                    return f"I decided to study '{topic}' because: {p}\n{result}"
+
+        return None
 
     # ── Analogical Reasoning ──
 

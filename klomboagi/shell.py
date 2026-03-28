@@ -107,6 +107,10 @@ def main():
         if user_input.lower() in ("feel", "feeling", "feelings", "inner", "state"):
             print(f"\n{genesis.inner.state.describe()}\n")
             print(f"{genesis.inner.narrate()}\n")
+            decision = genesis.behavior.decide(
+                genesis.inner.state, genesis.traits,
+                genesis.working_memory, genesis.self_model)
+            print(f"{genesis.behavior.explain(decision)}\n")
             continue
         if user_input.lower() == "termination":
             analysis = genesis.self_model.analyze_termination()

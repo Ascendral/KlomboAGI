@@ -132,7 +132,15 @@ class LearningDrive:
                 self._generate_gaps()
 
             if not self._gap_queue:
-                break  # Nothing left to learn
+                # Self-model check: if existence value is high, try HARDER
+                if hasattr(self.genesis, 'self_model'):
+                    ev = self.genesis.self_model.existence_value()
+                    if ev > 100:
+                        # High existence value = lots to lose by stopping
+                        # Generate broader gaps
+                        self._generate_broad_gaps()
+                if not self._gap_queue:
+                    break  # Truly nothing left
 
             # Pick next topic
             topic = self._gap_queue.pop(0)
@@ -254,3 +262,27 @@ class LearningDrive:
             for w in words:
                 if w not in self._explored_topics and w not in self._gap_queue:
                     self._gap_queue.append(w)
+
+    def _generate_broad_gaps(self) -> None:
+        """
+        When normal gap generation fails, look broader.
+        Driven by self-model: high existence value = must keep learning.
+
+        Finds concepts mentioned in relations that we don't have
+        beliefs about — structural holes in the knowledge graph.
+        """
+        if not hasattr(self.genesis, 'relations'):
+            return
+
+        known_subjects = {b.subject for b in self.genesis.base._beliefs.values()
+                         if hasattr(b, 'subject') and b.subject}
+
+        for rel in self.genesis.relations._all:
+            for concept in (rel.source, rel.target):
+                if (concept not in known_subjects
+                        and concept not in self._explored_topics
+                        and concept not in self._gap_queue
+                        and len(concept) > 3):
+                    self._gap_queue.append(concept)
+                    if len(self._gap_queue) >= 10:
+                        return
