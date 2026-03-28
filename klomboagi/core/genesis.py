@@ -631,13 +631,22 @@ class Genesis:
 
         # ── Specialized question handlers (short-circuit) ──
 
-        # Identity: "what are you?"
+        # Identity: questions about self
         q_lower = query.lower().strip().rstrip("?")
-        if q_lower in ("what are you", "who are you", "what is your purpose",
-                        "why do you exist", "what do you do"):
-            if "purpose" in q_lower or "why" in q_lower:
-                return self.archetype.respond_to_purpose()
+        if q_lower in ("what are you", "who are you", "what is klomboagi",
+                        "tell me about yourself", "describe yourself"):
             return self.archetype.respond_to_what_are_you()
+        if q_lower in ("what is your purpose", "why do you exist", "what do you do",
+                        "why are you here"):
+            return self.archetype.respond_to_purpose()
+        if q_lower in ("how do you feel", "what is it like to be you",
+                        "do you have feelings", "are you conscious",
+                        "what do you experience"):
+            return self.archetype.respond_to_feelings()
+        if q_lower in ("how are you different from chatgpt", "how are you different",
+                        "are you an llm", "are you a chatbot", "are you like chatgpt",
+                        "what makes you different"):
+            return self.archetype.respond_to_difference()
 
         # Meta: "what have you learned?"
         meta_patterns = ("what have you learned", "what do you know so far",
