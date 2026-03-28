@@ -92,6 +92,15 @@ def main():
             concepts = [c.strip() for c in user_input[6:].split(",")]
             print(f"\n{genesis.activation.think_about(concepts)}\n")
             continue
+        if user_input.lower() == "audit":
+            report = genesis.self_tester.audit(genesis.base._beliefs)
+            print(f"\n{report.summary()}\n")
+            continue
+        if user_input.lower().startswith("explain "):
+            concept = user_input[8:].strip()
+            synth = genesis.synthesizer.explain(concept)
+            print(f"\n  {synth if synth else 'I dont know enough to explain ' + concept}\n")
+            continue
 
         response = genesis.hear(user_input)
         # Indent response for readability

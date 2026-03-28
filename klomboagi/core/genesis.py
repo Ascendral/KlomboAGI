@@ -32,6 +32,9 @@ from klomboagi.core.curriculum import (
 from klomboagi.core.relations import RelationStore, RelationType, INVERSE_RELATIONS
 from klomboagi.reasoning.compute import ComputeEngine
 from klomboagi.reasoning.activation import ActivationNetwork
+from klomboagi.reasoning.hypothesis import HypothesisEngine
+from klomboagi.reasoning.synthesizer import Synthesizer
+from klomboagi.reasoning.self_test import SelfTester
 
 
 @dataclass
@@ -165,6 +168,15 @@ class Genesis:
 
         # Activation network — spreading activation like real neurons
         self.activation = ActivationNetwork(self.relations, self.base._beliefs)
+
+        # Hypothesis engine — reason about unknowns
+        self.hypothesizer = HypothesisEngine(self.relations, self.base._beliefs)
+
+        # Explanation synthesizer — coherent paragraphs not fact dumps
+        self.synthesizer = Synthesizer(self.relations, self.base._beliefs)
+
+        # Self-tester — verify own beliefs
+        self.self_tester = SelfTester(self.compute)
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -627,7 +639,19 @@ class Genesis:
                 parts.append(f"\nTransfer: {entry['message']}")
                 break
 
-        if not parts:
+        # 8. Synthesized explanation (if we have enough)
+        if known_facts and relation_lines:
+            for word in query_words:
+                synth = self.synthesizer.explain(word)
+                if synth and len(synth) > 20:
+                    parts.insert(0, synth)
+                    break
+
+        # 9. If we don't know much — form a hypothesis
+        if not known_facts and not relation_lines:
+            hypothesis = self.hypothesizer.hypothesize(query, list(query_words))
+            if hypothesis:
+                return hypothesis.explain()
             return self.base.hear(message)
 
         return "\n".join(parts)
@@ -786,6 +810,9 @@ class Genesis:
                     self.base._beliefs[statement] = belief
                     self.base.memory.beliefs[statement] = belief.to_dict()
                     self.base.graph.add(subj, is_a=[pred])
+
+        # 3.5. Extract relations from the raw text too
+        self._extract_relations(raw_info)
 
         # 4. Store raw discovery
         self.base._process_discovery(clean_topic, raw_info)
