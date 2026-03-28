@@ -141,6 +141,29 @@ def main():
             result = genesis.counterfactual.what_if(user_input)
             print(f"\n{result.explain()}\n")
             continue
+        if user_input.lower().startswith("generate "):
+            concept = user_input[9:].strip()
+            exp = genesis.generator.explain(concept)
+            print(f"\n  {exp.text}")
+            print(f"  [{exp.facts_used} facts, {exp.relations_used} relations, {'novel' if exp.novel else 'retrieved'}]\n")
+            continue
+        if user_input.lower().startswith("compare "):
+            parts = user_input[8:].strip().split(" and ", 1)
+            if len(parts) == 2:
+                print(f"\n{genesis.generator.compare(parts[0].strip(), parts[1].strip())}\n")
+            else:
+                print("  Usage: compare X and Y\n")
+            continue
+        if user_input.lower() == "failures":
+            s = genesis.failure_memory.stats()
+            print(f"\n  Failures: {s['total_failures']} total, {s['repeated_mistakes']} repeated")
+            for f in genesis.failure_memory.worst_mistakes(5):
+                print(f"    x{f.times_repeated}: {f.description[:60]}")
+            print()
+            continue
+        if user_input.lower().startswith("timeline"):
+            print(f"\n{genesis.temporal.timeline()}\n")
+            continue
         if user_input.lower().startswith("explain "):
             concept = user_input[8:].strip()
             synth = genesis.synthesizer.explain(concept)

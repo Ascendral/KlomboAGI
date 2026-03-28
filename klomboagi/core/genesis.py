@@ -45,6 +45,9 @@ from klomboagi.reasoning.inner_state import InnerStateEngine
 from klomboagi.reasoning.behavioral_loop import BehavioralLoop, BehaviorMode
 from klomboagi.reasoning.counterfactual import CounterfactualEngine
 from klomboagi.reasoning.nlu import NLU
+from klomboagi.reasoning.generator import ExplanationGenerator
+from klomboagi.reasoning.temporal import TemporalEngine
+from klomboagi.reasoning.failure_memory import FailureMemory
 
 
 @dataclass
@@ -218,6 +221,15 @@ class Genesis:
         # NLU — real language understanding beyond regex
         self.nlu = NLU()
 
+        # Explanation generator — construct novel sentences from knowledge
+        self.generator = ExplanationGenerator(self.relations, self.base._beliefs)
+
+        # Temporal engine — when things happen, in what order
+        self.temporal = TemporalEngine()
+
+        # Failure memory — learn from mistakes
+        self.failure_memory = FailureMemory()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -359,6 +371,12 @@ class Genesis:
         elif intent["type"] == "correction":
             self.metacognition.record_correction()
             self.inner.record_failure()  # correction = we were wrong
+            self.failure_memory.record(
+                description=resolved_message,
+                context=self.context.current_topic,
+                approach="previous_answer",
+                what_went_wrong="human corrected us",
+            )
             response = self.base.hear(resolved_message)
         else:
             response = self.base.hear(resolved_message)
@@ -768,12 +786,12 @@ class Genesis:
                 parts.append(f"\nTransfer: {entry['message']}")
                 break
 
-        # 8. Synthesized explanation (if we have enough)
-        if known_facts and relation_lines:
+        # 8. Generated explanation — CONSTRUCT sentences, don't just retrieve
+        if known_facts or relation_lines:
             for word in query_words:
-                synth = self.synthesizer.explain(word)
-                if synth and len(synth) > 20:
-                    parts.insert(0, synth)
+                explanation = self.generator.explain(word)
+                if explanation.novel and explanation.relations_used > 0:
+                    parts.insert(0, explanation.text)
                     break
 
         # 9. If we don't know much — form a hypothesis
