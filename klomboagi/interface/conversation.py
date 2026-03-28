@@ -546,6 +546,14 @@ class Baby:
 
     def _process_general(self, message: str) -> str:
         """Process a general statement — extract any knowledge."""
+        msg = message.strip().lower()
+
+        # Greetings
+        greetings = {"hi", "hello", "hey", "sup", "yo", "greetings", "whats up",
+                     "what's up", "howdy", "good morning", "good evening", "good afternoon"}
+        if msg.rstrip("!.,") in greetings:
+            return "Hello. What would you like to talk about?"
+
         # Try to find "X is Y" patterns even in longer text
         patterns = [
             r"(\w[\w\s]*?) (?:is|are) (?:a |an |the )?(\w[\w\s]*?)(?:\.|,|$)",

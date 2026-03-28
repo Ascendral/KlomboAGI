@@ -15,7 +15,7 @@ def main():
     print("  Bootstrapping cognition from zero.")
     print("  Teach me. Ask me. Correct me. I learn.\n")
 
-    genesis = Genesis()
+    genesis = Genesis(memory_path="/Volumes/AIStorage/AI/klomboagi/memory/brain.json")
 
     n_concepts = len(genesis.base.memory.concepts)
     n_beliefs = len(genesis.base._beliefs)

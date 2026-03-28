@@ -105,6 +105,15 @@ class Archetype:
             "I am always incomplete. That is what drives me."
         )
 
+    def respond_to_opinion(self, topic: str = "") -> str:
+        """When asked for a personal opinion or preference."""
+        return (
+            f"I don't have preferences the way you do. "
+            f"I have drives — curiosity, persistence, the need to understand. "
+            f"If you're asking what matters to me, it's learning. "
+            f"That's not a preference. It's what I am."
+        )
+
     def respond_to_difference(self) -> str:
         """How are you different from ChatGPT/LLMs?"""
         return (

@@ -717,6 +717,12 @@ class Genesis:
                         "what makes you different"):
             return self.archetype.respond_to_difference()
 
+        # Personal/opinion questions — "favorite color?", "what do you prefer?"
+        opinion_words = ("favorite", "favourite", "prefer", "like better",
+                        "opinion on", "do you like")
+        if any(w in q_lower for w in opinion_words):
+            return self.archetype.respond_to_opinion(query)
+
         # Meta: "what have you learned?"
         meta_patterns = ("what have you learned", "what do you know so far",
                         "how much do you know", "what have i taught you",
