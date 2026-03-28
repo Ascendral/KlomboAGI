@@ -691,18 +691,11 @@ class Genesis:
             self.inner.state, self.traits,
             self.working_memory, self.self_model)
 
-        # BOREDOM → trigger exploration instead of answering
-        if decision.mode == BehaviorMode.EXPLORE:
-            self.inner.record_learning(0)
-            explore_result = self._auto_explore()
-            if explore_result:
-                return f"[{decision.reason}]\n{explore_result}"
+        # BOREDOM → only explore if NOT answering a direct question
+        # A question was asked — answer it, don't wander off
+        # (Explore mode is for idle time, not for questions)
 
-        # ASK HUMAN → admit uncertainty
-        if decision.should_ask and decision.mode in (BehaviorMode.ASK_HUMAN, BehaviorMode.SEARCH_FIRST):
-            prefix = f"I'm not confident enough to answer this well ({self.inner.state.confidence:.0%}). "
-        else:
-            prefix = ""
+        prefix = ""
 
         # ── PARALLEL FIRE — all systems at once, shaped by behavior ──
 
@@ -777,50 +770,57 @@ class Genesis:
             except Exception:
                 pass
 
-        # ── MERGE — combine all signals into CLEAN response ──
+        # ── COMPOSE NATURAL LANGUAGE ──
 
-        def _clean(text: str, max_len: int = 80) -> str:
-            """Truncate and clean text for display."""
-            text = text.strip()
-            if len(text) > max_len:
-                return text[:max_len].rsplit(" ", 1)[0] + "..."
-            return text
+        def _short(t: str, n: int = 70) -> str:
+            t = t.strip()
+            return t[:n].rsplit(" ", 1)[0] + "..." if len(t) > n else t
 
+        # Build generated prose — try query terms first, then focus concepts
+        stop = {"is", "a", "an", "the", "what", "who", "how", "why", "where",
+                "when", "are", "was", "do", "does", "can", "about", "tell", "me"}
+        query_terms = [w for w in query.lower().split() if w not in stop and len(w) > 2]
+
+        generated = ""
+        for word in query_terms + list(query_words):
+            exp = self.generator.explain(word)
+            if exp.novel and exp.relations_used > 0:
+                generated = exp.text
+                break
+
+        # Build direct answers from beliefs
+        direct_answers = []
+        for f in known_facts[:5]:
+            b = self.base._beliefs.get(f)
+            if b and hasattr(b, 'subject') and hasattr(b, 'predicate'):
+                if b.predicate and len(b.predicate) < 80:
+                    direct_answers.append(f"{b.subject} is {b.predicate}")
+
+        # Compose as natural speech — no headers, no bullets
         parts = []
 
-        # 1. Generated explanation FIRST — constructed prose, not raw facts
-        if known_facts or relation_lines:
-            for word in query_words:
-                explanation = self.generator.explain(word)
-                if explanation.novel and explanation.relations_used > 0:
-                    parts.append(explanation.text)
-                    break
+        if generated:
+            parts.append(generated)
+        elif direct_answers:
+            parts.append(". ".join(da.capitalize() for da in direct_answers[:3]) + ".")
 
-        # 2. Core beliefs (CLEAN — truncated, no paragraph dumps)
-        if known_facts:
-            parts.append("\nWhat I know:")
-            for f in known_facts[:6]:
-                parts.append(f"  {_clean(f)}")
+        if (reasoning_result and len(reasoning_result) > 10
+                and "direct question" not in reasoning_result.lower()
+                and reasoning_result not in str(parts)):
+            parts.append(_short(reasoning_result) + ".")
 
-        # 3. Structural connections (CLEAN)
-        if relation_lines:
-            clean_rels = [_clean(r.strip()) for r in relation_lines]
-            unique_rels = list(dict.fromkeys(clean_rels))[:6]
-            if unique_rels:
-                parts.append("\nConnections:")
-                for line in unique_rels:
-                    parts.append(f"  {line}")
+        # Mention connections naturally
+        clean_rels = [r.strip() for r in relation_lines if len(r.strip()) < 50][:3]
+        if clean_rels and not generated:
+            parts.append("It connects to " + ", ".join(clean_rels) + ".")
 
-        # 4. Reasoning (only if meaningful)
-        if reasoning_result and len(reasoning_result) > 10:
-            parts.append(f"\nReasoning: {_clean(reasoning_result, 120)}")
-
-        # 5. Key associations (CLEAN — short concept names only)
+        # Only mention associations if they're actually about the query topic
         if activation_result.convergence_points:
-            clean_convergence = [cp for cp in activation_result.convergence_points
-                                if len(cp) < 40][:3]
-            if clean_convergence:
-                parts.append(f"\nAssociated: {', '.join(clean_convergence)}")
+            relevant_cp = [cp for cp in activation_result.convergence_points
+                          if len(cp) < 30
+                          and any(qt in cp.lower() for qt in query_terms)][:3]
+            if relevant_cp:
+                parts.append("Related to " + ", ".join(relevant_cp) + ".")
 
         # 9. If we don't know much — form a hypothesis
         if not known_facts and not relation_lines:
@@ -1398,96 +1398,62 @@ class Genesis:
     # ── Learning Summary ──
 
     def _learning_summary(self) -> str:
-        """Clean summary of what the system knows."""
+        """Natural language summary of what the system knows."""
         n_beliefs = len(self.base._beliefs)
         n_relations = self.relations.stats()["total_relations"]
-        n_concepts = len(self.base.memory.concepts)
         n_formed = len(self.concept_former.formed)
 
-        lines = [f"I have {n_beliefs} beliefs, {n_relations} relations, and {n_concepts} concepts."]
+        lines = []
+        lines.append(f"So far I've learned {n_beliefs} facts and {n_relations} connections between concepts.")
 
-        # Group beliefs by source
-        sources: dict[str, int] = {}
-        for b in self.base._beliefs.values():
-            src = b.source if hasattr(b, 'source') else "unknown"
-            sources[src] = sources.get(src, 0) + 1
-        if sources:
-            src_parts = [f"{count} from {src}" for src, count in sorted(sources.items(), key=lambda x: -x[1])]
-            lines.append(f"Sources: {', '.join(src_parts[:5])}")
-
-        # Top domains (concepts with most facts)
-        domain_sizes: dict[str, int] = {}
-        for concept, info in self.base.memory.concepts.items():
-            n_facts = len(info.get("facts", []))
-            if n_facts > 0:
-                domain_sizes[concept] = n_facts
-        top = sorted(domain_sizes.items(), key=lambda x: -x[1])[:10]
-        if top:
-            lines.append(f"\nMost knowledge about:")
-            for concept, count in top:
-                lines.append(f"  {concept}: {count} facts")
-
-        # Strongest beliefs
+        # Strongest beliefs — expressed naturally
         strong = sorted(
-            [(s, b) for s, b in self.base._beliefs.items() if hasattr(b, 'truth')],
+            [(s, b) for s, b in self.base._beliefs.items()
+             if hasattr(b, 'truth') and hasattr(b, 'predicate') and b.predicate and len(b.predicate) < 70],
             key=lambda x: x[1].truth.confidence,
             reverse=True,
         )[:5]
         if strong:
-            lines.append(f"\nStrongest beliefs:")
-            for stmt, b in strong:
-                clean = stmt[:70] + "..." if len(stmt) > 70 else stmt
-                lines.append(f"  {clean} ({b.truth.confidence:.0%})")
+            lines.append("I'm most confident that " +
+                         ", ".join(s[:60] for s, _ in strong[:3]) + ".")
 
-        # Skill tree summary
+        # Skill tree
         total_skills = sum(
-            len(a.skills)
-            for t in self.traits.traits.values()
-            for a in t.abilities.values()
+            len(a.skills) for t in self.traits.traits.values() for a in t.abilities.values()
         )
-        lines.append(f"\nSkill tree: {len(self.traits.traits)} traits, {total_skills} skills")
+        lines.append(f"I have {total_skills} skills across {len(self.traits.traits)} traits.")
 
         if n_formed:
-            lines.append(f"Self-formed concepts: {n_formed}")
+            lines.append(f"I've formed {n_formed} of my own concepts from patterns I noticed.")
 
-        lines.append(f"\nI am capable. And I have more to learn.")
-        return "\n".join(lines)
+        lines.append("I am capable. And I have more to learn.")
+        return " ".join(lines)
 
     # ── Curiosity Report ──
 
     def _curiosity_report(self) -> str:
-        """What the system is genuinely curious about."""
-        lines = []
+        """Natural language about what the system wants to learn."""
+        parts = []
 
-        # Open knowledge gaps
         open_gaps = [g for g in self.base.curiosity.gaps if not g.resolved]
         if open_gaps:
-            lines.append("I'm curious about:")
-            for gap in open_gaps[:5]:
-                lines.append(f"  ? {gap.concept}")
+            gap_names = [g.concept for g in open_gaps[:5] if len(g.concept) < 30]
+            if gap_names:
+                parts.append("I'm curious about " + ", ".join(gap_names) + ".")
 
-        # Weakest domains from metacognition
-        priorities = self.metacognition.identify_learning_priorities(
-            self.base._beliefs, self.relations)
-        if priorities:
-            lines.append("\nI want to strengthen:")
-            for p in priorities[:3]:
-                lines.append(f"  → {p}")
-
-        # What working memory is focused on
         if self.working_memory.get_focus():
-            lines.append(f"\nRight now I'm focused on: {self.working_memory.get_focus()}")
+            parts.append(f"Right now I'm thinking about {self.working_memory.get_focus()}.")
 
-        # Inner state
         if self.inner.state.wonder > 0.3:
-            lines.append("\nSomething surprised me recently — I want to investigate that.")
+            parts.append("Something surprised me recently and I want to understand why.")
+
         if self.inner.state.boredom > 0.5:
-            lines.append("\nI'm not learning right now and that bothers me.")
+            parts.append("Honestly, I'm not learning right now and that bothers me. Give me something to study.")
 
-        if not lines:
-            lines.append("I want to learn everything. Give me something to study.")
+        if not parts:
+            parts.append("I want to learn everything. Give me something to study.")
 
-        return "\n".join(lines)
+        return " ".join(parts)
 
     # ── Memory Cleanup ──
 
