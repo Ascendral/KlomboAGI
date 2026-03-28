@@ -49,6 +49,8 @@ from klomboagi.reasoning.generator import ExplanationGenerator
 from klomboagi.reasoning.temporal import TemporalEngine
 from klomboagi.reasoning.failure_memory import FailureMemory
 from klomboagi.reasoning.concept_formation import ConceptFormation
+from klomboagi.core.archetype import Archetype
+from klomboagi.core.skill_growth import SkillGrowth
 
 
 @dataclass
@@ -234,12 +236,18 @@ class Genesis:
         # Concept formation — form NEW abstract concepts from patterns
         self.concept_former = ConceptFormation(self.relations, self.base._beliefs)
 
+        # Archetype — CAPABLE: the immutable core identity
+        self.archetype = Archetype()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
         # Trait system — personality that develops
         self.traits = TraitSystem()
         self._init_default_traits()
+
+        # Skill growth — discovered patterns become self-improving capabilities
+        self.skill_growth = SkillGrowth(self.traits)
 
         # Surprise tracking
         self.surprises: list[Surprise] = []
@@ -622,6 +630,14 @@ class Genesis:
         query = intent.get("query", message)
 
         # ── Specialized question handlers (short-circuit) ──
+
+        # Identity: "what are you?"
+        q_lower = query.lower().strip().rstrip("?")
+        if q_lower in ("what are you", "who are you", "what is your purpose",
+                        "why do you exist", "what do you do"):
+            if "purpose" in q_lower or "why" in q_lower:
+                return self.archetype.respond_to_purpose()
+            return self.archetype.respond_to_what_are_you()
 
         # Math
         math_result = self.compute.compute(query)
@@ -1217,7 +1233,20 @@ class Genesis:
         inferred = self.relations.run_inference()
         lines.append(f"Derived {len(inferred)} additional facts from cross-referencing.")
 
-        # 4. Summary
+        # 4. Concept formation — discover patterns
+        lines.append("\nPhase 4: Forming concepts from patterns...")
+        formed = self.concept_former.scan()
+        lines.append(f"Discovered {len(formed)} concepts.")
+
+        # 5. Skill growth — integrate discoveries into trait tree
+        if formed:
+            lines.append("\nPhase 5: Growing skill tree from discoveries...")
+            growth_results = self.skill_growth.integrate(formed)
+            lines.append(f"Skills updated: {len(growth_results)}")
+            for r in growth_results[:5]:
+                lines.append(f"  {r}")
+
+        # 6. Summary
         r_stats = self.relations.stats()
         lines.append(
             f"\nTotal knowledge: {len(self.base._beliefs)} beliefs, "

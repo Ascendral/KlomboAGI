@@ -156,7 +156,20 @@ def main():
             continue
         if user_input.lower() in ("concepts", "formed", "formed concepts"):
             formed = genesis.concept_former.scan()
-            print(f"\n  {genesis.concept_former.report()}\n")
+            growth = genesis.skill_growth.integrate(formed)
+            print(f"\n  {genesis.concept_former.report()}")
+            if growth:
+                print(f"\n  Skills grown: {len(growth)}")
+                for g in growth[:10]:
+                    print(f"    {g}")
+            print()
+            continue
+        if user_input.lower() in ("skills", "skill tree", "tree"):
+            print(f"\n{genesis.skill_growth.report()}\n")
+            continue
+        if user_input.lower() in ("identity", "who am i", "what am i", "archetype"):
+            print(f"\n  {genesis.archetype.identity()}\n")
+            print(f"  {genesis.archetype.values()}\n")
             continue
         if user_input.lower() == "failures":
             s = genesis.failure_memory.stats()
