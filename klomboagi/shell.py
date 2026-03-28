@@ -167,6 +167,9 @@ def main():
         if user_input.lower() in ("skills", "skill tree", "tree"):
             print(f"\n{genesis.skill_growth.report()}\n")
             continue
+        if user_input.lower() in ("cleanup", "clean", "purge"):
+            print(f"\n  {genesis.cleanup_memory()}\n")
+            continue
         if user_input.lower() in ("identity", "who am i", "what am i", "archetype"):
             print(f"\n  {genesis.archetype.identity()}\n")
             print(f"  {genesis.archetype.values()}\n")

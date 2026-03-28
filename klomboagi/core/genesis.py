@@ -639,6 +639,13 @@ class Genesis:
                 return self.archetype.respond_to_purpose()
             return self.archetype.respond_to_what_are_you()
 
+        # Meta: "what have you learned?"
+        meta_patterns = ("what have you learned", "what do you know so far",
+                        "how much do you know", "what have i taught you",
+                        "summarize your knowledge", "what do you know")
+        if any(q_lower.startswith(p) or q_lower == p for p in meta_patterns):
+            return self._learning_summary()
+
         # Math
         math_result = self.compute.compute(query)
         if math_result.success and math_result.result != 0:
@@ -763,56 +770,50 @@ class Genesis:
             except Exception:
                 pass
 
-        # ── MERGE — combine all signals into unified response ──
+        # ── MERGE — combine all signals into CLEAN response ──
+
+        def _clean(text: str, max_len: int = 80) -> str:
+            """Truncate and clean text for display."""
+            text = text.strip()
+            if len(text) > max_len:
+                return text[:max_len].rsplit(" ", 1)[0] + "..."
+            return text
 
         parts = []
 
-        # Core answer (beliefs, sorted by relevance)
-        if known_facts:
-            parts.append("What I know:")
-            for f in known_facts[:8]:
-                b = self.base._beliefs.get(f)
-                conf = f" ({b.truth.confidence:.0%})" if b else ""
-                parts.append(f"  {f}{conf}")
-
-        # Structural connections
-        if relation_lines:
-            unique_rels = list(dict.fromkeys(relation_lines))
-            parts.append("\nConnections:")
-            for line in unique_rels[:8]:
-                parts.append(line)
-
-        # Logical reasoning
-        if reasoning_result:
-            parts.append(f"\nReasoning: {reasoning_result}")
-
-        # Neural associations — convergence points
-        if activation_result.convergence_points:
-            parts.append("\nNeural associations:")
-            for cp in activation_result.convergence_points[:5]:
-                node = next((n for n in activation_result.activated if n.name == cp), None)
-                if node:
-                    parts.append(f"  * {cp} (from: {', '.join(node.sources)})")
-        elif activation_result.activated:
-            top = activation_result.top(3)
-            if top:
-                parts.append("\nAssociated concepts:")
-                for node in top:
-                    parts.append(f"  ~ {node.name} ({node.activation:.2f})")
-
-        # Pattern from CognitionLoop
-        for entry in state.trace:
-            if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
-                parts.append(f"\nTransfer: {entry['message']}")
-                break
-
-        # 8. Generated explanation — CONSTRUCT sentences, don't just retrieve
+        # 1. Generated explanation FIRST — constructed prose, not raw facts
         if known_facts or relation_lines:
             for word in query_words:
                 explanation = self.generator.explain(word)
                 if explanation.novel and explanation.relations_used > 0:
-                    parts.insert(0, explanation.text)
+                    parts.append(explanation.text)
                     break
+
+        # 2. Core beliefs (CLEAN — truncated, no paragraph dumps)
+        if known_facts:
+            parts.append("\nWhat I know:")
+            for f in known_facts[:6]:
+                parts.append(f"  {_clean(f)}")
+
+        # 3. Structural connections (CLEAN)
+        if relation_lines:
+            clean_rels = [_clean(r.strip()) for r in relation_lines]
+            unique_rels = list(dict.fromkeys(clean_rels))[:6]
+            if unique_rels:
+                parts.append("\nConnections:")
+                for line in unique_rels:
+                    parts.append(f"  {line}")
+
+        # 4. Reasoning (only if meaningful)
+        if reasoning_result and len(reasoning_result) > 10:
+            parts.append(f"\nReasoning: {_clean(reasoning_result, 120)}")
+
+        # 5. Key associations (CLEAN — short concept names only)
+        if activation_result.convergence_points:
+            clean_convergence = [cp for cp in activation_result.convergence_points
+                                if len(cp) < 40][:3]
+            if clean_convergence:
+                parts.append(f"\nAssociated: {', '.join(clean_convergence)}")
 
         # 9. If we don't know much — form a hypothesis
         if not known_facts and not relation_lines:
@@ -1386,6 +1387,108 @@ class Genesis:
                 lines.append(f"  {stmt}")
 
         return "\n".join(lines)
+
+    # ── Learning Summary ──
+
+    def _learning_summary(self) -> str:
+        """Clean summary of what the system knows."""
+        n_beliefs = len(self.base._beliefs)
+        n_relations = self.relations.stats()["total_relations"]
+        n_concepts = len(self.base.memory.concepts)
+        n_formed = len(self.concept_former.formed)
+
+        lines = [f"I have {n_beliefs} beliefs, {n_relations} relations, and {n_concepts} concepts."]
+
+        # Group beliefs by source
+        sources: dict[str, int] = {}
+        for b in self.base._beliefs.values():
+            src = b.source if hasattr(b, 'source') else "unknown"
+            sources[src] = sources.get(src, 0) + 1
+        if sources:
+            src_parts = [f"{count} from {src}" for src, count in sorted(sources.items(), key=lambda x: -x[1])]
+            lines.append(f"Sources: {', '.join(src_parts[:5])}")
+
+        # Top domains (concepts with most facts)
+        domain_sizes: dict[str, int] = {}
+        for concept, info in self.base.memory.concepts.items():
+            n_facts = len(info.get("facts", []))
+            if n_facts > 0:
+                domain_sizes[concept] = n_facts
+        top = sorted(domain_sizes.items(), key=lambda x: -x[1])[:10]
+        if top:
+            lines.append(f"\nMost knowledge about:")
+            for concept, count in top:
+                lines.append(f"  {concept}: {count} facts")
+
+        # Strongest beliefs
+        strong = sorted(
+            [(s, b) for s, b in self.base._beliefs.items() if hasattr(b, 'truth')],
+            key=lambda x: x[1].truth.confidence,
+            reverse=True,
+        )[:5]
+        if strong:
+            lines.append(f"\nStrongest beliefs:")
+            for stmt, b in strong:
+                clean = stmt[:70] + "..." if len(stmt) > 70 else stmt
+                lines.append(f"  {clean} ({b.truth.confidence:.0%})")
+
+        # Skill tree summary
+        total_skills = sum(
+            len(a.skills)
+            for t in self.traits.traits.values()
+            for a in t.abilities.values()
+        )
+        lines.append(f"\nSkill tree: {len(self.traits.traits)} traits, {total_skills} skills")
+
+        if n_formed:
+            lines.append(f"Self-formed concepts: {n_formed}")
+
+        lines.append(f"\nI am capable. And I have more to learn.")
+        return "\n".join(lines)
+
+    # ── Memory Cleanup ──
+
+    def cleanup_memory(self) -> str:
+        """
+        Purge garbage beliefs — paragraphs, fragments, duplicates.
+
+        Returns summary of what was cleaned.
+        """
+        removed = 0
+        to_remove = []
+
+        for statement, belief in self.base._beliefs.items():
+            # Remove beliefs with predicates longer than 80 chars (paragraphs)
+            if hasattr(belief, 'predicate') and belief.predicate and len(belief.predicate) > 80:
+                to_remove.append(statement)
+                continue
+
+            # Remove beliefs with subjects that are pronouns or fragments
+            if hasattr(belief, 'subject') and belief.subject:
+                subj = belief.subject.lower()
+                if subj in ("it", "this", "that", "which", "they", "he", "she", "we",
+                           "these", "those", "there", "here", "what"):
+                    to_remove.append(statement)
+                    continue
+
+            # Remove beliefs with garbage predicates
+            if hasattr(belief, 'predicate') and belief.predicate:
+                pred = belief.predicate.lower()
+                if (pred.startswith(("same", "no longer", "not yet"))
+                        or ":" in pred[:20]  # Contains colons (likely garbage parsing)
+                        or pred.count(",") > 3):  # Too many commas
+                    to_remove.append(statement)
+
+        for stmt in to_remove:
+            del self.base._beliefs[stmt]
+            self.base.memory.beliefs.pop(stmt, None)
+            removed += 1
+
+        if removed:
+            self.base.memory.save(self.base.memory_path)
+            self.save_state()
+
+        return f"Cleaned {removed} garbage beliefs. {len(self.base._beliefs)} remaining."
 
     # ── Auto-Exploration (triggered by boredom) ──
 
