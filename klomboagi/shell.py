@@ -167,6 +167,12 @@ def main():
         if user_input.lower() in ("skills", "skill tree", "tree"):
             print(f"\n{genesis.skill_growth.report()}\n")
             continue
+        if user_input.lower() == "eval":
+            from klomboagi.evals.genesis_eval import run_evals
+            print("\n  Running evals...")
+            report = run_evals(genesis)
+            print(f"\n{report.summary()}\n")
+            continue
         if user_input.lower() in ("cleanup", "clean", "purge"):
             print(f"\n  {genesis.cleanup_memory()}\n")
             continue
