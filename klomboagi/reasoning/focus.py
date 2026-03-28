@@ -47,22 +47,27 @@ class FocusEngine:
 
         scored_beliefs = []
         for statement, belief in beliefs.items():
-            score = 0.0
+            # Must have keyword match — working memory alone isn't enough
+            keyword_score = 0.0
             if hasattr(belief, 'subject') and belief.subject:
                 subj_words = set(belief.subject.lower().split()) - STOP_WORDS
                 overlap = query_words & subj_words
                 if overlap:
-                    score += 1.0 * len(overlap) / max(len(subj_words), 1)
+                    keyword_score += 1.0 * len(overlap) / max(len(subj_words), 1)
             if hasattr(belief, 'predicate') and belief.predicate:
                 pred_words = set(belief.predicate.lower().split()) - STOP_WORDS
                 if query_words & pred_words:
-                    score += 0.3
+                    keyword_score += 0.3
+
+            if keyword_score == 0:
+                continue  # No keyword match = not relevant, period
+
+            score = keyword_score
             if hasattr(belief, 'truth'):
                 score *= (0.5 + belief.truth.confidence * 0.5)
             if working_memory and hasattr(belief, 'subject') and working_memory.contains(belief.subject):
                 score += 0.3
-            if score > 0:
-                scored_beliefs.append((statement, score))
+            scored_beliefs.append((statement, score))
 
         scored_beliefs.sort(key=lambda x: x[1], reverse=True)
 

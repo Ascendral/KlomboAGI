@@ -854,77 +854,128 @@ class Genesis:
             except Exception:
                 pass
 
-        # ── COMPOSE NATURAL LANGUAGE ──
+        # ── ALL SYSTEMS FIRE — compose from everything ──
 
-        def _short(t: str, n: int = 70) -> str:
-            t = t.strip()
-            return t[:n].rsplit(" ", 1)[0] + "..." if len(t) > n else t
-
-        # Build generated prose — try query terms first, then focus concepts
         stop = {"is", "a", "an", "the", "what", "who", "how", "why", "where",
-                "when", "are", "was", "do", "does", "can", "about", "tell", "me"}
+                "when", "are", "was", "do", "does", "can", "about", "tell", "me",
+                "you", "your", "think", "know", "like", "would", "should", "could",
+                "have", "has", "had", "will", "been", "being", "there", "their"}
         query_terms = [w for w in query.lower().split() if w not in stop and len(w) > 2]
 
+        # PREDICTIVE PROCESSING — predict before answering, learn from error later
+        prediction = self.predictor.predict(
+            query_terms[0] if query_terms else query, self.base._beliefs)
+
+        # FAILURE MEMORY — check if we've failed this kind of question before
+        for qt in query_terms:
+            warning = self.failure_memory.check_approach(qt, "answer")
+            if warning:
+                # We've failed here before — switch approach
+                decision = self.behavior.decide(self.inner.state, self.traits)
+                break
+
+        # CONSTRUCTIVE MEMORY — reconstruct understanding (not raw retrieval)
+        constructed = None
+        for qt in query_terms:
+            mem = self.constructive.reconstruct(qt)
+            if mem.confidence > 0.1 and len(mem.fragments) > 0:
+                constructed = mem
+                break
+
+        # EXPLANATION GENERATOR — construct prose from relations
+        # Try query_terms, then ONLY focus concepts that match query_terms
         generated = ""
-        for word in query_terms + list(query_words):
+        safe_focus = [c for c in query_words if any(qt in c for qt in query_terms)]
+        for word in query_terms + safe_focus:
             exp = self.generator.explain(word)
             if exp.novel and exp.relations_used > 0:
                 generated = exp.text
                 break
 
-        # Build direct answers from beliefs
-        direct_answers = []
-        for f in known_facts[:5]:
-            b = self.base._beliefs.get(f)
-            if b and hasattr(b, 'subject') and hasattr(b, 'predicate'):
-                if b.predicate and len(b.predicate) < 80:
-                    direct_answers.append(f"{b.subject} is {b.predicate}")
+        # FREE ENERGY — decide: answer, search, or explore?
+        fe_action = self.free_energy.select_action({
+            "query": query,
+            "confidence": prediction.confidence,
+            "has_beliefs": bool(known_facts),
+            "has_relations": bool(relation_lines),
+            "active_gaps": len([g for g in self.base.curiosity.gaps if not g.resolved]),
+        })
 
-        # Compose as natural speech — no headers, no bullets
+        # If free energy says search and we have nothing — search
+        if fe_action.action_type == "search" and not known_facts and not generated:
+            clean_q = query_terms[-1] if query_terms else query
+            search_result = self.base._curious_lookup(clean_q)
+            if search_result and "couldn't find" not in search_result.lower():
+                # PREDICTIVE PROCESSING — compare prediction to what we found
+                self.predictor.compare(prediction, search_result[:100])
+                return search_result
+
+        # If free energy says ask human — do it
+        if fe_action.action_type == "ask_human" and not known_facts and not generated:
+            topic = " ".join(query_terms[:2]) if query_terms else "that"
+            return f"I don't know about {topic} yet. Can you teach me?"
+
+        # COMPOSE — use constructive memory if available, else generator, else beliefs
         parts = []
 
-        if generated:
+        if constructed and constructed.confidence > 0.2 and generated:
             parts.append(generated)
-        elif direct_answers:
-            parts.append(". ".join(da.capitalize() for da in direct_answers[:3]) + ".")
+        elif constructed and constructed.confidence > 0.2:
+            parts.append(constructed.reconstruction)
+        elif generated:
+            parts.append(generated)
+        elif known_facts:
+            for f in known_facts[:3]:
+                b = self.base._beliefs.get(f)
+                if b and hasattr(b, 'predicate') and b.predicate and len(b.predicate) < 80:
+                    parts.append(f"{b.subject} is {b.predicate}.".capitalize())
 
+        # If NOTHING produced an answer — obey free energy decision
+        if not parts:
+            if fe_action.action_type == "ask_human":
+                topic = " ".join(query_terms[:2]) if query_terms else "that"
+                return f"I don't know about {topic} yet. Can you teach me?"
+            if fe_action.action_type in ("search", "explore"):
+                clean_q = query_terms[-1] if query_terms else query
+                result = self.base._curious_lookup(clean_q)
+                if result and "couldn't find" not in result.lower():
+                    self.predictor.compare(prediction, result[:100])
+                    return result
+
+        # REASONING result (if meaningful)
         if (reasoning_result and len(reasoning_result) > 10
                 and "direct question" not in reasoning_result.lower()
                 and reasoning_result not in str(parts)):
-            parts.append(_short(reasoning_result) + ".")
+            parts.append(reasoning_result[:70] + ".")
 
-        # Mention connections naturally
-        clean_rels = [r.strip() for r in relation_lines if len(r.strip()) < 50][:3]
-        if clean_rels and not generated:
-            parts.append("It connects to " + ", ".join(clean_rels) + ".")
+        # WORKSPACE — submit the answer to global broadcast for other systems
+        if parts:
+            self.workspace.submit(
+                parts[0][:60], SignalType.PERCEPTION, 0.6, "answer_pipeline")
 
-        # Only mention associations if they're actually about the query topic
-        if activation_result.convergence_points:
-            relevant_cp = [cp for cp in activation_result.convergence_points
-                          if len(cp) < 30
-                          and any(qt in cp.lower() for qt in query_terms)][:3]
-            if relevant_cp:
-                parts.append("Related to " + ", ".join(relevant_cp) + ".")
+        # ATTENTION ECONOMY — reward concepts that contributed
+        for qt in query_terms:
+            if any(qt in p.lower() for p in parts):
+                self.attention_economy.reward(qt, 3.0)
 
-        # 9. If we don't know much — try to figure it out
-        if not known_facts and not relation_lines and not generated:
-            # Try hypothesis from existing knowledge
+        # PREDICTIVE PROCESSING — compare our answer to our prediction
+        if parts:
+            self.predictor.compare(prediction, parts[0][:100])
+
+        # If we still have nothing — hypothesis → search → admit
+        if not parts:
             hypothesis = self.hypothesizer.hypothesize(query, list(query_words) + query_terms)
             if hypothesis:
                 return hypothesis.explain()
 
-            # Try searching — use the key topic, not the full question
             clean_query = query_terms[-1] if query_terms else query
             search_result = self.base._curious_lookup(clean_query)
             if search_result and "couldn't find" not in search_result.lower():
+                self.predictor.compare(prediction, search_result[:100])
                 return search_result
 
-            # Genuinely don't know — say so naturally
             topic = " ".join(query_terms[:2]) if query_terms else "that"
             return f"I don't know about {topic} yet. Teach me, or tell me to learn about it."
-
-        if not parts:
-            return f"I don't have enough to say about that yet."
 
         return " ".join(parts)
 

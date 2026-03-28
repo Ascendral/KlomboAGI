@@ -66,16 +66,25 @@ class ConstructiveMemory:
         sources = []
         concept_lower = concept.lower()
 
-        # 1. Direct beliefs
+        # 1. Direct beliefs — MUST have direct knowledge to proceed
+        has_direct = False
         for stmt, belief in self.beliefs.items():
             if hasattr(belief, 'subject') and belief.subject == concept_lower:
                 if belief.predicate and len(belief.predicate) < 80:
                     weight = belief.truth.confidence if hasattr(belief, 'truth') else 0.5
-                    # Boost if recently accessed (ACT-R)
                     if self.decay and self.decay.retrievable(concept_lower):
                         weight *= 1.3
                     fragments.append((f"{concept} is {belief.predicate}", weight))
                     sources.append("direct_belief")
+                    has_direct = True
+
+        # If no direct beliefs about this concept, return empty
+        if not has_direct:
+            return ReconstructedMemory(
+                concept=concept, fragments=[], sources=[],
+                reconstruction=f"I have no understanding of {concept}.",
+                confidence=0.0, context_influence=0.0,
+            )
 
         # 2. Inherited from parents (is_a chain)
         if hasattr(self.relations, 'get_forward'):
