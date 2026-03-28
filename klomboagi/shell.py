@@ -26,7 +26,9 @@ def main():
         print("  Starting empty — I know nothing yet.\n")
 
     print("  Commands: status, personality, teach <domain>, teach all, teach everything")
-    print("           domains, connect <concept>, quit\n")
+    print("           domains, connect <concept>, think <a>,<b>, path <x> to <y>")
+    print("           read <source>, ingest, explain <concept>, audit, reflect")
+    print("           memory, goals, study <topic>, autolearn, quit\n")
 
     while True:
         try:
@@ -123,6 +125,28 @@ def main():
             source = user_input[5:].strip()
             print(f"\n  Reading and learning from: {source}")
             print(f"  {genesis.read_and_learn(source)}\n")
+            continue
+        if user_input.lower().startswith("study "):
+            topic = user_input[6:].strip()
+            print(f"\n  Planning learning for: {topic}")
+            genesis.planner.plan_learning(topic, f"user requested: {topic}")
+            print(f"  {genesis.planner.plan.summary()}")
+            print(f"\n  Executing learning plan...")
+            results = genesis.planner.execute_all(genesis, max_steps=10)
+            for r in results:
+                print(f"    [{r['status']}] {r['topic']}: +{r.get('facts_gained', 0)} facts")
+            print(f"\n  Done. {len(genesis.base._beliefs)} total beliefs.\n")
+            continue
+        if user_input.lower() == "autolearn":
+            print("\n  Auto-generating learning plan from gaps...")
+            genesis.planner.plan_from_gaps(
+                genesis.base._beliefs, genesis.relations, genesis.metacognition)
+            print(f"  {genesis.planner.plan.summary()}")
+            print(f"\n  Executing...")
+            results = genesis.planner.execute_all(genesis, max_steps=15)
+            for r in results:
+                print(f"    [{r['status']}] {r['topic']}: +{r.get('facts_gained', 0)} facts")
+            print(f"\n  Done. {len(genesis.base._beliefs)} total beliefs.\n")
             continue
         if user_input.lower().startswith("ingest"):
             from klomboagi.core.ingest import ingest_all, ingest_report

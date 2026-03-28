@@ -38,6 +38,7 @@ from klomboagi.reasoning.self_test import SelfTester
 from klomboagi.reasoning.working_mem import WorkingMemory
 from klomboagi.reasoning.metacognition import MetacognitionEngine
 from klomboagi.reasoning.focus import FocusEngine
+from klomboagi.reasoning.learning_planner import LearningPlanner
 
 
 @dataclass
@@ -189,6 +190,9 @@ class Genesis:
 
         # Focus engine — filter noise, find relevance
         self.focus = FocusEngine()
+
+        # Learning planner — autonomous goal-directed learning
+        self.planner = LearningPlanner()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
