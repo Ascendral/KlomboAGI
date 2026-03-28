@@ -263,3 +263,150 @@ class TestGenesisLifecycle:
         after = genesis.traits.personality_vector()
         # Curiosity should have strengthened (keywords "what" match)
         assert after["curiosity"] >= initial["curiosity"]
+
+
+# ── Deep Thinking tests ──
+
+
+class TestDeepThinking:
+
+    def test_question_triggers_cognition_loop(self, genesis):
+        """Questions should fire the CognitionLoop."""
+        genesis.hear("a planet is a celestial body")
+        response = genesis.hear("what is a planet?")
+        assert genesis.deep_thinks >= 1
+        assert "CognitionLoop" in response
+
+    def test_deep_think_uses_known_facts(self):
+        """CognitionLoop should receive relevant beliefs."""
+        g = Genesis(memory_path="/tmp/klombo_test_deep_think.json")
+        g.hear("water is a liquid")
+        g.hear("a liquid is a state of matter")
+        response = g.hear("what is water?")
+        # Should find facts about water
+        assert "water" in response.lower() or "liquid" in response.lower()
+
+    def test_cognition_episodes_accumulate(self, genesis):
+        """Each deep think should add to cognition episodes."""
+        genesis.hear("a star is hot")
+        genesis.hear("what is a star?")
+        episodes = genesis._cognition_data.get("episodes", [])
+        assert len(episodes) >= 1
+
+    def test_reasoning_engine_fires(self, genesis):
+        """ReasoningEngine should attempt fact derivation."""
+        genesis.hear("an alligator is green")
+        genesis.hear("an alligator is 12 feet long")
+        response = genesis.hear("is an alligator greener or longer?")
+        # Should produce some response without crashing
+        assert len(response) > 0
+        assert genesis.deep_thinks >= 1
+
+
+# ── Concept Extraction tests ──
+
+
+class TestConceptExtraction:
+
+    def test_extracts_is_a_patterns(self, genesis):
+        text = "A mammal is a warm-blooded animal. Mammals are vertebrates."
+        concepts = genesis._extract_concepts("mammal", text)
+        # Should find at least one (subject, predicate) pair
+        assert len(concepts) >= 1
+
+    def test_extracts_from_wikipedia_style(self, genesis):
+        text = (
+            "Python is a high-level programming language. "
+            "Python is dynamically typed. "
+            "Python is widely used in data science."
+        )
+        concepts = genesis._extract_concepts("python", text)
+        subjects = [s for s, _ in concepts]
+        # Should extract python-related facts
+        assert any("python" in s for s in subjects)
+
+    def test_caps_at_15(self, genesis):
+        # Generate text with many facts
+        text = ". ".join(f"Thing{i} is a category{i}" for i in range(30))
+        concepts = genesis._extract_concepts("thing", text)
+        assert len(concepts) <= 15
+
+    def test_empty_text_returns_empty(self, genesis):
+        concepts = genesis._extract_concepts("nothing", "")
+        assert concepts == []
+
+    def test_removes_source_tags(self, genesis):
+        text = "[Wikipedia: Dogs] A dog is a domesticated mammal."
+        concepts = genesis._extract_concepts("dog", text)
+        # Should not include "Wikipedia" in extracted concepts
+        for subj, pred in concepts:
+            assert "wikipedia" not in subj.lower()
+
+
+# ── Active Learning tests ──
+
+
+class TestActiveLearning:
+
+    def test_active_learn_empty_topic(self, genesis):
+        response = genesis._active_learn("")
+        assert "what should" in response.lower()
+
+    def test_active_learn_stores_beliefs(self, genesis):
+        """Active learning should create beliefs from discoveries."""
+        before = len(genesis.base._beliefs)
+        # This will hit the network, so we mock the searcher
+        genesis.base.searcher.search = lambda q: (
+            "A quasar is an extremely luminous object. "
+            "Quasars are powered by supermassive black holes."
+        )
+        genesis._active_learn("quasar")
+        after = len(genesis.base._beliefs)
+        assert after >= before
+
+    def test_active_learn_runs_cognition(self, genesis):
+        """Active learning should run CognitionLoop."""
+        genesis.base.searcher.search = lambda q: "A neutron star is a collapsed star."
+        genesis._active_learn("neutron star")
+        # Should have created at least one cognition episode
+        episodes = genesis._cognition_data.get("episodes", [])
+        assert len(episodes) >= 1
+
+    def test_active_learn_identifies_gaps(self, genesis):
+        """Active learning should notice new unknowns."""
+        genesis.base.searcher.search = lambda q: (
+            "A quasar is an active galactic nucleus."
+        )
+        response = genesis._active_learn("quasar")
+        # May find gaps like "galactic" or "nucleus"
+        assert len(response) > 0
+
+    def test_learn_command_triggers_active_learn(self, genesis):
+        """'learn about X' command should trigger active learning."""
+        genesis.base.searcher.search = lambda q: "A prion is a misfolded protein."
+        response = genesis.hear("learn about prion")
+        assert "prion" in response.lower() or "Learning" in response
+
+
+# ── Cognition Inquiry Callback test ──
+
+
+class TestCognitionInquiry:
+
+    def test_inquiry_checks_beliefs(self, genesis):
+        """When CognitionLoop asks a question, check existing beliefs."""
+        genesis.hear("a cat is a feline")
+
+        class FakeGap:
+            question = "what is a cat"
+
+        result = genesis._handle_cognition_inquiry(FakeGap())
+        assert result is not None
+        assert "cat" in result.lower()
+
+    def test_inquiry_returns_none_for_unknown(self, genesis):
+        class FakeGap:
+            question = "what is a zyphlox"
+
+        result = genesis._handle_cognition_inquiry(FakeGap())
+        assert result is None

@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from klomboagi.interface.conversation import Baby, Memory
 from klomboagi.core.traits import TraitSystem, Trait, Ability, Skill
 from klomboagi.reasoning.truth import TruthValue, Belief, EvidenceStamp
+from klomboagi.reasoning.cognition_loop import CognitionLoop, CognitionPhase
+from klomboagi.reasoning.engine import ReasoningEngine
 
 
 @dataclass
@@ -142,6 +144,12 @@ class Genesis:
         # Base conversation system — already handles teaching, questions, commands
         self.base = Baby(memory_path=memory_path)
 
+        # CognitionLoop — the full 10-phase reasoning engine
+        self._init_cognition_loop()
+
+        # Reasoning engine — for direct fact derivation
+        self.reasoning_engine = ReasoningEngine()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -159,6 +167,35 @@ class Genesis:
         self.total_turns = 0
         self.total_surprises = 0
         self.total_proactive = 0
+        self.deep_thinks = 0
+
+    def _init_cognition_loop(self) -> None:
+        """Wire the CognitionLoop with a lightweight mock storage."""
+        from unittest.mock import MagicMock
+
+        # Lightweight storage that satisfies CognitionLoop's interface
+        # Uses in-memory dicts instead of the full file system
+        self._cognition_data: dict[str, object] = {
+            "episodes": [],
+            "abstractions": [],
+            "knowledge_gaps": [],
+            "causal_graph": {"nodes": [], "edges": {}},
+        }
+
+        storage = MagicMock()
+        storage.load_json = MagicMock(
+            side_effect=lambda key, default=None:
+                self._cognition_data.get(key, default if default is not None else [])
+        )
+        def _save(key, data):
+            self._cognition_data[key] = data
+        storage.save_json = MagicMock(side_effect=_save)
+        storage.event_log = MagicMock()
+
+        self.cognition = CognitionLoop(storage, trait_system=None)  # traits wired later
+
+        # Wire inquiry callback — when the brain has a question, ask the human
+        self.cognition.on_inquiry = self._handle_cognition_inquiry
 
     def _init_default_traits(self) -> None:
         """
@@ -234,8 +271,13 @@ class Genesis:
             "known_entities": self.context.entities_mentioned,
         })
 
-        # 5. Process through base system
-        response = self.base.hear(resolved_message)
+        # 5. Route: deep think for questions, base system for everything else
+        if intent["type"] == "question":
+            response = self._think_deep(resolved_message, intent)
+        elif intent["type"] == "command" and intent.get("command") == "learn":
+            response = self._active_learn(intent.get("target", ""))
+        else:
+            response = self.base.hear(resolved_message)
 
         # 6. Update dialog context
         self.context.update(intent, resolved_message)
@@ -414,6 +456,241 @@ class Genesis:
 
         return None
 
+    # ── Deep Thinking ──
+
+    def _think_deep(self, message: str, intent: dict) -> str:
+        """
+        Fire the full CognitionLoop for a question.
+
+        Instead of simple belief lookup, runs the 10-phase pipeline:
+        perceive → remember → transfer → inquire → hypothesize → evaluate → act → observe → learn
+
+        Falls back to base system if CognitionLoop adds nothing.
+        """
+        self.deep_thinks += 1
+        query = intent.get("query", message)
+
+        # Gather known facts about the topic
+        known_facts = []
+        query_words = set(query.lower().split())
+        for statement, belief in self.base._beliefs.items():
+            stmt_words = set(statement.lower().split())
+            if stmt_words & query_words:
+                known_facts.append(statement)
+
+        # Build problem for CognitionLoop
+        problem = {
+            "description": query,
+            "known_facts": known_facts[:20],
+            "known_entities": self.context.entities_mentioned,
+            "referenced_entities": [w for w in query_words if len(w) > 2],
+            "expected_outcome": f"answer to: {query}",
+        }
+
+        # Run CognitionLoop
+        state = self.cognition.think(problem)
+
+        # Extract insights from the trace
+        insights = []
+        for entry in state.trace:
+            if entry["phase"] == "learn" and entry.get("data"):
+                insights.append(entry["message"])
+            if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
+                insights.append(f"Transfer: {entry['message']}")
+
+        # Also try ReasoningEngine for dimensional/property questions
+        reasoning_result = ""
+        if known_facts:
+            try:
+                chain = self.reasoning_engine.reason(query, known_facts[:10])
+                if chain.confidence > 0.3:
+                    reasoning_result = f"\nReasoning: {chain.conclusion} (confidence: {chain.confidence:.0%})"
+                    if chain.frameworks_used:
+                        reasoning_result += f" [frameworks: {', '.join(chain.frameworks_used)}]"
+            except Exception:
+                pass
+
+        # Get base response (belief lookup + curiosity search)
+        base_response = self.base.hear(message)
+
+        # Combine if CognitionLoop added value
+        if insights or reasoning_result:
+            parts = [base_response]
+            if reasoning_result:
+                parts.append(reasoning_result)
+            if insights:
+                parts.append("\nDeep analysis:")
+                for insight in insights[:3]:
+                    parts.append(f"  {insight}")
+            # Record to cognition episodes for future transfer
+            parts.append(f"\n[CognitionLoop: {len(state.trace)} steps, "
+                        f"{state.attempts} attempts, "
+                        f"{'transferred' if state.transfer_plan else 'novel'}]")
+            return "\n".join(parts)
+
+        return base_response
+
+    def _handle_cognition_inquiry(self, gap) -> str | None:
+        """
+        Called when CognitionLoop has a knowledge gap.
+        Try to fill it from beliefs or curiosity search.
+        """
+        concept = gap.question if hasattr(gap, 'question') else str(gap)
+        concept_words = set(concept.lower().split()) - {"what", "is", "a", "an", "the", "are"}
+        # Check existing beliefs — match on subject/predicate or keyword overlap
+        for statement, belief in self.base._beliefs.items():
+            stmt_words = set(statement.lower().split())
+            if concept_words & stmt_words:
+                return statement
+        return None
+
+    # ── Active Learning ──
+
+    def _active_learn(self, topic: str) -> str:
+        """
+        'Learn about X' — triggers the full pipeline:
+        1. Search multiple sources
+        2. Extract structured concepts from raw text
+        3. Store as beliefs with truth values
+        4. Run CognitionLoop to connect to existing knowledge
+        5. Identify follow-up gaps
+        """
+        if not topic:
+            return "What should I learn about?"
+
+        clean_topic = topic.strip()
+        if clean_topic.startswith("about "):
+            clean_topic = clean_topic[6:].strip()
+
+        lines = [f"Learning about '{clean_topic}'..."]
+
+        # 1. Search
+        raw_info = self.base.searcher.search(clean_topic)
+        if not raw_info or "Could not find" in raw_info:
+            return f"I couldn't find information about '{clean_topic}'. Can you teach me?"
+
+        lines.append(f"\nFound information ({len(raw_info)} chars).")
+
+        # 2. Extract structured concepts
+        extracted = self._extract_concepts(clean_topic, raw_info)
+        if extracted:
+            lines.append(f"\nExtracted {len(extracted)} facts:")
+            for subj, pred in extracted[:10]:
+                lines.append(f"  {subj} is {pred}")
+
+                # 3. Store as beliefs
+                statement = f"{subj} is {pred}"
+                if statement not in self.base._beliefs:
+                    self.base._evidence_counter += 1
+                    belief = Belief(
+                        statement=statement,
+                        truth=TruthValue.from_single_observation(True),
+                        stamp=EvidenceStamp.new(self.base._evidence_counter),
+                        subject=subj,
+                        predicate=pred,
+                        source="discovery",
+                    )
+                    self.base._beliefs[statement] = belief
+                    self.base.memory.beliefs[statement] = belief.to_dict()
+                    self.base.graph.add(subj, is_a=[pred])
+
+        # 4. Store raw discovery
+        self.base._process_discovery(clean_topic, raw_info)
+
+        # 5. Run CognitionLoop to connect to existing knowledge
+        known_facts = [f"{s} is {p}" for s, p in extracted[:10]] if extracted else []
+        problem = {
+            "description": f"understand {clean_topic}",
+            "known_facts": known_facts,
+            "known_entities": [clean_topic],
+        }
+        state = self.cognition.think(problem)
+
+        # Report what the brain figured out
+        if state.learned:
+            lines.append(f"\nPattern detected: {state.learned.get('name', 'unnamed')}")
+        if state.similar_experiences:
+            lines.append(f"Connected to {len(state.similar_experiences)} past experiences.")
+
+        # 6. Identify follow-up gaps
+        new_gaps = []
+        for fact_subj, fact_pred in (extracted or [])[:5]:
+            unknowns = self.base._find_unknowns_in(fact_pred)
+            for u in unknowns:
+                if u != clean_topic and u not in new_gaps:
+                    new_gaps.append(u)
+                    self.base.curiosity.notice_gap(u, context=f"discovered while learning about {clean_topic}")
+
+        if new_gaps:
+            lines.append(f"\nNew questions: {', '.join(new_gaps[:5])}")
+
+        # Save memory
+        self.base.memory.save(self.base.memory_path)
+
+        self.traits.record_outcome("curiosity", "investigate", "search", True)
+        return "\n".join(lines)
+
+    def _extract_concepts(self, topic: str, raw_text: str) -> list[tuple[str, str]]:
+        """
+        Extract structured (subject, predicate) pairs from raw text.
+
+        Parses natural language into knowledge graph entries.
+        This is concept OWNERSHIP — the system forms its own understanding.
+        """
+        concepts: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        # Clean the text — remove source tags
+        text = re.sub(r'\[(?:Wikipedia|DuckDuckGo|Wikidata|Open Library)[^\]]*\]', '', raw_text)
+
+        # Pattern 1: "X is/are Y" statements
+        for m in re.finditer(
+            r'(?:^|[.;])\s*(?:A |An |The )?(\b[A-Z][\w\s]{1,30}?\b)\s+'
+            r'(?:is|are)\s+'
+            r'(?:a |an |the )?'
+            r'([\w\s]{2,40}?)(?:[.,;]|$)',
+            text, re.MULTILINE
+        ):
+            subj = m.group(1).strip().lower()
+            pred = m.group(2).strip().lower()
+            key = f"{subj}:{pred}"
+            if key not in seen and len(subj) > 1 and len(pred) > 1:
+                seen.add(key)
+                concepts.append((subj, pred))
+
+        # Pattern 2: "X, a type of Y" or "X, known as Y"
+        for m in re.finditer(
+            r'(\b[\w\s]{2,25}?\b),\s+(?:a type of|a kind of|known as|also called)\s+([\w\s]{2,30})',
+            text, re.IGNORECASE
+        ):
+            subj = m.group(1).strip().lower()
+            pred = m.group(2).strip().lower()
+            key = f"{subj}:{pred}"
+            if key not in seen:
+                seen.add(key)
+                concepts.append((subj, pred))
+
+        # Pattern 3: "X belong(s) to Y" or "X are members of Y"
+        for m in re.finditer(
+            r'(\b[\w\s]{2,25}?\b)\s+(?:belongs? to|are members of|is part of)\s+([\w\s]{2,30})',
+            text, re.IGNORECASE
+        ):
+            subj = m.group(1).strip().lower()
+            pred = m.group(2).strip().lower()
+            key = f"{subj}:{pred}"
+            if key not in seen:
+                seen.add(key)
+                concepts.append((subj, pred))
+
+        # Always add the topic itself with any extracted description
+        if concepts:
+            # The first sentence often defines the topic
+            first_pred = concepts[0][1] if concepts else ""
+            if first_pred and (topic.lower(), first_pred) not in concepts:
+                concepts.insert(0, (topic.lower(), first_pred))
+
+        return concepts[:15]  # Cap at 15 facts per discovery
+
     def status(self) -> str:
         """Full system status."""
         base_status = self.base._status()
@@ -425,6 +702,8 @@ class Genesis:
             "",
             "Cognitive Genesis Status:",
             f"  Total turns: {self.total_turns}",
+            f"  Deep thinks: {self.deep_thinks}",
+            f"  Cognition episodes: {len(self._cognition_data.get('episodes', []))}",
             f"  Surprises detected: {self.total_surprises}",
             f"  Proactive questions: {self.total_proactive}",
             f"  Dialog topic: {self.context.current_topic or '(none)'}",
