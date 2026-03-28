@@ -116,6 +116,10 @@ class Baby:
 
         Returns the system's response — from its own understanding.
         """
+        # If the message is long (multi-sentence), split and process each sentence
+        if len(message) > 200:
+            return self._hear_long(message)
+
         # Record conversation
         self.memory.conversations.append({"role": "human", "content": message})
 
@@ -140,6 +144,102 @@ class Baby:
         self.memory.save(self.memory_path)
 
         return response
+
+    def _hear_long(self, message: str) -> str:
+        """
+        Process long multi-sentence input by splitting into sentences.
+        Each sentence is parsed independently to avoid paragraph-as-predicate.
+        """
+        # Split on sentence boundaries
+        sentences = re.split(r'(?<=[.!?])\s+', message.strip())
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+
+        if not sentences:
+            return self._process_general(message)
+
+        learned = []
+        for sentence in sentences[:20]:  # Cap at 20 sentences
+            intent = self._parse_intent(sentence)
+            if intent["type"] == "teach":
+                subj = intent["subject"]
+                pred = intent["predicate"]
+                # Cap predicate length
+                if len(pred) > 80:
+                    pred = pred[:80].rsplit(" ", 1)[0]
+                    intent["predicate"] = pred
+                self._learn_from_teaching_quiet(intent)
+                learned.append(f"{subj} → {pred}")
+            elif intent["type"] == "general":
+                # Try to extract any "X is Y" from general text
+                for m in re.finditer(
+                    r'(?:A |An |The )?(\b[\w\s]{2,25}?\b)\s+(?:is|are)\s+(?:a |an |the )?([\w\s]{2,60})',
+                    sentence, re.IGNORECASE
+                ):
+                    subj = m.group(1).strip().lower()
+                    pred = m.group(2).strip().lower()
+                    if len(subj) > 1 and len(pred) > 1 and subj != pred and len(pred) <= 80:
+                        self.graph.add(subj, is_a=[pred])
+                        if subj not in self.memory.concepts:
+                            self.memory.concepts[subj] = {"facts": [], "taught_by": "human"}
+                        if pred not in self.memory.concepts[subj]["facts"]:
+                            self.memory.concepts[subj]["facts"].append(pred)
+                        learned.append(f"{subj} → {pred}")
+
+        self.memory.conversations.append({"role": "human", "content": message[:500]})
+
+        if learned:
+            # Deduplicate
+            seen = set()
+            unique = []
+            for item in learned:
+                if item not in seen:
+                    seen.add(item)
+                    unique.append(item)
+            response = f"I absorbed {len(unique)} facts from that:\n"
+            for item in unique[:15]:
+                response += f"  {item}\n"
+            if len(unique) > 15:
+                response += f"  ...and {len(unique) - 15} more."
+        else:
+            response = "I heard you, but I couldn't extract specific facts from that. Try shorter sentences like 'X is Y'."
+
+        self.memory.conversations.append({"role": "system", "content": response})
+        self.memory.save(self.memory_path)
+        return response
+
+    def _learn_from_teaching_quiet(self, intent: dict) -> None:
+        """Learn without generating a full response (for batch processing)."""
+        subject = intent["subject"]
+        predicate = intent["predicate"]
+        statement = f"{subject} is {predicate}"
+
+        self._evidence_counter += 1
+        new_belief = Belief(
+            statement=statement,
+            truth=TruthValue.from_single_observation(True),
+            stamp=EvidenceStamp.new(self._evidence_counter),
+            subject=subject,
+            predicate=predicate,
+            source="human",
+        )
+
+        existing = self._beliefs.get(statement)
+        if existing:
+            revised = existing.revise_with(new_belief)
+            if revised:
+                self._beliefs[statement] = revised
+        else:
+            self._beliefs[statement] = new_belief
+
+        self.graph.add(subject, is_a=[predicate])
+
+        if subject not in self.memory.concepts:
+            self.memory.concepts[subject] = {"facts": [], "taught_by": "human"}
+        if predicate not in self.memory.concepts[subject]["facts"]:
+            self.memory.concepts[subject]["facts"].append(predicate)
+
+        self.memory.beliefs[statement] = self._beliefs[statement].to_dict()
+        self.memory.teachings.append({"subject": subject, "predicate": predicate})
 
     def _parse_intent(self, message: str) -> dict:
         """
@@ -185,6 +285,9 @@ class Baby:
                 # Skip if subject is a question word
                 if subject in ("what", "who", "where", "how", "when", "which", "why"):
                     continue
+                # Cap predicate length — don't store paragraphs
+                if len(predicate) > 80:
+                    predicate = predicate[:80].rsplit(" ", 1)[0]
                 return {"type": "teach", "subject": subject,
                         "predicate": predicate, "raw": message}
 
@@ -525,20 +628,65 @@ class Baby:
                 connections.append(name)
         return connections[:5]
 
+    # Common English words that should NEVER trigger curiosity gaps.
+    # These are function words, common verbs, adjectives, and adverbs
+    # that don't represent learnable concepts.
+    COMMON_WORDS = frozenset({
+        # Articles, pronouns, prepositions, conjunctions
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "had",
+        "her", "was", "one", "our", "out", "has", "his", "how", "its", "may",
+        "new", "now", "old", "see", "way", "who", "did", "get", "let", "say",
+        "she", "too", "use", "with", "that", "this", "from", "they", "been",
+        "have", "many", "some", "them", "than", "each", "make", "like", "long",
+        "look", "come", "could", "people", "into", "just", "about", "would",
+        "there", "their", "which", "large", "small", "very", "also", "more",
+        "other", "what", "when", "where", "then", "only", "most", "such",
+        "both", "even", "well", "back", "much", "will", "still", "should",
+        "after", "before", "between", "under", "over", "while", "being",
+        "through", "during", "without", "within", "along", "every", "those",
+        "same", "another", "because", "however", "never", "always", "often",
+        "here", "these", "thing", "things", "really", "need", "right",
+        # Common verbs
+        "know", "think", "take", "give", "tell", "call", "try", "ask", "work",
+        "seem", "feel", "leave", "keep", "put", "run", "read", "set", "turn",
+        "show", "hear", "play", "move", "live", "believe", "hold", "bring",
+        "happen", "write", "provide", "stand", "lose", "pay", "meet", "include",
+        "continue", "start", "begin", "might", "must", "goes", "went", "done",
+        "made", "found", "known", "said", "used", "called", "based", "given",
+        "does", "using", "means", "says", "told", "takes", "comes", "goes",
+        "became", "become", "makes", "follows", "describes", "explains",
+        "exists", "contains", "requires", "allows", "creates", "produces",
+        "involves", "includes", "provides", "remains", "appears", "occurs",
+        "behaves", "combines", "defines", "measures", "observed", "measured",
+        "fired", "powered", "composed", "formed", "called", "named",
+        # Common adjectives/adverbs
+        "good", "great", "first", "last", "little", "own", "important",
+        "different", "possible", "able", "certain", "sure", "real", "whole",
+        "true", "false", "high", "low", "best", "better", "enough", "far",
+        "yet", "quite", "rather", "almost", "already", "actually", "simply",
+        "exactly", "especially", "extremely", "incredibly", "completely",
+        "essentially", "approximately", "typically", "generally", "basically",
+        "probably", "perhaps", "famous", "specific", "particular", "various",
+        "several", "modern", "early", "later", "above", "below",
+        # Common nouns that aren't learnable concepts
+        "way", "part", "case", "fact", "time", "year", "day", "number",
+        "point", "place", "world", "hand", "example", "state", "kind",
+        "type", "form", "level", "side", "area", "name", "result", "end",
+        "feature", "system", "group", "set", "order", "process", "idea",
+        "issue", "question", "answer", "problem", "reason", "word", "words",
+        "something", "anything", "everything", "nothing", "someone",
+        "anyone", "everyone", "others", "rest", "term", "terms",
+        # Technical common words
+        "data", "value", "values", "model", "method", "function", "rule",
+        "rules", "step", "steps", "unit", "units", "version", "discrete",
+        "continuous", "fundamental", "standard", "classical", "advanced",
+    })
+
     def _find_unknowns_in(self, text: str) -> list[str]:
         """Find concepts mentioned in text that we don't know about."""
-        words = set(re.findall(r'\b([a-z]{3,})\b', text.lower()))
-        common = {"the", "and", "for", "are", "but", "not", "you", "all",
-                  "can", "had", "her", "was", "one", "our", "out", "has",
-                  "his", "how", "its", "may", "new", "now", "old", "see",
-                  "way", "who", "did", "get", "let", "say", "she", "too",
-                  "use", "with", "that", "this", "from", "they", "been",
-                  "have", "many", "some", "them", "than", "each", "make",
-                  "like", "long", "look", "come", "could", "people", "into",
-                  "just", "about", "would", "there", "their", "which",
-                  "large", "small", "very", "also", "more", "other"}
+        words = set(re.findall(r'\b([a-z]{4,})\b', text.lower()))  # min 4 chars
         unknowns = []
-        for word in words - common:
+        for word in words - self.COMMON_WORDS:
             if word not in self.memory.concepts and not self.graph.get(word):
                 unknowns.append(word)
         return unknowns[:3]

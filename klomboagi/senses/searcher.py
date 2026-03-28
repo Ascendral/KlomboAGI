@@ -105,9 +105,25 @@ class Searcher:
             if not results:
                 return ""
 
-            entity_id = results[0]["id"]
-            label = results[0].get("label", query)
-            description = results[0].get("description", "")
+            # Filter out scholarly articles and disambiguation pages
+            skip_descriptions = {
+                "scientific article", "scholarly article", "wikimedia",
+                "disambiguation", "family name", "given name",
+            }
+            entity_id = None
+            label = query
+            description = ""
+            for result in results[:5]:
+                desc = result.get("description", "").lower()
+                if any(skip in desc for skip in skip_descriptions):
+                    continue
+                entity_id = result["id"]
+                label = result.get("label", query)
+                description = result.get("description", "")
+                break
+
+            if not entity_id:
+                return ""
 
             # Step 2: Get entity details
             entity_url = (
