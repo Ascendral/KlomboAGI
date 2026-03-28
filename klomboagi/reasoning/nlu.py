@@ -301,6 +301,14 @@ class NLU:
         """Extract Subject-Verb-Object triples from main clause."""
         triples = []
 
+        # Don't extract from questions — questions are queries, not statements
+        if raw.strip().endswith("?"):
+            return []
+        first_word = tokens[0].text.lower() if tokens else ""
+        if first_word in ("what", "who", "where", "how", "why", "when", "which",
+                          "is", "are", "do", "does", "can", "could", "would", "should"):
+            return []
+
         # Find verb positions
         verb_positions = [i for i, t in enumerate(tokens) if t.pos == POS.VERB]
         if not verb_positions:

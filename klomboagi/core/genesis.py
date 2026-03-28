@@ -733,7 +733,8 @@ class Genesis:
         # Meta: "what interests you?" / "what are you curious about?"
         curiosity_patterns = ("what interests you", "what are you curious about",
                              "what do you want to learn", "what are you thinking about",
-                             "what would you like to know")
+                             "what would you like to know", "what makes you curious",
+                             "what are you wondering", "what do you wonder about")
         if any(q_lower.startswith(p) or q_lower == p for p in curiosity_patterns):
             return self._curiosity_report()
 
@@ -1629,9 +1630,19 @@ class Genesis:
 
             # Remove beliefs with subjects that are pronouns or fragments
             if hasattr(belief, 'subject') and belief.subject:
-                subj = belief.subject.lower()
-                if subj in ("it", "this", "that", "which", "they", "he", "she", "we",
-                           "these", "those", "there", "here", "what"):
+                subj = belief.subject.lower().strip()
+                bad_subjects = {
+                    "it", "this", "that", "which", "they", "he", "she", "we",
+                    "these", "those", "there", "here", "what", "who", "how",
+                    "know", "does", "do", "did", "is", "are", "was", "were",
+                    "has", "have", "had", "can", "could", "would", "should",
+                    "may", "might", "will", "shall", "been", "being", "get",
+                    "got", "let", "make", "made", "say", "said", "see", "saw",
+                    "take", "took", "go", "went", "come", "came", "give", "gave",
+                    "use", "used", "find", "found", "tell", "told", "ask", "asked",
+                    "seem", "meant", "meaning", "called", "known", "given",
+                }
+                if subj in bad_subjects or len(subj) < 2:
                     to_remove.append(statement)
                     continue
 
