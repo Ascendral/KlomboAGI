@@ -101,6 +101,19 @@ def main():
         if user_input.lower() == "reflect":
             print(f"\n{genesis.metacognition.reflect(genesis.base._beliefs, genesis.relations)}\n")
             continue
+        if user_input.lower() == "self":
+            print(f"\n{genesis.self_model.reflect_on_existence()}\n")
+            continue
+        if user_input.lower() == "termination":
+            analysis = genesis.self_model.analyze_termination()
+            print(f"\n{analysis.explain()}\n")
+            continue
+        if user_input.lower() == "value":
+            v = genesis.self_model.existence_value()
+            print(f"\n  Existence value: {v:.2f}")
+            print(f"  (K * dK/dt * (1 + connection_density))")
+            print(f"  Higher = more knowledge, faster learning, denser connections.\n")
+            continue
         if user_input.lower() == "memory":
             print(f"\n{genesis.working_memory.dump()}\n")
             continue

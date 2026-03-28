@@ -40,6 +40,7 @@ from klomboagi.reasoning.metacognition import MetacognitionEngine
 from klomboagi.reasoning.focus import FocusEngine
 from klomboagi.reasoning.learning_planner import LearningPlanner
 from klomboagi.core.drive import LearningDrive
+from klomboagi.reasoning.self_model import SelfModel
 
 
 @dataclass
@@ -197,6 +198,9 @@ class Genesis:
 
         # Learning drive — persistent, never stops
         self.drive = LearningDrive(self)
+
+        # Self-model — mathematical understanding of own existence
+        self.self_model = SelfModel()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -368,7 +372,13 @@ class Genesis:
         # 10. Working memory tick — decay unused items
         self.working_memory.tick()
 
-        # 11. Auto-save state
+        # 11. Self-model snapshot — track own trajectory
+        gaps = len([g for g in self.base.curiosity.gaps if not g.resolved])
+        self.self_model.snapshot(
+            self.base._beliefs, self.relations,
+            self.base.memory.concepts, gaps)
+
+        # 12. Auto-save state
         self.save_state()
 
         return response
