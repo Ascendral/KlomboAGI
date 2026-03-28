@@ -154,6 +154,10 @@ def main():
             else:
                 print("  Usage: compare X and Y\n")
             continue
+        if user_input.lower() in ("concepts", "formed", "formed concepts"):
+            formed = genesis.concept_former.scan()
+            print(f"\n  {genesis.concept_former.report()}\n")
+            continue
         if user_input.lower() == "failures":
             s = genesis.failure_memory.stats()
             print(f"\n  Failures: {s['total_failures']} total, {s['repeated_mistakes']} repeated")

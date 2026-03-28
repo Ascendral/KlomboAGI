@@ -48,6 +48,7 @@ from klomboagi.reasoning.nlu import NLU
 from klomboagi.reasoning.generator import ExplanationGenerator
 from klomboagi.reasoning.temporal import TemporalEngine
 from klomboagi.reasoning.failure_memory import FailureMemory
+from klomboagi.reasoning.concept_formation import ConceptFormation
 
 
 @dataclass
@@ -229,6 +230,9 @@ class Genesis:
 
         # Failure memory — learn from mistakes
         self.failure_memory = FailureMemory()
+
+        # Concept formation — form NEW abstract concepts from patterns
+        self.concept_former = ConceptFormation(self.relations, self.base._beliefs)
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -1284,20 +1288,21 @@ class Genesis:
         facts_learned = 0
         relations_learned = 0
 
-        for sentence in sentences[:100]:  # Cap at 100 sentences
-            # Extract "X is Y" facts — case insensitive
-            for m in re.finditer(
-                r'(?:A |An |The )?(\b[\w][\w\s]{1,30}?\b)\s+'
-                r'(?:is|are)\s+(?:a |an |the )?'
-                r'([\w\s,]{2,60}?)(?:[.]|$)',
-                sentence, re.IGNORECASE
-            ):
-                subj = m.group(1).strip().lower()
-                pred = m.group(2).strip().lower()
-                # Quality filter: subject max 5 words, predicate meaningful
+        r_stats_before = self.relations.stats()["total_relations"]
+
+        for sentence in sentences[:100]:
+            # Use NLU for structured extraction
+            triples = self.nlu.parse(sentence)
+            for triple in triples:
+                subj, pred = triple.as_belief()
+                subj = subj.strip().lower()
+                pred = pred.strip().lower()
+
+                # Quality filter
                 subj_words = subj.split()
                 if (len(subj) > 2 and len(pred) > 5 and len(pred) <= 80
-                        and len(subj_words) <= 5 and not pred.startswith(("same", "no ", "not "))):
+                        and len(subj_words) <= 5
+                        and subj_words[0] not in ("it", "this", "that", "which", "they")):
                     statement = f"{subj} is {pred}"
                     if statement not in self.base._beliefs:
                         self.base._evidence_counter += 1
@@ -1315,14 +1320,17 @@ class Genesis:
                         self.base.memory.concepts[subj]["facts"].append(pred)
                         facts_learned += 1
 
-            # 4. Extract relations
-            self._extract_relations(sentence)
-
-        # Count new relations
-        r_stats_before = self.relations.stats()["total_relations"]
-
-        # Also extract from the full text for cross-sentence patterns
-        self._extract_relations(content[:5000])
+                # Extract relation if applicable
+                rel = triple.as_relation()
+                if rel:
+                    rel_type_map = {
+                        "causes": RelationType.CAUSES, "requires": RelationType.REQUIRES,
+                        "part_of": RelationType.PART_OF, "uses": RelationType.USES,
+                        "enables": RelationType.ENABLES, "measures": RelationType.MEASURES,
+                    }
+                    rt = rel_type_map.get(rel[1])
+                    if rt:
+                        self.relations.add(rel[0], rt, rel[2], confidence=0.5, domain="document")
 
         r_stats_after = self.relations.stats()["total_relations"]
         relations_learned = r_stats_after - r_stats_before
