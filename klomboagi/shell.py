@@ -24,7 +24,8 @@ def main():
     else:
         print("  Starting empty — I know nothing yet.\n")
 
-    print("  Commands: 'status', 'personality', 'teach <domain>', 'teach all', 'domains', 'quit'\n")
+    print("  Commands: status, personality, teach <domain>, teach all, teach everything")
+    print("           domains, connect <concept>, quit\n")
 
     while True:
         try:
@@ -62,12 +63,22 @@ def main():
             continue
         if user_input.lower().startswith("teach "):
             domain = user_input[6:].strip()
-            if domain == "all":
-                print("\n  Teaching all domains...")
+            if domain == "everything":
+                print("\n  Teaching everything...")
+                print(f"  {genesis.teach_everything()}\n")
+            elif domain == "all":
+                print("\n  Teaching all fact domains...")
                 print(f"  {genesis.teach_all()}\n")
+            elif domain == "relations":
+                print("\n  Teaching all relations...")
+                print(f"  {genesis.teach_relations('all')}\n")
             else:
                 print(f"\n  Teaching {domain}...")
                 print(f"  {genesis.teach_domain(domain)}\n")
+            continue
+        if user_input.lower().startswith("connect "):
+            concept = user_input[8:].strip()
+            print(f"\n{genesis.what_connects(concept)}\n")
             continue
 
         response = genesis.hear(user_input)

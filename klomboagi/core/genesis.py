@@ -25,7 +25,11 @@ from klomboagi.core.traits import TraitSystem, Trait, Ability, Skill
 from klomboagi.reasoning.truth import TruthValue, Belief, EvidenceStamp
 from klomboagi.reasoning.cognition_loop import CognitionLoop, CognitionPhase
 from klomboagi.reasoning.engine import ReasoningEngine
-from klomboagi.core.curriculum import get_curriculum, get_all_domains, curriculum_stats
+from klomboagi.core.curriculum import (
+    get_curriculum, get_all_domains, curriculum_stats,
+    get_relation_curriculum, get_all_relation_domains,
+)
+from klomboagi.core.relations import RelationStore, RelationType
 
 
 @dataclass
@@ -150,6 +154,9 @@ class Genesis:
 
         # Reasoning engine — for direct fact derivation
         self.reasoning_engine = ReasoningEngine()
+
+        # Relation store — multi-directional reasoning
+        self.relations = RelationStore()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -748,7 +755,7 @@ class Genesis:
         )
 
     def teach_all(self) -> str:
-        """Teach all available curricula."""
+        """Teach all available fact curricula."""
         results = []
         for domain in get_all_domains():
             result = self.teach_domain(domain)
@@ -758,6 +765,95 @@ class Genesis:
             f"Taught {stats['total_facts']} facts across {stats['domains']} domains:\n"
             + "\n".join(results)
         )
+
+    def teach_relations(self, domain: str = "all") -> str:
+        """
+        Teach relations between concepts — causes, requires, part_of, uses, etc.
+
+        This is what enables spherical reasoning: every concept connects
+        to others in multiple directions, not just "is_a".
+        """
+        relation_type_map = {
+            "is_a": RelationType.IS_A,
+            "causes": RelationType.CAUSES,
+            "requires": RelationType.REQUIRES,
+            "part_of": RelationType.PART_OF,
+            "uses": RelationType.USES,
+            "opposite_of": RelationType.OPPOSITE_OF,
+            "enables": RelationType.ENABLES,
+            "measures": RelationType.MEASURES,
+            "example_of": RelationType.EXAMPLE_OF,
+            "analogous_to": RelationType.ANALOGOUS_TO,
+        }
+
+        domains_to_teach = get_all_relation_domains() if domain == "all" else [domain]
+        total_taught = 0
+
+        for d in domains_to_teach:
+            triples = get_relation_curriculum(d)
+            if not triples:
+                continue
+            for source, rel_str, target in triples:
+                rel_type = relation_type_map.get(rel_str)
+                if rel_type:
+                    self.relations.add(source, rel_type, target, confidence=0.5, domain=d)
+                    total_taught += 1
+
+        # Run inference to derive new relations from what we taught
+        inferred = self.relations.run_inference()
+
+        stats = self.relations.stats()
+        return (
+            f"Taught {total_taught} relations. "
+            f"Inferred {len(inferred)} new facts.\n"
+            f"Total: {stats['total_relations']} relations across "
+            f"{stats['unique_concepts']} concepts.\n"
+            f"By type: {stats['by_type']}"
+        )
+
+    def teach_everything(self) -> str:
+        """Teach ALL facts AND relations, then run inference."""
+        lines = []
+
+        # 1. Teach all fact curricula
+        lines.append("Phase 1: Teaching facts...")
+        lines.append(self.teach_all())
+
+        # 2. Teach all relation curricula
+        lines.append("\nPhase 2: Teaching relations...")
+        lines.append(self.teach_relations("all"))
+
+        # 3. Run inference again (now with more data)
+        lines.append("\nPhase 3: Running global inference...")
+        inferred = self.relations.run_inference()
+        lines.append(f"Derived {len(inferred)} additional facts from cross-referencing.")
+
+        # 4. Summary
+        r_stats = self.relations.stats()
+        lines.append(
+            f"\nTotal knowledge: {len(self.base._beliefs)} beliefs, "
+            f"{r_stats['total_relations']} relations, "
+            f"{r_stats['unique_concepts']} connected concepts."
+        )
+
+        self.base.memory.save(self.base.memory_path)
+        return "\n".join(lines)
+
+    def what_connects(self, concept: str) -> str:
+        """Show everything connected to a concept — all directions."""
+        concept = concept.lower().strip()
+        rels = self.relations.get_all_about(concept)
+        if not rels:
+            return f"No relations found for '{concept}'."
+
+        lines = [f"Relations for '{concept}':"]
+        for r in rels:
+            direction = "→" if r.source == concept else "←"
+            if r.source == concept:
+                lines.append(f"  {direction} {r.relation.value} {r.target} ({r.confidence:.0%})")
+            else:
+                lines.append(f"  {direction} {r.source} {r.relation.value} this ({r.confidence:.0%})")
+        return "\n".join(lines)
 
     def status(self) -> str:
         """Full system status."""

@@ -430,12 +430,192 @@ CURRICULA["categories"] = [
 ]
 
 
+# ═══════════════════════════════════════════════════════════════
+# RELATION CURRICULA — (source, relation_type, target) triples
+# These teach how concepts CONNECT across domains.
+# ═══════════════════════════════════════════════════════════════
+
+RELATION_CURRICULA: dict[str, list[tuple[str, str, str]]] = {}
+
+
+RELATION_CURRICULA["cross-domain"] = [
+    # Physics ↔ Mathematics
+    ("physics", "uses", "mathematics"),
+    ("newton's second law", "uses", "multiplication"),
+    ("the pythagorean theorem", "uses", "exponentiation"),
+    ("the pythagorean theorem", "uses", "addition"),
+    ("wave-particle duality", "uses", "a function"),
+    ("quantum mechanics", "uses", "complex number"),
+    ("relativity", "uses", "geometry"),
+    ("acceleration", "measures", "velocity"),
+    ("velocity", "measures", "position"),
+
+    # Chemistry ↔ Physics
+    ("chemistry", "uses", "physics"),
+    ("a chemical bond", "causes", "a molecule"),
+    ("temperature", "causes", "a chemical reaction"),
+    ("a catalyst", "enables", "a chemical reaction"),
+    ("an electron", "part_of", "an atom"),
+    ("a proton", "part_of", "an atom"),
+    ("a neutron", "part_of", "an atom"),
+    ("an atom", "part_of", "a molecule"),
+
+    # Biology ↔ Chemistry
+    ("biology", "uses", "chemistry"),
+    ("dna", "uses", "a chemical bond"),
+    ("photosynthesis", "uses", "light"),
+    ("cellular respiration", "requires", "a molecule"),
+    ("a cell", "part_of", "an organism"),
+    ("a gene", "part_of", "dna"),
+    ("natural selection", "causes", "evolution"),
+    ("a mutation", "causes", "evolution"),
+
+    # Economics ↔ Mathematics
+    ("economics", "uses", "mathematics"),
+    ("supply", "causes", "equilibrium"),
+    ("demand", "causes", "equilibrium"),
+    ("inflation", "causes", "price"),
+    ("interest rate", "causes", "inflation"),
+    ("fiscal policy", "uses", "monetary policy"),
+    ("scarcity", "causes", "opportunity cost"),
+
+    # Computer Science ↔ Mathematics
+    ("computer science", "uses", "mathematics"),
+    ("computer science", "uses", "logic"),
+    ("an algorithm", "uses", "mathematics"),
+    ("binary", "uses", "a number"),
+    ("encryption", "uses", "a prime number"),
+    ("big-o notation", "measures", "time complexity"),
+    ("recursion", "uses", "a function"),
+    ("dynamic programming", "uses", "recursion"),
+
+    # Geometry ↔ Physics
+    ("geometry", "part_of", "mathematics"),
+    ("the cartesian plane", "uses", "a dimension"),
+    ("a sphere", "uses", "three dimensions"),
+    ("gravity", "uses", "geometry"),
+]
+
+
+RELATION_CURRICULA["causal chains"] = [
+    # Physics causal chains
+    ("a force", "causes", "acceleration"),
+    ("acceleration", "causes", "velocity"),
+    ("gravity", "causes", "a force"),
+    ("heat", "causes", "expansion"),
+    ("friction", "causes", "heat"),
+    ("light", "causes", "the photoelectric effect"),
+    ("energy", "enables", "work"),
+    ("work", "requires", "a force"),
+
+    # Chemistry causal chains
+    ("heat", "causes", "a chemical reaction"),
+    ("a chemical reaction", "causes", "energy"),
+    ("oxidation", "requires", "an electron"),
+
+    # Biology causal chains
+    ("sunlight", "enables", "photosynthesis"),
+    ("photosynthesis", "causes", "chemical energy"),
+    ("a mutation", "causes", "natural selection"),
+    ("natural selection", "causes", "evolution"),
+
+    # Economics causal chains
+    ("demand", "causes", "price"),
+    ("supply", "causes", "price"),
+    ("inflation", "causes", "interest rate"),
+    ("monetary policy", "causes", "interest rate"),
+    ("fiscal policy", "causes", "gdp"),
+    ("unemployment", "causes", "a recession"),
+
+    # CS causal chains
+    ("a program", "requires", "an algorithm"),
+    ("an algorithm", "requires", "data"),
+    ("encryption", "enables", "security"),
+]
+
+
+RELATION_CURRICULA["part-whole"] = [
+    # Physics composition
+    ("an electromagnetic wave", "part_of", "the electromagnetic spectrum"),
+    ("kinetic energy", "part_of", "energy"),
+    ("potential energy", "part_of", "energy"),
+    ("heat", "part_of", "energy"),
+
+    # Math composition
+    ("a natural number", "part_of", "an integer"),
+    ("an integer", "part_of", "a rational number"),
+    ("a rational number", "part_of", "a real number"),
+    ("a real number", "part_of", "a complex number"),
+    ("addition", "part_of", "arithmetic"),
+    ("subtraction", "part_of", "arithmetic"),
+    ("multiplication", "part_of", "arithmetic"),
+    ("division", "part_of", "arithmetic"),
+    ("arithmetic", "part_of", "mathematics"),
+    ("geometry", "part_of", "mathematics"),
+    ("algebra", "part_of", "mathematics"),
+
+    # CS composition
+    ("a bit", "part_of", "a byte"),
+    ("a byte", "part_of", "memory"),
+    ("a processor", "part_of", "a computer"),
+    ("memory", "part_of", "a computer"),
+    ("a stack", "part_of", "data structures"),
+    ("a queue", "part_of", "data structures"),
+    ("a tree", "part_of", "data structures"),
+
+    # Geometry composition
+    ("a point", "part_of", "a line"),
+    ("a line", "part_of", "a plane"),
+    ("a plane", "part_of", "space"),
+    ("a side", "part_of", "a polygon"),
+    ("an angle", "part_of", "a triangle"),
+]
+
+
+RELATION_CURRICULA["opposites"] = [
+    ("addition", "opposite_of", "subtraction"),
+    ("multiplication", "opposite_of", "division"),
+    ("hot", "opposite_of", "cold"),
+    ("big", "opposite_of", "small"),
+    ("fast", "opposite_of", "slow"),
+    ("positive", "opposite_of", "negative"),
+    ("kinetic energy", "opposite_of", "potential energy"),
+    ("inflation", "opposite_of", "deflation"),
+    ("supply", "opposite_of", "demand"),
+    ("oxidation", "opposite_of", "reduction"),
+    ("an acid", "opposite_of", "a base"),
+    ("solid", "opposite_of", "gas"),
+    ("true", "opposite_of", "false"),
+    ("mitosis", "opposite_of", "meiosis"),
+    ("encryption", "opposite_of", "decryption"),
+]
+
+
+def get_relation_curriculum(domain: str) -> list[tuple[str, str, str]]:
+    """Get a relation curriculum. Returns list of (source, relation, target)."""
+    domain = domain.lower().strip()
+    if domain in RELATION_CURRICULA:
+        return RELATION_CURRICULA[domain]
+    for key in RELATION_CURRICULA:
+        if domain in key or key in domain:
+            return RELATION_CURRICULA[key]
+    return []
+
+
+def get_all_relation_domains() -> list[str]:
+    return sorted(RELATION_CURRICULA.keys())
+
+
 # ── Totals ──
 
 def curriculum_stats() -> dict:
     """Stats about all curricula."""
+    rel_facts = sum(len(c) for c in RELATION_CURRICULA.values())
     return {
         "domains": len(CURRICULA),
         "total_facts": sum(len(c) for c in CURRICULA.values()),
+        "relation_domains": len(RELATION_CURRICULA),
+        "total_relations": rel_facts,
         "per_domain": {k: len(v) for k, v in CURRICULA.items()},
+        "per_relation_domain": {k: len(v) for k, v in RELATION_CURRICULA.items()},
     }
