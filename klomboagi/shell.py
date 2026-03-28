@@ -19,8 +19,9 @@ def main():
 
     n_concepts = len(genesis.base.memory.concepts)
     n_beliefs = len(genesis.base._beliefs)
-    if n_concepts > 0:
-        print(f"  Loaded {n_concepts} concepts, {n_beliefs} beliefs from memory.\n")
+    n_relations = genesis.relations.stats()["total_relations"]
+    if n_concepts > 0 or n_relations > 0:
+        print(f"  Loaded {n_concepts} concepts, {n_beliefs} beliefs, {n_relations} relations.\n")
     else:
         print("  Starting empty — I know nothing yet.\n")
 

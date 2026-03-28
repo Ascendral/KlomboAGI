@@ -30,6 +30,7 @@ from klomboagi.core.curriculum import (
     get_relation_curriculum, get_all_relation_domains,
 )
 from klomboagi.core.relations import RelationStore, RelationType, INVERSE_RELATIONS
+from klomboagi.reasoning.compute import ComputeEngine
 
 
 @dataclass
@@ -158,6 +159,9 @@ class Genesis:
         # Relation store — multi-directional reasoning
         self.relations = RelationStore()
 
+        # Computation engine — can DO math, not just know about it
+        self.compute = ComputeEngine()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -176,6 +180,9 @@ class Genesis:
         self.total_surprises = 0
         self.total_proactive = 0
         self.deep_thinks = 0
+
+        # Load saved state if it exists
+        self.load_state()
 
     def _init_cognition_loop(self) -> None:
         """Wire the CognitionLoop with a lightweight mock storage."""
@@ -286,6 +293,8 @@ class Genesis:
             response = self._active_learn(intent.get("target", ""))
         else:
             response = self.base.hear(resolved_message)
+            # Auto-extract relations from any input
+            self._extract_relations(resolved_message)
 
         # 6. Update dialog context
         self.context.update(intent, resolved_message)
@@ -308,6 +317,9 @@ class Genesis:
         if proactive:
             self.total_proactive += 1
             response += f"\n\nBy the way — {proactive}"
+
+        # 10. Auto-save state
+        self.save_state()
 
         return response
 
@@ -494,6 +506,12 @@ class Genesis:
         """
         self.deep_thinks += 1
         query = intent.get("query", message)
+
+        # 0. Check for math expressions/questions
+        math_result = self.compute.compute(query)
+        if math_result.success and math_result.result != 0:
+            steps = "\n  ".join(math_result.steps) if math_result.steps else ""
+            return f"{math_result.result}\n  {steps}" if steps else str(math_result.result)
 
         # 1. Check for relational questions first
         relational = self._parse_relational_question(query)
@@ -969,6 +987,119 @@ class Genesis:
             else:
                 lines.append(f"  {direction} {r.source} {r.relation.value} this ({r.confidence:.0%})")
         return "\n".join(lines)
+
+    # ── Auto-Relation Extraction ──
+
+    def _extract_relations(self, message: str) -> None:
+        """
+        Auto-extract relations from natural language input.
+
+        "gravity causes acceleration" → relation(gravity, CAUSES, acceleration)
+        "calculus requires algebra" → relation(calculus, REQUIRES, algebra)
+        "a proton is part of an atom" → relation(proton, PART_OF, atom)
+        """
+        msg = message.lower().strip()
+
+        relation_patterns = [
+            (r"(\w[\w\s]{1,30}?)\s+causes?\s+(\w[\w\s]{1,30})", RelationType.CAUSES),
+            (r"(\w[\w\s]{1,30}?)\s+requires?\s+(\w[\w\s]{1,30})", RelationType.REQUIRES),
+            (r"(\w[\w\s]{1,30}?)\s+(?:is\s+)?part\s+of\s+(\w[\w\s]{1,30})", RelationType.PART_OF),
+            (r"(\w[\w\s]{1,30}?)\s+uses?\s+(\w[\w\s]{1,30})", RelationType.USES),
+            (r"(\w[\w\s]{1,30}?)\s+enables?\s+(\w[\w\s]{1,30})", RelationType.ENABLES),
+            (r"(\w[\w\s]{1,30}?)\s+measures?\s+(\w[\w\s]{1,30})", RelationType.MEASURES),
+            (r"(\w[\w\s]{1,30}?)\s+is\s+(?:the\s+)?opposite\s+of\s+(\w[\w\s]{1,30})", RelationType.OPPOSITE_OF),
+        ]
+
+        for pattern, rel_type in relation_patterns:
+            for m in re.finditer(pattern, msg):
+                source = m.group(1).strip()
+                target = m.group(2).strip()
+                # Skip very short or stop-word-only matches
+                if len(source) > 1 and len(target) > 1:
+                    self.relations.add(source, rel_type, target,
+                                      confidence=0.5, domain="conversation")
+
+    # ── State Persistence ──
+
+    def save_state(self) -> None:
+        """
+        Save the full Genesis state — traits, relations, cognition data.
+
+        The base Baby already saves beliefs/concepts. This saves everything else
+        so personality and relations persist across sessions.
+        """
+        import json
+        from pathlib import Path
+
+        state_path = Path(self.base.memory_path).parent / "genesis_state.json"
+
+        # Serialize traits
+        trait_data = {}
+        for name, trait in self.traits.traits.items():
+            trait_data[name] = trait.to_dict()
+
+        # Serialize relations
+        relation_data = [r.to_dict() for r in self.relations._all]
+
+        state = {
+            "traits": trait_data,
+            "relations": relation_data,
+            "cognition_episodes": self._cognition_data.get("episodes", []),
+            "metrics": {
+                "total_turns": self.total_turns,
+                "deep_thinks": self.deep_thinks,
+                "total_surprises": self.total_surprises,
+                "total_proactive": self.total_proactive,
+            },
+        }
+
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, indent=2, default=str))
+
+    def load_state(self) -> bool:
+        """
+        Load saved Genesis state. Returns True if state was loaded.
+        """
+        import json
+        from pathlib import Path
+
+        state_path = Path(self.base.memory_path).parent / "genesis_state.json"
+        if not state_path.exists():
+            return False
+
+        try:
+            state = json.loads(state_path.read_text())
+
+            # Restore traits
+            for name, data in state.get("traits", {}).items():
+                if name in self.traits.traits:
+                    self.traits.traits[name].drive_strength = data.get("drive_strength", 0.5)
+                    self.traits.traits[name].activation_count = data.get("activation_count", 0)
+
+            # Restore relations
+            rel_type_map = {rt.value: rt for rt in RelationType}
+            for r_data in state.get("relations", []):
+                rel_type = rel_type_map.get(r_data.get("relation"))
+                if rel_type:
+                    self.relations.add(
+                        r_data["source"], rel_type, r_data["target"],
+                        confidence=r_data.get("confidence", 0.5),
+                        domain=r_data.get("source_domain", "loaded"),
+                    )
+
+            # Restore cognition episodes
+            self._cognition_data["episodes"] = state.get("cognition_episodes", [])
+
+            # Restore metrics
+            metrics = state.get("metrics", {})
+            self.total_turns = metrics.get("total_turns", 0)
+            self.deep_thinks = metrics.get("deep_thinks", 0)
+            self.total_surprises = metrics.get("total_surprises", 0)
+            self.total_proactive = metrics.get("total_proactive", 0)
+
+            return True
+        except Exception:
+            return False
 
     def status(self) -> str:
         """Full system status."""

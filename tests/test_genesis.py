@@ -9,8 +9,8 @@ from klomboagi.core.relations import RelationType
 
 
 @pytest.fixture
-def genesis():
-    return Genesis(memory_path="/tmp/klombo_test_genesis.json")
+def genesis(tmp_path):
+    return Genesis(memory_path=str(tmp_path / "brain.json"))
 
 
 # ── Dialog Context tests ──
