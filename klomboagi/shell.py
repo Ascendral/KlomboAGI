@@ -88,6 +88,10 @@ def main():
             else:
                 print("  Usage: path <concept> to <concept>\n")
             continue
+        if user_input.lower().startswith("think "):
+            concepts = [c.strip() for c in user_input[6:].split(",")]
+            print(f"\n{genesis.activation.think_about(concepts)}\n")
+            continue
 
         response = genesis.hear(user_input)
         # Indent response for readability

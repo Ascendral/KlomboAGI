@@ -31,6 +31,7 @@ from klomboagi.core.curriculum import (
 )
 from klomboagi.core.relations import RelationStore, RelationType, INVERSE_RELATIONS
 from klomboagi.reasoning.compute import ComputeEngine
+from klomboagi.reasoning.activation import ActivationNetwork
 
 
 @dataclass
@@ -161,6 +162,9 @@ class Genesis:
 
         # Computation engine — can DO math, not just know about it
         self.compute = ComputeEngine()
+
+        # Activation network — spreading activation like real neurons
+        self.activation = ActivationNetwork(self.relations, self.base._beliefs)
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -598,6 +602,15 @@ class Genesis:
             if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
                 parts.append(f"\nTransfer: {entry['message']}")
                 break
+
+        # 7. Spreading activation — fire neurons in all directions
+        activation_result = self.activation.activate(list(query_words))
+        if activation_result.convergence_points:
+            parts.append("\nAssociations (spreading activation):")
+            for cp in activation_result.convergence_points[:5]:
+                node = next((n for n in activation_result.activated if n.name == cp), None)
+                if node:
+                    parts.append(f"  * {cp} ← {', '.join(node.sources)}")
 
         if not parts:
             # Fall back to base system (which will search)
