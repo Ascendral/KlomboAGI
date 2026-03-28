@@ -173,6 +173,21 @@ def main():
             report = run_evals(genesis)
             print(f"\n{report.summary()}\n")
             continue
+        if user_input.lower() in ("modulators", "mods", "mode"):
+            print(f"\n{genesis.modulator.explain()}\n")
+            continue
+        if user_input.lower() in ("chunks", "compiled"):
+            stats = genesis.chunker.stats()
+            print(f"\n  Compiled chunks: {stats['total_chunks']}")
+            for cond, conc, uses in stats['most_used']:
+                print(f"    {cond} → {conc} (used {uses}x)")
+            print()
+            continue
+        if user_input.lower() in ("workspace", "broadcast"):
+            recent = genesis.workspace.recent_broadcasts()
+            print(f"\n  Recent broadcasts: {recent}")
+            print(f"  Stats: {genesis.workspace.stats()}\n")
+            continue
         if user_input.lower() in ("cleanup", "clean", "purge"):
             print(f"\n  {genesis.cleanup_memory()}\n")
             continue

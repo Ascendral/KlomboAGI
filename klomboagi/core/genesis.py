@@ -53,6 +53,9 @@ from klomboagi.core.archetype import Archetype
 from klomboagi.core.skill_growth import SkillGrowth
 from klomboagi.reasoning.memory_dynamics import ActivationDecay, ConflictDetector, ChunkCompiler
 from klomboagi.reasoning.global_workspace import GlobalWorkspace, SignalType
+from klomboagi.reasoning.free_energy import FreeEnergyMinimizer
+from klomboagi.reasoning.dual_process import DualProcess
+from klomboagi.reasoning.modulators import ModulatorController
 
 
 @dataclass
@@ -252,6 +255,16 @@ class Genesis:
 
         # Global Workspace — competitive broadcast to all subsystems
         self.workspace = GlobalWorkspace()
+
+        # Expected Free Energy — principled explore vs exploit
+        self.free_energy = FreeEnergyMinimizer()
+
+        # Dual Process — System 1 (fast) vs System 2 (slow)
+        self.dual_process = DualProcess(
+            self.chunker, self.base._beliefs, self.relations, self.generator)
+
+        # Cognitive Modulators — 3 scalars that change HOW reasoning operates
+        self.modulator = ModulatorController()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -455,7 +468,10 @@ class Genesis:
                 0.5, "dialog_context")
         broadcast = self.workspace.compete()
 
-        # 14. Inner state — compute how we "feel" based on real metrics
+        # 14. Cognitive modulators — inner state changes HOW we reason
+        self.modulator.update(self.inner.state, self.traits)
+
+        # 15. Inner state — compute how we "feel" based on real metrics
         self.inner.record_success()  # made it through a cycle
         self.inner.compute(
             beliefs_in_focus=len(self.working_memory.get_active_items()),
@@ -720,12 +736,11 @@ class Genesis:
         if analogy:
             return self._answer_analogy(analogy)
 
-        # SOAR chunk lookup — instant compiled rules before full reasoning
-        chunks = self.chunker.lookup(query)
-        if chunks:
-            best = max(chunks, key=lambda c: c.confidence)
-            chunk_answer = f"From {best.condition} I know that {best.conclusion}."
-            # Still continue to full reasoning but this gives an instant first answer
+        # DUAL PROCESS: System 1 fires first (chunks + direct retrieval)
+        dp_result = self.dual_process.think(query)
+        if dp_result.system_used == 1 and dp_result.system1_confidence >= 0.6:
+            # System 1 answered confidently — instant response, no System 2 needed
+            return dp_result.answer
 
         # Counterfactual questions: "what if there were no gravity?"
         if query.lower().startswith("what if") or query.lower().startswith("without"):
@@ -747,10 +762,13 @@ class Genesis:
 
         # ── PARALLEL FIRE — all systems at once, shaped by behavior ──
 
-        # System 0: FOCUS — filter noise, find what's relevant
+        # Update modulators before reasoning
+        mods = self.modulator.update(self.inner.state, self.traits)
+
+        # System 0: FOCUS — shaped by modulators
         focus_result = self.focus.focus(query, self.base._beliefs,
                                         self.relations, self.working_memory,
-                                        max_results=decision.chain_length)
+                                        max_results=mods.max_beliefs_to_consider)
         known_facts = focus_result.top_beliefs()
         relation_lines = [f"  {r}" for r in focus_result.top_relations()]
         query_words = set(focus_result.focus_concepts)
