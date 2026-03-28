@@ -59,6 +59,7 @@ from klomboagi.reasoning.modulators import ModulatorController
 from klomboagi.reasoning.attention_economy import AttentionEconomy
 from klomboagi.reasoning.predictive import PredictiveProcessor
 from klomboagi.reasoning.constructive_memory import ConstructiveMemory
+from klomboagi.senses.llm_translator import LLMTranslator
 
 
 @dataclass
@@ -274,6 +275,11 @@ class Genesis:
 
         # Predictive Processing — predict before seeing, learn from errors
         self.predictor = PredictiveProcessor()
+
+        # LLM Translator — language sense, NOT the brain
+        # Disabled by default. Enable with: genesis.translator.enabled = True
+        # genesis.translator.api_key = "sk-..."
+        self.translator = LLMTranslator(enabled=False)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
@@ -1858,12 +1864,11 @@ class Genesis:
 
     def _extract_relations(self, message: str) -> None:
         """
-        Auto-extract relations from natural language using NLU.
+        Auto-extract relations from natural language.
 
-        Parses sentence structure to find:
-        "gravity causes acceleration" → relation(gravity, CAUSES, acceleration)
-        "because heat increases, molecules move faster" → causal relation
-        "the dog, which is a mammal, has fur" → relative clause extraction
+        If LLM translator is enabled: uses LLM for high-quality parsing.
+        If disabled: falls back to rule-based NLU.
+        Everything is tagged with source so you can audit what came from where.
         """
         rel_type_map = {
             "causes": RelationType.CAUSES,
@@ -1872,32 +1877,61 @@ class Genesis:
             "uses": RelationType.USES,
             "enables": RelationType.ENABLES,
             "measures": RelationType.MEASURES,
+            "is_a": None,  # Handled as belief, not relation
+            "opposite_of": RelationType.OPPOSITE_OF,
+            "has_property": None,
         }
 
-        # Use NLU to extract structured relations
-        nlu_relations = self.nlu.extract_relations(message)
-        for source, rel_str, target in nlu_relations:
-            rel_type = rel_type_map.get(rel_str)
-            if rel_type and len(source) > 1 and len(target) > 1:
-                self.relations.add(source, rel_type, target,
-                                  confidence=0.5, domain="conversation")
+        # Use LLM translator if enabled, otherwise NLU
+        if self.translator.enabled:
+            parsed = self.translator.parse(message)
+            for triple in parsed:
+                if triple.relation == "is_a" or triple.relation == "has_property":
+                    # Store as belief — tagged source="llm_parse"
+                    statement = f"{triple.subject} is {triple.object}"
+                    if statement not in self.base._beliefs and len(triple.subject) > 1:
+                        self.base._evidence_counter += 1
+                        belief = Belief(
+                            statement=statement,
+                            truth=TruthValue.from_single_observation(True),
+                            stamp=EvidenceStamp.new(self.base._evidence_counter),
+                            subject=triple.subject, predicate=triple.object,
+                            source=triple.source,  # "llm_parse" — TAGGED
+                        )
+                        self.base._beliefs[statement] = belief
+                        self.base.memory.beliefs[statement] = belief.to_dict()
+                        self.base.graph.add(triple.subject, is_a=[triple.object])
+                else:
+                    # Store as relation — tagged
+                    rel_type = rel_type_map.get(triple.relation)
+                    if rel_type and len(triple.subject) > 1 and len(triple.object) > 1:
+                        self.relations.add(triple.subject, rel_type, triple.object,
+                                          confidence=triple.confidence,
+                                          domain=triple.source)
+        else:
+            # Fallback: rule-based NLU
+            nlu_relations = self.nlu.extract_relations(message)
+            for source, rel_str, target in nlu_relations:
+                rel_type = rel_type_map.get(rel_str)
+                if rel_type and len(source) > 1 and len(target) > 1:
+                    self.relations.add(source, rel_type, target,
+                                      confidence=0.5, domain="conversation")
 
-        # Also extract facts as beliefs
-        nlu_facts = self.nlu.extract_facts(message)
-        for subj, pred in nlu_facts:
-            if len(subj) > 1 and len(pred) > 3:
-                statement = f"{subj} is {pred}"
-                if statement not in self.base._beliefs:
-                    self.base._evidence_counter += 1
-                    belief = Belief(
-                        statement=statement,
-                        truth=TruthValue.from_single_observation(True),
-                        stamp=EvidenceStamp.new(self.base._evidence_counter),
-                        subject=subj, predicate=pred, source="nlu",
-                    )
-                    self.base._beliefs[statement] = belief
-                    self.base.memory.beliefs[statement] = belief.to_dict()
-                    self.base.graph.add(subj, is_a=[pred])
+            nlu_facts = self.nlu.extract_facts(message)
+            for subj, pred in nlu_facts:
+                if len(subj) > 1 and len(pred) > 3:
+                    statement = f"{subj} is {pred}"
+                    if statement not in self.base._beliefs:
+                        self.base._evidence_counter += 1
+                        belief = Belief(
+                            statement=statement,
+                            truth=TruthValue.from_single_observation(True),
+                            stamp=EvidenceStamp.new(self.base._evidence_counter),
+                            subject=subj, predicate=pred, source="nlu",
+                        )
+                        self.base._beliefs[statement] = belief
+                        self.base.memory.beliefs[statement] = belief.to_dict()
+                        self.base.graph.add(subj, is_a=[pred])
 
     # ── State Persistence ──
 

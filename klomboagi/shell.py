@@ -173,6 +173,31 @@ def main():
             report = run_evals(genesis)
             print(f"\n{report.summary()}\n")
             continue
+        if user_input.lower() == "llm on":
+            key = input("  API key: ").strip()
+            if key:
+                genesis.translator.api_key = key
+                genesis.translator.enabled = True
+                print("  LLM translator ENABLED. Parsing only. No reasoning. All tagged.\n")
+            continue
+        if user_input.lower() == "llm off":
+            genesis.translator.enabled = False
+            print("  LLM translator DISABLED. Using rule-based NLU.\n")
+            continue
+        if user_input.lower() in ("llm", "llm status"):
+            print(f"\n{genesis.translator.audit_report()}\n")
+            continue
+        if user_input.lower() == "sources":
+            # Show where beliefs came from
+            sources = {}
+            for b in genesis.base._beliefs.values():
+                src = b.source if hasattr(b, 'source') else "unknown"
+                sources[src] = sources.get(src, 0) + 1
+            print("\n  Belief sources:")
+            for src, count in sorted(sources.items(), key=lambda x: -x[1]):
+                print(f"    {src}: {count}")
+            print()
+            continue
         if user_input.lower() in ("modulators", "mods", "mode"):
             print(f"\n{genesis.modulator.explain()}\n")
             continue
