@@ -496,72 +496,85 @@ class Genesis:
 
         return None
 
-    # ── Deep Thinking ──
+    # ── Deep Thinking — Parallel Cognition ──
 
     def _think_deep(self, message: str, intent: dict) -> str:
         """
-        Full reasoning pipeline for questions.
+        Parallel cognition — ALL systems fire simultaneously, results merge.
 
-        1. Parse relational questions (what causes X? what uses X?)
-        2. Gather beliefs + relations about the topic
-        3. Run CognitionLoop for pattern detection
-        4. Run ReasoningEngine for dimensional analysis
-        5. Combine into a unified answer
+        Like real neurons: every subsystem activates at once.
+        The final response is the COMBINED output, weighted by confidence.
+
+        Systems firing in parallel:
+        1. Math engine (computation)
+        2. Relation engine (structural connections)
+        3. Activation network (spreading neural activation)
+        4. Belief system (stored knowledge)
+        5. Reasoning engine (logical derivation)
+        6. CognitionLoop (pattern detection + transfer)
         """
         self.deep_thinks += 1
         query = intent.get("query", message)
 
-        # 0. Check for math expressions/questions
+        # ── Specialized question handlers (short-circuit) ──
+
+        # Math
         math_result = self.compute.compute(query)
         if math_result.success and math_result.result != 0:
             steps = "\n  ".join(math_result.steps) if math_result.steps else ""
             return f"{math_result.result}\n  {steps}" if steps else str(math_result.result)
 
-        # 0.5. Check for "how does X connect to Y?" / "why" questions
+        # Connection questions
         connection = self._parse_connection_question(query)
         if connection:
             return self.relations.explain_connection(connection[0], connection[1])
 
+        # Why questions
         why_result = self._parse_why_question(query)
         if why_result:
             return self._answer_why(why_result)
 
-        # 1. Check for relational questions first
+        # Relational questions
         relational = self._parse_relational_question(query)
         if relational:
             return self._answer_relational(relational)
 
-        # 2. Gather known facts
+        # Analogy questions
+        analogy = self._parse_analogy_question(query)
+        if analogy:
+            return self._answer_analogy(analogy)
+
+        # ── PARALLEL FIRE — all systems at once ──
+
         stop_words = {"is", "a", "an", "the", "what", "who", "where", "how",
                       "when", "which", "why", "are", "was", "do", "does",
                       "can", "could", "about", "tell", "me", "explain"}
         query_words = set(query.lower().split()) - stop_words
+
+        # System 1: BELIEFS — what do we know?
         known_facts = []
         for statement, belief in self.base._beliefs.items():
             stmt_words = set(statement.lower().split()) - stop_words
             if query_words & stmt_words:
                 known_facts.append(statement)
 
-        # 3. Gather relations about the topic
+        # System 2: RELATIONS — structural connections
         relation_lines = []
         for word in query_words:
-            rels = self.relations.get_all_about(word)
-            for r in rels[:5]:
-                if r.source == word:
-                    relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
-                else:
-                    relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
+            for r in self.relations.get_all_about(word)[:5]:
+                relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
 
-        # 4. Run CognitionLoop
-        problem = {
+        # System 3: ACTIVATION — spreading neural fire
+        activation_result = self.activation.activate(list(query_words))
+
+        # System 4: COGNITION — pattern detection
+        state = self.cognition.think({
             "description": query,
             "known_facts": known_facts[:20],
             "known_entities": list(query_words),
-            "expected_outcome": f"answer to: {query}",
-        }
-        state = self.cognition.think(problem)
+        })
 
-        # 5. Run ReasoningEngine
+        # System 5: REASONING — logical derivation
         reasoning_result = ""
         if known_facts:
             try:
@@ -571,49 +584,50 @@ class Genesis:
             except Exception:
                 pass
 
-        # 6. Build response
+        # ── MERGE — combine all signals into unified response ──
+
         parts = []
 
-        # Beliefs
+        # Core answer (beliefs, sorted by relevance)
         if known_facts:
             parts.append("What I know:")
-            for f in known_facts[:10]:
+            for f in known_facts[:8]:
                 b = self.base._beliefs.get(f)
                 conf = f" ({b.truth.confidence:.0%})" if b else ""
                 parts.append(f"  {f}{conf}")
 
-        # Relations
+        # Structural connections
         if relation_lines:
-            # Deduplicate
             unique_rels = list(dict.fromkeys(relation_lines))
             parts.append("\nConnections:")
-            for line in unique_rels[:10]:
+            for line in unique_rels[:8]:
                 parts.append(line)
 
-        # Reasoning
+        # Logical reasoning
         if reasoning_result:
             parts.append(f"\nReasoning: {reasoning_result}")
 
-        # CognitionLoop insights
+        # Neural associations — convergence points
+        if activation_result.convergence_points:
+            parts.append("\nNeural associations:")
+            for cp in activation_result.convergence_points[:5]:
+                node = next((n for n in activation_result.activated if n.name == cp), None)
+                if node:
+                    parts.append(f"  * {cp} (from: {', '.join(node.sources)})")
+        elif activation_result.activated:
+            top = activation_result.top(3)
+            if top:
+                parts.append("\nAssociated concepts:")
+                for node in top:
+                    parts.append(f"  ~ {node.name} ({node.activation:.2f})")
+
+        # Pattern from CognitionLoop
         for entry in state.trace:
-            if entry["phase"] == "learn" and entry.get("data"):
-                parts.append(f"\nPattern: {entry['message']}")
-                break
             if entry["phase"] == "transfer" and "successful" in entry.get("message", "").lower():
                 parts.append(f"\nTransfer: {entry['message']}")
                 break
 
-        # 7. Spreading activation — fire neurons in all directions
-        activation_result = self.activation.activate(list(query_words))
-        if activation_result.convergence_points:
-            parts.append("\nAssociations (spreading activation):")
-            for cp in activation_result.convergence_points[:5]:
-                node = next((n for n in activation_result.activated if n.name == cp), None)
-                if node:
-                    parts.append(f"  * {cp} ← {', '.join(node.sources)}")
-
         if not parts:
-            # Fall back to base system (which will search)
             return self.base.hear(message)
 
         return "\n".join(parts)
@@ -1009,6 +1023,117 @@ class Genesis:
             else:
                 lines.append(f"  {direction} {r.source} {r.relation.value} this ({r.confidence:.0%})")
         return "\n".join(lines)
+
+    # ── Analogical Reasoning ──
+
+    def _parse_analogy_question(self, query: str) -> dict | None:
+        """Parse "X is to Y as A is to what?" style questions."""
+        q = query.lower().strip().rstrip("?")
+        patterns = [
+            r"(.+?) is to (.+?) as (.+?) is to what",
+            r"(.+?) is to (.+?) as (.+?) is to (.+)",  # verify analogy
+            r"what is (.+?) to (.+?) as (.+?) to (.+)",
+        ]
+        for i, pattern in enumerate(patterns):
+            m = re.match(pattern, q)
+            if m:
+                groups = m.groups()
+                if len(groups) == 3:
+                    return {"a": groups[0].strip(), "b": groups[1].strip(),
+                            "c": groups[2].strip(), "d": None}
+                elif len(groups) == 4:
+                    return {"a": groups[0].strip(), "b": groups[1].strip(),
+                            "c": groups[2].strip(), "d": groups[3].strip()}
+        return None
+
+    def _answer_analogy(self, analogy: dict) -> str:
+        """
+        Solve analogies by finding structural parallels in the relation graph.
+
+        "addition is to subtraction as multiplication is to what?"
+        → Find: addition --opposite_of--> subtraction
+        → Apply same relation: multiplication --opposite_of--> ?
+        → Answer: division
+        """
+        a, b, c = analogy["a"], analogy["b"], analogy["c"]
+        d = analogy.get("d")
+
+        # Find relations between A and B
+        ab_relations = []
+        for r in self.relations.get_forward(a):
+            if r.target == b:
+                ab_relations.append(r)
+        for r in self.relations.get_backward(a):
+            if r.source == b:
+                ab_relations.append(r)
+        # Also try with articles
+        if not ab_relations:
+            for prefix in ("a ", "an ", "the "):
+                for r in self.relations.get_forward(prefix + a):
+                    if r.target == b or r.target == prefix + b:
+                        ab_relations.append(r)
+
+        if not ab_relations:
+            return (f"I don't know the relationship between '{a}' and '{b}'. "
+                    f"Teach me how they're related?")
+
+        # Apply the same relation(s) to C to find D
+        candidates = []
+        for ab_rel in ab_relations:
+            # Look for C having the same relation type
+            c_rels = self.relations.get_forward(c, ab_rel.relation)
+            if not c_rels:
+                for prefix in ("a ", "an ", "the "):
+                    c_rels = self.relations.get_forward(prefix + c, ab_rel.relation)
+                    if c_rels:
+                        break
+            for cr in c_rels:
+                candidates.append((cr.target, ab_rel.relation.value, cr.confidence))
+
+        if d:
+            # Verify mode
+            match = any(cand[0] == d or cand[0].endswith(d) for cand in candidates)
+            if match:
+                rel = candidates[0][1] if candidates else "related"
+                return f"Yes! {a} is to {b} as {c} is to {d} (both {rel})"
+            elif candidates:
+                best = candidates[0]
+                return (f"Not quite. {a} {ab_relations[0].relation.value} {b}, "
+                        f"so {c} {best[1]} {best[0]}, not {d}")
+            return f"I can't verify this analogy — I don't know enough about {c}."
+
+        if candidates:
+            best = candidates[0]
+            rel = ab_relations[0].relation.value
+            return (f"{a} is to {b} as {c} is to {best[0]}\n"
+                    f"  ({a} {rel} {b}, so {c} {rel} {best[0]})")
+
+        return f"I know {a} {ab_relations[0].relation.value} {b}, but I don't know what {c} {ab_relations[0].relation.value}."
+
+    # ── Evidence Accumulation ──
+
+    def strengthen_belief(self, statement: str, source: str = "confirmation") -> None:
+        """
+        Strengthen a belief when multiple sources agree.
+
+        If the system discovers something through search AND the human
+        confirms it, the belief should be stronger than either alone.
+        """
+        if statement in self.base._beliefs:
+            belief = self.base._beliefs[statement]
+            self.base._evidence_counter += 1
+            confirming = Belief(
+                statement=statement,
+                truth=TruthValue.from_single_observation(True),
+                stamp=EvidenceStamp.new(self.base._evidence_counter),
+                subject=belief.subject,
+                predicate=belief.predicate,
+                source=source,
+            )
+            revised = belief.revise_with(confirming)
+            if revised:
+                self.base._beliefs[statement] = revised
+                self.base.memory.beliefs[statement] = revised.to_dict()
 
     # ── Connection & Why Questions ──
 
