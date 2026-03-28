@@ -101,6 +101,11 @@ def main():
             synth = genesis.synthesizer.explain(concept)
             print(f"\n  {synth if synth else 'I dont know enough to explain ' + concept}\n")
             continue
+        if user_input.lower().startswith("read "):
+            source = user_input[5:].strip()
+            print(f"\n  Reading and learning from: {source}")
+            print(f"  {genesis.read_and_learn(source)}\n")
+            continue
 
         response = genesis.hear(user_input)
         # Indent response for readability

@@ -40,6 +40,37 @@ class Reader:
         except Exception as e:
             return f"Error reading {path}: {e}"
 
+    def read_wikipedia(self, topic: str) -> str:
+        """Read a full Wikipedia article's plain text content."""
+        try:
+            import urllib.request
+            import urllib.parse
+            import json
+
+            safe = urllib.parse.quote(topic)
+            url = (
+                f"https://en.wikipedia.org/w/api.php"
+                f"?action=query&titles={safe}&prop=extracts"
+                f"&explaintext=1&format=json&exlimit=1"
+            )
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "KlomboAGI/0.1 (learning system)"
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+
+            pages = data.get("query", {}).get("pages", {})
+            for page_id, page in pages.items():
+                if page_id == "-1":
+                    return ""
+                text = page.get("extract", "")
+                if text:
+                    # Take first 10000 chars to avoid overwhelming
+                    return text[:10000]
+            return ""
+        except Exception as e:
+            return f"Error reading Wikipedia: {e}"
+
     def read_url(self, url: str) -> str:
         """Fetch content from a URL."""
         try:

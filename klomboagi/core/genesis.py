@@ -1051,6 +1051,116 @@ class Genesis:
                 lines.append(f"  {direction} {r.source} {r.relation.value} this ({r.confidence:.0%})")
         return "\n".join(lines)
 
+    # ── Document Learning ──
+
+    def read_and_learn(self, source: str) -> str:
+        """
+        Read an entire document (URL, file, or Wikipedia topic) and learn from it.
+
+        Pipeline:
+        1. Read the document
+        2. Split into sentences
+        3. Extract (subject, predicate) facts
+        4. Extract relations (causes, requires, part_of, uses)
+        5. Store as beliefs + knowledge graph entries
+        6. Run inference to derive new connections
+        7. Report what was learned
+        """
+        # 1. Read — detect source type
+        if source.startswith(("http://", "https://")):
+            content = self.base.reader.read(source)
+        elif source.startswith("wiki:"):
+            # wiki:Quantum_mechanics → read full Wikipedia article
+            topic = source[5:].strip()
+            content = self.base.reader.read_wikipedia(topic)
+        elif not source.startswith("/") and not source.startswith(".") and " " not in source:
+            # Bare word like "Gravity" → try Wikipedia first, then file
+            content = self.base.reader.read_wikipedia(source)
+            if not content or len(content) < 50:
+                content = self.base.reader.read(source)
+        else:
+            content = self.base.reader.read(source)
+
+        if not content or len(content) < 50:
+            return f"Could not read '{source}' or content too short."
+
+        lines = [f"Reading document ({len(content)} chars)..."]
+
+        # 2. Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', content.strip())
+        sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+        lines.append(f"Found {len(sentences)} sentences.")
+
+        # 3. Extract facts
+        facts_learned = 0
+        relations_learned = 0
+
+        for sentence in sentences[:100]:  # Cap at 100 sentences
+            # Extract "X is Y" facts — case insensitive
+            for m in re.finditer(
+                r'(?:A |An |The )?(\b[\w][\w\s]{1,30}?\b)\s+'
+                r'(?:is|are)\s+(?:a |an |the )?'
+                r'([\w\s,]{2,60}?)(?:[.]|$)',
+                sentence, re.IGNORECASE
+            ):
+                subj = m.group(1).strip().lower()
+                pred = m.group(2).strip().lower()
+                # Quality filter: subject max 5 words, predicate meaningful
+                subj_words = subj.split()
+                if (len(subj) > 2 and len(pred) > 5 and len(pred) <= 80
+                        and len(subj_words) <= 5 and not pred.startswith(("same", "no ", "not "))):
+                    statement = f"{subj} is {pred}"
+                    if statement not in self.base._beliefs:
+                        self.base._evidence_counter += 1
+                        belief = Belief(
+                            statement=statement,
+                            truth=TruthValue.from_single_observation(True),
+                            stamp=EvidenceStamp.new(self.base._evidence_counter),
+                            subject=subj, predicate=pred, source="document",
+                        )
+                        self.base._beliefs[statement] = belief
+                        self.base.memory.beliefs[statement] = belief.to_dict()
+                        self.base.graph.add(subj, is_a=[pred])
+                        if subj not in self.base.memory.concepts:
+                            self.base.memory.concepts[subj] = {"facts": [], "taught_by": "document"}
+                        self.base.memory.concepts[subj]["facts"].append(pred)
+                        facts_learned += 1
+
+            # 4. Extract relations
+            self._extract_relations(sentence)
+
+        # Count new relations
+        r_stats_before = self.relations.stats()["total_relations"]
+
+        # Also extract from the full text for cross-sentence patterns
+        self._extract_relations(content[:5000])
+
+        r_stats_after = self.relations.stats()["total_relations"]
+        relations_learned = r_stats_after - r_stats_before
+
+        # 5. Run inference
+        inferred = self.relations.run_inference()
+
+        # 6. Save
+        self.base.memory.save(self.base.memory_path)
+        self.save_state()
+
+        lines.append(f"\nLearned:")
+        lines.append(f"  Facts extracted: {facts_learned}")
+        lines.append(f"  Relations extracted: {relations_learned}")
+        lines.append(f"  Inferred: {len(inferred)} new connections")
+        lines.append(f"  Total beliefs: {len(self.base._beliefs)}")
+        lines.append(f"  Total relations: {self.relations.stats()['total_relations']}")
+
+        # Show some of what we learned
+        if facts_learned > 0:
+            lines.append(f"\nSample facts:")
+            recent = list(self.base._beliefs.items())[-min(facts_learned, 10):]
+            for stmt, belief in recent:
+                lines.append(f"  {stmt}")
+
+        return "\n".join(lines)
+
     # ── Analogical Reasoning ──
 
     def _parse_analogy_question(self, query: str) -> dict | None:
