@@ -560,15 +560,25 @@ class Genesis:
 
         stop_words = {"is", "a", "an", "the", "what", "who", "where", "how",
                       "when", "which", "why", "are", "was", "do", "does",
-                      "can", "could", "about", "tell", "me", "explain"}
+                      "can", "could", "about", "tell", "me", "explain",
+                      "of", "in", "to", "for", "and", "or", "on", "at",
+                      "by", "from", "with", "as", "be", "been", "being"}
         query_words = set(query.lower().split()) - stop_words
+        if not query_words:
+            # If ALL words were stop words, use the original minus just question words
+            query_words = set(query.lower().split()) - {"what", "is", "a", "an", "the"}
 
-        # System 1: BELIEFS — what do we know?
+        # System 1: BELIEFS — match on SUBJECT, not full statement text
         known_facts = []
         for statement, belief in self.base._beliefs.items():
-            stmt_words = set(statement.lower().split()) - stop_words
-            if query_words & stmt_words:
-                known_facts.append(statement)
+            if hasattr(belief, 'subject') and belief.subject:
+                subj_words = set(belief.subject.lower().split()) - stop_words
+                if query_words & subj_words:
+                    known_facts.append(statement)
+            else:
+                stmt_words = set(statement.lower().split()) - stop_words
+                if query_words & stmt_words:
+                    known_facts.append(statement)
 
         # System 2: RELATIONS — structural connections
         relation_lines = []
@@ -586,12 +596,12 @@ class Genesis:
             "known_entities": list(query_words),
         })
 
-        # System 5: REASONING — logical derivation
+        # System 5: REASONING — logical derivation (use max 5 facts to avoid noise)
         reasoning_result = ""
         if known_facts:
             try:
-                chain = self.reasoning_engine.reason(query, known_facts[:10])
-                if chain.confidence > 0.3:
+                chain = self.reasoning_engine.reason(query, known_facts[:5])
+                if chain.confidence > 0.3 and chain.conclusion:
                     reasoning_result = chain.conclusion
             except Exception:
                 pass
