@@ -44,6 +44,7 @@ from klomboagi.reasoning.self_model import SelfModel
 from klomboagi.reasoning.inner_state import InnerStateEngine
 from klomboagi.reasoning.behavioral_loop import BehavioralLoop, BehaviorMode
 from klomboagi.reasoning.counterfactual import CounterfactualEngine
+from klomboagi.reasoning.nlu import NLU
 
 
 @dataclass
@@ -213,6 +214,9 @@ class Genesis:
 
         # Counterfactual engine — "what if X were different?"
         self.counterfactual = CounterfactualEngine(self.relations)
+
+        # NLU — real language understanding beyond regex
+        self.nlu = NLU()
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -1539,32 +1543,46 @@ class Genesis:
 
     def _extract_relations(self, message: str) -> None:
         """
-        Auto-extract relations from natural language input.
+        Auto-extract relations from natural language using NLU.
 
+        Parses sentence structure to find:
         "gravity causes acceleration" → relation(gravity, CAUSES, acceleration)
-        "calculus requires algebra" → relation(calculus, REQUIRES, algebra)
-        "a proton is part of an atom" → relation(proton, PART_OF, atom)
+        "because heat increases, molecules move faster" → causal relation
+        "the dog, which is a mammal, has fur" → relative clause extraction
         """
-        msg = message.lower().strip()
+        rel_type_map = {
+            "causes": RelationType.CAUSES,
+            "requires": RelationType.REQUIRES,
+            "part_of": RelationType.PART_OF,
+            "uses": RelationType.USES,
+            "enables": RelationType.ENABLES,
+            "measures": RelationType.MEASURES,
+        }
 
-        relation_patterns = [
-            (r"(\w[\w\s]{1,30}?)\s+causes?\s+(\w[\w\s]{1,30})", RelationType.CAUSES),
-            (r"(\w[\w\s]{1,30}?)\s+requires?\s+(\w[\w\s]{1,30})", RelationType.REQUIRES),
-            (r"(\w[\w\s]{1,30}?)\s+(?:is\s+)?part\s+of\s+(\w[\w\s]{1,30})", RelationType.PART_OF),
-            (r"(\w[\w\s]{1,30}?)\s+uses?\s+(\w[\w\s]{1,30})", RelationType.USES),
-            (r"(\w[\w\s]{1,30}?)\s+enables?\s+(\w[\w\s]{1,30})", RelationType.ENABLES),
-            (r"(\w[\w\s]{1,30}?)\s+measures?\s+(\w[\w\s]{1,30})", RelationType.MEASURES),
-            (r"(\w[\w\s]{1,30}?)\s+is\s+(?:the\s+)?opposite\s+of\s+(\w[\w\s]{1,30})", RelationType.OPPOSITE_OF),
-        ]
+        # Use NLU to extract structured relations
+        nlu_relations = self.nlu.extract_relations(message)
+        for source, rel_str, target in nlu_relations:
+            rel_type = rel_type_map.get(rel_str)
+            if rel_type and len(source) > 1 and len(target) > 1:
+                self.relations.add(source, rel_type, target,
+                                  confidence=0.5, domain="conversation")
 
-        for pattern, rel_type in relation_patterns:
-            for m in re.finditer(pattern, msg):
-                source = m.group(1).strip()
-                target = m.group(2).strip()
-                # Skip very short or stop-word-only matches
-                if len(source) > 1 and len(target) > 1:
-                    self.relations.add(source, rel_type, target,
-                                      confidence=0.5, domain="conversation")
+        # Also extract facts as beliefs
+        nlu_facts = self.nlu.extract_facts(message)
+        for subj, pred in nlu_facts:
+            if len(subj) > 1 and len(pred) > 3:
+                statement = f"{subj} is {pred}"
+                if statement not in self.base._beliefs:
+                    self.base._evidence_counter += 1
+                    belief = Belief(
+                        statement=statement,
+                        truth=TruthValue.from_single_observation(True),
+                        stamp=EvidenceStamp.new(self.base._evidence_counter),
+                        subject=subj, predicate=pred, source="nlu",
+                    )
+                    self.base._beliefs[statement] = belief
+                    self.base.memory.beliefs[statement] = belief.to_dict()
+                    self.base.graph.add(subj, is_a=[pred])
 
     # ── State Persistence ──
 
