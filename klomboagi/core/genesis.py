@@ -56,6 +56,9 @@ from klomboagi.reasoning.global_workspace import GlobalWorkspace, SignalType
 from klomboagi.reasoning.free_energy import FreeEnergyMinimizer
 from klomboagi.reasoning.dual_process import DualProcess
 from klomboagi.reasoning.modulators import ModulatorController
+from klomboagi.reasoning.attention_economy import AttentionEconomy
+from klomboagi.reasoning.predictive import PredictiveProcessor
+from klomboagi.reasoning.constructive_memory import ConstructiveMemory
 
 
 @dataclass
@@ -266,6 +269,17 @@ class Genesis:
         # Cognitive Modulators — 3 scalars that change HOW reasoning operates
         self.modulator = ModulatorController()
 
+        # Attention Economy — zero-sum budget, forces real prioritization
+        self.attention_economy = AttentionEconomy()
+
+        # Predictive Processing — predict before seeing, learn from errors
+        self.predictor = PredictiveProcessor()
+
+        # Constructive Memory — reconstruct, don't retrieve
+        self.constructive = ConstructiveMemory(
+            self.base._beliefs, self.relations,
+            self.memory_decay, self.working_memory)
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -387,11 +401,12 @@ class Genesis:
         # 2. Parse intent
         intent = self.base._parse_intent(resolved_message)
 
-        # 3. Working memory + ACT-R decay — attend to mentioned concepts
+        # 3. Working memory + ACT-R decay + attention economy
         for word in resolved_message.lower().split():
             if len(word) > 3 and word not in self.base.COMMON_WORDS:
                 self.working_memory.attend(word, "concept", "input")
-                self.memory_decay.access(word)  # ACT-R trace
+                self.memory_decay.access(word)
+                self.attention_economy.allocate(word, 5.0)  # zero-sum attention
 
         # 4. Check for surprise BEFORE learning
         surprise = self._check_surprise(intent)
@@ -468,7 +483,10 @@ class Genesis:
                 0.5, "dialog_context")
         broadcast = self.workspace.compete()
 
-        # 14. Cognitive modulators — inner state changes HOW we reason
+        # 14. Attention economy tax — zero-sum, forces prioritization
+        self.attention_economy.tax()
+
+        # 15. Cognitive modulators — inner state changes HOW we reason
         self.modulator.update(self.inner.state, self.traits)
 
         # 15. Inner state — compute how we "feel" based on real metrics
