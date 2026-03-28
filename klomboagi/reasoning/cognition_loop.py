@@ -43,6 +43,13 @@ from klomboagi.reasoning.self_eval import SelfEvaluator, ReasoningAttempt, Evalu
 from klomboagi.storage.manager import StorageManager
 from klomboagi.utils.time import utc_now
 
+# Optional import — trait system is not required
+try:
+    from klomboagi.core.traits import TraitSystem, TraitInfluence
+except ImportError:
+    TraitSystem = None  # type: ignore[assignment,misc]
+    TraitInfluence = None  # type: ignore[assignment,misc]
+
 
 class CognitionPhase(Enum):
     PERCEIVE = "perceive"
@@ -73,6 +80,7 @@ class CognitionState:
     action_result: dict | None = None           # What happened when we acted
     learned: dict | None = None                 # What was abstracted
     nudges: list[str] = field(default_factory=list)  # Human corrections received
+    trait_influence: dict | None = None         # Trait system influence (if active)
     attempts: int = 0                           # How many times through the loop
     max_attempts: int = 3
     trace: list[dict] = field(default_factory=list)  # Full reasoning trace
@@ -102,6 +110,7 @@ class CognitionState:
             "action_result": self.action_result,
             "learned": self.learned,
             "nudges": self.nudges,
+            "trait_influence": self.trait_influence,
             "attempts": self.attempts,
             "trace": self.trace,
             "created_at": self.created_at,
@@ -117,13 +126,15 @@ class CognitionLoop:
     This is the piece nobody has published.
     """
 
-    def __init__(self, storage: StorageManager) -> None:
+    def __init__(self, storage: StorageManager,
+                 trait_system: TraitSystem | None = None) -> None:
         self.storage = storage
         self.abstraction = AbstractionEngine(storage)
         self.comparator = StructuralComparator(self.abstraction)
         self.causal = CausalModel(storage)
         self.inquiry = InquiryEngine(storage)
         self.evaluator = SelfEvaluator()
+        self.trait_system = trait_system
 
         # Optional callbacks
         self.on_phase: Callable[[CognitionPhase, str], None] | None = None
@@ -186,6 +197,18 @@ class CognitionLoop:
     def _perceive(self, state: CognitionState) -> None:
         """Decompose the problem into structural elements."""
         state.log("perceive", "Decomposing problem into structural elements")
+
+        # Consult trait system if available
+        if self.trait_system is not None:
+            influence = self.trait_system.influence(state.problem)
+            state.trait_influence = influence.to_dict()
+            if influence.active_traits:
+                state.log("perceive",
+                          f"Traits activated: {influence.reasoning}",
+                          state.trait_influence)
+                # Persistence trait grants extra attempts
+                if influence.persistence_modifier > 0:
+                    state.max_attempts += influence.persistence_modifier
 
         # Use the problem as an episode-like structure
         episode = {
@@ -346,6 +369,11 @@ class CognitionLoop:
             "confidence": attempt.confidence,
         }
 
+        # Apply trait confidence modifier if available
+        if state.trait_influence and state.trait_influence.get("confidence_modifier"):
+            attempt.confidence = max(0.0, min(1.0,
+                attempt.confidence + state.trait_influence["confidence_modifier"]))
+
         state.log("hypothesize", f"Hypothesis generated via {approach} (confidence: {attempt.confidence:.0%})",
                   state.hypothesis)
 
@@ -461,6 +489,17 @@ class CognitionLoop:
 
         # Update causal model
         self.causal.learn_from_episode(episode)
+
+        # Update trait system with outcome
+        if self.trait_system is not None and state.trait_influence:
+            for trait_name in state.trait_influence.get("active_traits", []):
+                trait = self.trait_system.get_trait(trait_name)
+                if trait:
+                    for ability in trait.abilities.values():
+                        for skill in ability.skills.values():
+                            self.trait_system.record_outcome(
+                                trait_name, ability.name, skill.name, success)
+            self.trait_system.tick()
 
         state.log("observe", f"Episode recorded (success={success})")
         state.phase = CognitionPhase.LEARN
