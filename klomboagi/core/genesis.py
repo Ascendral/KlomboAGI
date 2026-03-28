@@ -646,6 +646,13 @@ class Genesis:
         if any(q_lower.startswith(p) or q_lower == p for p in meta_patterns):
             return self._learning_summary()
 
+        # Meta: "what interests you?" / "what are you curious about?"
+        curiosity_patterns = ("what interests you", "what are you curious about",
+                             "what do you want to learn", "what are you thinking about",
+                             "what would you like to know")
+        if any(q_lower.startswith(p) or q_lower == p for p in curiosity_patterns):
+            return self._curiosity_report()
+
         # Math
         math_result = self.compute.compute(query)
         if math_result.success and math_result.result != 0:
@@ -1446,6 +1453,42 @@ class Genesis:
         lines.append(f"\nI am capable. And I have more to learn.")
         return "\n".join(lines)
 
+    # ── Curiosity Report ──
+
+    def _curiosity_report(self) -> str:
+        """What the system is genuinely curious about."""
+        lines = []
+
+        # Open knowledge gaps
+        open_gaps = [g for g in self.base.curiosity.gaps if not g.resolved]
+        if open_gaps:
+            lines.append("I'm curious about:")
+            for gap in open_gaps[:5]:
+                lines.append(f"  ? {gap.concept}")
+
+        # Weakest domains from metacognition
+        priorities = self.metacognition.identify_learning_priorities(
+            self.base._beliefs, self.relations)
+        if priorities:
+            lines.append("\nI want to strengthen:")
+            for p in priorities[:3]:
+                lines.append(f"  → {p}")
+
+        # What working memory is focused on
+        if self.working_memory.get_focus():
+            lines.append(f"\nRight now I'm focused on: {self.working_memory.get_focus()}")
+
+        # Inner state
+        if self.inner.state.wonder > 0.3:
+            lines.append("\nSomething surprised me recently — I want to investigate that.")
+        if self.inner.state.boredom > 0.5:
+            lines.append("\nI'm not learning right now and that bothers me.")
+
+        if not lines:
+            lines.append("I want to learn everything. Give me something to study.")
+
+        return "\n".join(lines)
+
     # ── Memory Cleanup ──
 
     def cleanup_memory(self) -> str:
@@ -1510,9 +1553,14 @@ class Genesis:
                 self.inner.record_learning(3)
                 return f"I was bored, so I went and learned about '{next_gap.concept}'.\n{result}"
 
-        # Try a topic from learning priorities
+        # Try a topic from learning priorities — extract real topics, not meta-words
+        meta_noise = {"study", "learn", "more", "currently", "critical", "gaps",
+                      "detected", "continue", "broadly", "relationships", "improve",
+                      "answer", "reduce", "errors", "corrections", "received"}
         for p in priorities:
-            words = [w for w in p.lower().split() if len(w) > 4 and w not in {"study", "learn", "more", "currently"}]
+            words = [w for w in p.lower().split()
+                    if len(w) > 4 and w not in meta_noise
+                    and not w.endswith(("ing", "tion", "ness"))]
             if words:
                 topic = words[0]
                 result = self.read_and_learn(topic)

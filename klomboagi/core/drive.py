@@ -256,9 +256,16 @@ class LearningDrive:
         """Generate new learning targets from metacognition."""
         priorities = self.genesis.metacognition.identify_learning_priorities(
             self.genesis.base._beliefs, self.genesis.relations)
+
+        # Extract DOMAIN NAMES from priorities, not random words
+        meta_noise = {"study", "more", "learn", "only", "currently", "critical",
+                      "gaps", "detected", "continue", "broadly", "relationships",
+                      "improve", "answer", "rate", "reduce", "errors", "corrections",
+                      "received", "confidence", "relations"}
         for p in priorities:
             words = [w for w in p.lower().split()
-                    if len(w) > 3 and w not in {"study", "more", "learn", "only", "currently"}]
+                    if len(w) > 4 and w not in meta_noise
+                    and not w.endswith(("ing", "tion", "ness", "ment", "ally"))]
             for w in words:
                 if w not in self._explored_topics and w not in self._gap_queue:
                     self._gap_queue.append(w)
