@@ -25,6 +25,7 @@ from klomboagi.core.traits import TraitSystem, Trait, Ability, Skill
 from klomboagi.reasoning.truth import TruthValue, Belief, EvidenceStamp
 from klomboagi.reasoning.cognition_loop import CognitionLoop, CognitionPhase
 from klomboagi.reasoning.engine import ReasoningEngine
+from klomboagi.core.curriculum import get_curriculum, get_all_domains, curriculum_stats
 
 
 @dataclass
@@ -349,11 +350,13 @@ class Genesis:
         """
         Do two predicates conflict?
 
-        "green" and "red" conflict (both colors).
-        "green" and "large" don't (different properties).
-        "reptile" and "mammal" conflict (both animal classes).
+        Uses the knowledge graph to detect conflicts:
+        if both predicates share a parent category, they conflict.
+        "green" and "red" both → "a color" → conflict.
+        "reptile" and "mammal" both → "an animal class" → conflict.
+
+        Falls back to hardcoded opposites for basic cases.
         """
-        # Negation patterns — strip articles for comparison
         def strip_article(s: str) -> str:
             for art in ("a ", "an ", "the "):
                 if s.startswith(art):
@@ -363,27 +366,41 @@ class Genesis:
         old_clean = strip_article(old.lower().strip())
         new_clean = strip_article(new.lower().strip())
 
+        # Negation
         if new_clean.startswith("not ") and strip_article(new_clean[4:]) == old_clean:
             return True
         if old_clean.startswith("not ") and strip_article(old_clean[4:]) == new_clean:
             return True
 
-        # Known conflicting categories (bootstrap knowledge)
-        conflict_groups = [
-            {"red", "blue", "green", "yellow", "orange", "purple", "black", "white", "pink", "brown"},
-            {"hot", "cold", "warm", "cool", "freezing", "boiling"},
-            {"big", "small", "large", "tiny", "huge", "little"},
-            {"fast", "slow", "quick"},
-            {"mammal", "reptile", "bird", "fish", "insect", "amphibian", "arachnid"},
-            {"solid", "liquid", "gas", "plasma"},
-            {"true", "false"},
-            {"alive", "dead"},
-            {"male", "female"},
+        # Graph-based: check if both predicates share a parent category
+        old_concept = self.base.graph.get(old_clean)
+        new_concept = self.base.graph.get(new_clean)
+        if old_concept and new_concept:
+            old_parents = set(old_concept.is_a)
+            new_parents = set(new_concept.is_a)
+            shared = old_parents & new_parents
+            if shared and old_clean != new_clean:
+                return True
+
+        # Also check beliefs for shared categories
+        old_categories = set()
+        new_categories = set()
+        for statement, belief in self.base._beliefs.items():
+            if belief.subject == old_clean:
+                old_categories.add(belief.predicate)
+            if belief.subject == new_clean:
+                new_categories.add(belief.predicate)
+        shared_beliefs = old_categories & new_categories
+        if shared_beliefs and old_clean != new_clean:
+            return True
+
+        # Hardcoded opposites (minimal — these are logical, not domain-specific)
+        opposites = [
+            ("true", "false"), ("alive", "dead"), ("male", "female"),
+            ("positive", "negative"), ("open", "closed"), ("on", "off"),
         ]
-        old_lower = old.lower().strip()
-        new_lower = new.lower().strip()
-        for group in conflict_groups:
-            if old_lower in group and new_lower in group and old_lower != new_lower:
+        for a, b in opposites:
+            if (old_clean == a and new_clean == b) or (old_clean == b and new_clean == a):
                 return True
 
         return False
@@ -690,6 +707,57 @@ class Genesis:
                 concepts.insert(0, (topic.lower(), first_pred))
 
         return concepts[:15]  # Cap at 15 facts per discovery
+
+    # ── Teaching Protocol ──
+
+    def teach_domain(self, domain: str) -> str:
+        """
+        Teach an entire domain at machine speed.
+
+        Feeds structured (subject, predicate) facts through the learning
+        pipeline. Each fact becomes a belief with NARS truth values
+        and a knowledge graph entry.
+
+        Returns a summary of what was learned.
+        """
+        facts = get_curriculum(domain)
+        if not facts:
+            available = ", ".join(get_all_domains())
+            return f"Unknown domain '{domain}'. Available: {available}"
+
+        learned = 0
+        for subject, predicate in facts:
+            intent = {"subject": subject, "predicate": predicate, "raw": f"{subject} is {predicate}"}
+            self.base._learn_from_teaching_quiet(intent)
+            learned += 1
+
+        # Run CognitionLoop to form patterns from the new knowledge
+        known = [f"{s} is {p}" for s, p in facts[:20]]
+        self.cognition.think({
+            "description": f"understand {domain}",
+            "known_facts": known,
+            "known_entities": [domain],
+        })
+
+        self.base.memory.save(self.base.memory_path)
+
+        return (
+            f"Learned {learned} facts about {domain}.\n"
+            f"Concepts: {len(self.base.memory.concepts)} | "
+            f"Beliefs: {len(self.base._beliefs)}"
+        )
+
+    def teach_all(self) -> str:
+        """Teach all available curricula."""
+        results = []
+        for domain in get_all_domains():
+            result = self.teach_domain(domain)
+            results.append(f"  {domain}: {result}")
+        stats = curriculum_stats()
+        return (
+            f"Taught {stats['total_facts']} facts across {stats['domains']} domains:\n"
+            + "\n".join(results)
+        )
 
     def status(self) -> str:
         """Full system status."""

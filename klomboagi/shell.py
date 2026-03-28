@@ -24,7 +24,7 @@ def main():
     else:
         print("  Starting empty — I know nothing yet.\n")
 
-    print("  Commands: 'status', 'personality', 'quit'\n")
+    print("  Commands: 'status', 'personality', 'teach <domain>', 'teach all', 'domains', 'quit'\n")
 
     while True:
         try:
@@ -51,6 +51,23 @@ def main():
                 bar = "█" * int(strength * 20) + "░" * (20 - int(strength * 20))
                 print(f"    {name:15s} [{bar}] {strength:.0%}")
             print()
+            continue
+        if user_input.lower() == "domains":
+            from klomboagi.core.curriculum import get_all_domains, curriculum_stats
+            stats = curriculum_stats()
+            print(f"\n  Available domains ({stats['total_facts']} total facts):")
+            for domain, count in stats["per_domain"].items():
+                print(f"    {domain:20s} {count} facts")
+            print()
+            continue
+        if user_input.lower().startswith("teach "):
+            domain = user_input[6:].strip()
+            if domain == "all":
+                print("\n  Teaching all domains...")
+                print(f"  {genesis.teach_all()}\n")
+            else:
+                print(f"\n  Teaching {domain}...")
+                print(f"  {genesis.teach_domain(domain)}\n")
             continue
 
         response = genesis.hear(user_input)

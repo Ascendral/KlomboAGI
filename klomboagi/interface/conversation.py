@@ -388,10 +388,13 @@ class Baby:
         if known:
             # Check beliefs for relevant deductions
             relevant_beliefs = []
-            query_words = set(query.lower().split())
+            stop_words = {"is", "a", "an", "the", "what", "who", "where", "how",
+                          "when", "which", "why", "are", "was", "were", "do", "does",
+                          "can", "could", "about", "tell", "me", "explain"}
+            query_words = set(query.lower().split()) - stop_words
             for statement, belief in self._beliefs.items():
-                stmt_words = set(statement.lower().split())
-                if stmt_words & query_words:
+                stmt_words = set(statement.lower().split()) - stop_words
+                if query_words & stmt_words:
                     relevant_beliefs.append(belief)
 
             if relevant_beliefs:

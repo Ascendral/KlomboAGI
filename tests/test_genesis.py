@@ -143,25 +143,30 @@ class TestGenesis:
 
 class TestSurpriseDetection:
 
-    def test_detects_color_contradiction(self, genesis):
-        genesis.hear("a car is red")
-        response = genesis.hear("a car is blue")
-        assert "thought" in response.lower() or "wait" in response.lower() or "updating" in response.lower()
-        assert genesis.total_surprises >= 1
+    @pytest.fixture
+    def taught_genesis(self):
+        """Genesis with categories for conflict detection."""
+        g = Genesis(memory_path="/tmp/klombo_test_surprise.json")
+        g.teach_domain("categories")
+        return g
 
-    def test_detects_animal_class_contradiction(self, genesis):
-        genesis.hear("a whale is a fish")
-        response = genesis.hear("a whale is a mammal")
-        assert genesis.total_surprises >= 1
-        # Old belief should be weakened
-        old_belief = genesis.base._beliefs.get("whale is fish")
+    def test_detects_color_contradiction(self, taught_genesis):
+        taught_genesis.hear("a car is red")
+        response = taught_genesis.hear("a car is blue")
+        assert "thought" in response.lower() or "wait" in response.lower() or "updating" in response.lower()
+        assert taught_genesis.total_surprises >= 1
+
+    def test_detects_animal_class_contradiction(self, taught_genesis):
+        taught_genesis.hear("a whale is a fish")
+        response = taught_genesis.hear("a whale is a mammal")
+        assert taught_genesis.total_surprises >= 1
+        old_belief = taught_genesis.base._beliefs.get("whale is fish")
         if old_belief:
             assert old_belief.truth.frequency < 1.0
 
     def test_no_surprise_on_additional_info(self, genesis):
         genesis.hear("a dog is an animal")
         genesis.hear("a dog is friendly")
-        # "animal" and "friendly" aren't contradictory
         assert genesis.total_surprises == 0
 
     def test_surprise_on_negation(self, genesis):
@@ -175,17 +180,24 @@ class TestSurpriseDetection:
 
 class TestPredicateConflict:
 
-    def test_color_conflict(self, genesis):
-        assert genesis._predicates_conflict("red", "blue")
-        assert genesis._predicates_conflict("green", "yellow")
+    @pytest.fixture
+    def taught_genesis(self):
+        """Genesis with categories taught so graph-based conflict detection works."""
+        g = Genesis(memory_path="/tmp/klombo_test_conflict.json")
+        g.teach_domain("categories")
+        return g
 
-    def test_no_conflict_different_types(self, genesis):
-        assert not genesis._predicates_conflict("green", "large")
-        assert not genesis._predicates_conflict("red", "fast")
+    def test_color_conflict(self, taught_genesis):
+        assert taught_genesis._predicates_conflict("red", "blue")
+        assert taught_genesis._predicates_conflict("green", "yellow")
 
-    def test_animal_class_conflict(self, genesis):
-        assert genesis._predicates_conflict("mammal", "reptile")
-        assert genesis._predicates_conflict("bird", "fish")
+    def test_no_conflict_different_types(self, taught_genesis):
+        assert not taught_genesis._predicates_conflict("green", "large")
+        assert not taught_genesis._predicates_conflict("red", "fast")
+
+    def test_animal_class_conflict(self, taught_genesis):
+        assert taught_genesis._predicates_conflict("mammal", "reptile")
+        assert taught_genesis._predicates_conflict("bird", "fish")
 
     def test_negation_conflict(self, genesis):
         assert genesis._predicates_conflict("alive", "not alive")
@@ -194,11 +206,11 @@ class TestPredicateConflict:
     def test_no_conflict_same_predicate(self, genesis):
         assert not genesis._predicates_conflict("red", "red")
 
-    def test_temperature_conflict(self, genesis):
-        assert genesis._predicates_conflict("hot", "cold")
+    def test_temperature_conflict(self, taught_genesis):
+        assert taught_genesis._predicates_conflict("hot", "cold")
 
-    def test_size_conflict(self, genesis):
-        assert genesis._predicates_conflict("big", "small")
+    def test_size_conflict(self, taught_genesis):
+        assert taught_genesis._predicates_conflict("big", "small")
 
 
 # ── Proactive curiosity tests ──
