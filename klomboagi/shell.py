@@ -251,6 +251,18 @@ def main():
                 print(f"    [{r['status']}] {r['topic']}: +{r.get('facts_gained', 0)} facts")
             print(f"\n  Done. {len(genesis.base._beliefs)} total beliefs.\n")
             continue
+        if user_input.lower().startswith("marathon"):
+            from klomboagi.core.marathon import run_marathon, marathon_report
+            parts = user_input.split()
+            hours = float(parts[1]) if len(parts) > 1 else 2.0
+            print(f"\n  Starting {hours}h marathon ({263} articles across 23 domains)...")
+            import sys
+            def prog(d, t, a, f, e):
+                sys.stdout.write(f'\r  [{e/60:.0f}m] {d}/{t} | {a} articles | +{f} facts    ')
+                sys.stdout.flush()
+            results = run_marathon(genesis, max_hours=hours, on_progress=prog)
+            print(f"\n\n{marathon_report(results)}\n")
+            continue
         if user_input.lower().startswith("drive "):
             mission = user_input[6:].strip()
             cycles = 20
