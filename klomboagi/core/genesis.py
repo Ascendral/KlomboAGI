@@ -43,6 +43,7 @@ from klomboagi.core.drive import LearningDrive
 from klomboagi.reasoning.self_model import SelfModel
 from klomboagi.reasoning.inner_state import InnerStateEngine
 from klomboagi.reasoning.behavioral_loop import BehavioralLoop, BehaviorMode
+from klomboagi.reasoning.counterfactual import CounterfactualEngine
 
 
 @dataclass
@@ -209,6 +210,9 @@ class Genesis:
 
         # Behavioral loop — inner state drives actual decisions
         self.behavior = BehavioralLoop()
+
+        # Counterfactual engine — "what if X were different?"
+        self.counterfactual = CounterfactualEngine(self.relations)
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
@@ -619,6 +623,12 @@ class Genesis:
         if analogy:
             return self._answer_analogy(analogy)
 
+        # Counterfactual questions: "what if there were no gravity?"
+        if query.lower().startswith("what if") or query.lower().startswith("without"):
+            result = self.counterfactual.what_if(query)
+            if result.total_affected > 0:
+                return result.explain()
+
         # ── BEHAVIORAL DECISION — inner state drives approach ──
 
         decision = self.behavior.decide(
@@ -674,11 +684,31 @@ class Genesis:
         # System 3: ACTIVATION — spreading neural fire
         activation_result = self.activation.activate(list(query_words))
 
-        # System 4: COGNITION — pattern detection
+        # System 4: COGNITION — pattern detection with REAL structured actions
+        cognition_actions = []
+        for f in known_facts[:5]:
+            b = self.base._beliefs.get(f)
+            if b and hasattr(b, 'subject'):
+                cognition_actions.append({
+                    "type": "recall_belief",
+                    "target": b.subject,
+                    "result": b.predicate,
+                })
+        for r_line in relation_lines[:5]:
+            cognition_actions.append({"type": "traverse_relation", "target": r_line.strip()})
+        if activation_result.convergence_points:
+            cognition_actions.append({
+                "type": "neural_convergence",
+                "target": activation_result.convergence_points[:3],
+                "result": "convergence",
+            })
+
         state = self.cognition.think({
             "description": query,
             "known_facts": known_facts[:20],
             "known_entities": list(query_words),
+            "actions": cognition_actions,
+            "expected_outcome": f"answer: {query}",
         })
 
         # System 5: REASONING — logical derivation (use max 5 facts to avoid noise)

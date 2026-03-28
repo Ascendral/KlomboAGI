@@ -137,6 +137,10 @@ def main():
                 print(f"    → {p}")
             print()
             continue
+        if user_input.lower().startswith("what if ") or user_input.lower().startswith("without "):
+            result = genesis.counterfactual.what_if(user_input)
+            print(f"\n{result.explain()}\n")
+            continue
         if user_input.lower().startswith("explain "):
             concept = user_input[8:].strip()
             synth = genesis.synthesizer.explain(concept)
