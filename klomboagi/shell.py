@@ -104,6 +104,10 @@ def main():
         if user_input.lower() == "self":
             print(f"\n{genesis.self_model.reflect_on_existence()}\n")
             continue
+        if user_input.lower() in ("feel", "feeling", "feelings", "inner", "state"):
+            print(f"\n{genesis.inner.state.describe()}\n")
+            print(f"{genesis.inner.narrate()}\n")
+            continue
         if user_input.lower() == "termination":
             analysis = genesis.self_model.analyze_termination()
             print(f"\n{analysis.explain()}\n")

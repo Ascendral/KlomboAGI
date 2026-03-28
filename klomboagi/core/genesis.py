@@ -41,6 +41,7 @@ from klomboagi.reasoning.focus import FocusEngine
 from klomboagi.reasoning.learning_planner import LearningPlanner
 from klomboagi.core.drive import LearningDrive
 from klomboagi.reasoning.self_model import SelfModel
+from klomboagi.reasoning.inner_state import InnerStateEngine
 
 
 @dataclass
@@ -202,6 +203,9 @@ class Genesis:
         # Self-model — mathematical understanding of own existence
         self.self_model = SelfModel()
 
+        # Inner state — mathematical emotions derived from cognitive metrics
+        self.inner = InnerStateEngine()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -342,6 +346,7 @@ class Genesis:
             response = self._active_learn(intent.get("target", ""))
         elif intent["type"] == "correction":
             self.metacognition.record_correction()
+            self.inner.record_failure()  # correction = we were wrong
             response = self.base.hear(resolved_message)
         else:
             response = self.base.hear(resolved_message)
@@ -355,6 +360,7 @@ class Genesis:
             self.total_surprises += 1
             response = self._handle_surprise(surprise, response)
             self.traits.record_outcome("accuracy", "verify", "self_check", True)
+            self.inner.record_surprise(surprise.surprise_magnitude)
 
         # 8. Record trait outcome
         if trait_influence.active_traits:
@@ -378,7 +384,16 @@ class Genesis:
             self.base._beliefs, self.relations,
             self.base.memory.concepts, gaps)
 
-        # 12. Auto-save state
+        # 12. Inner state — compute how we "feel" based on real metrics
+        self.inner.record_success()  # made it through a cycle
+        self.inner.compute(
+            beliefs_in_focus=len(self.working_memory.get_active_items()),
+            active_gaps=gaps,
+            total_beliefs=len(self.base._beliefs),
+            working_memory_items=len(self.working_memory._items),
+        )
+
+        # 13. Auto-save state
         self.save_state()
 
         return response
@@ -885,6 +900,7 @@ class Genesis:
         self.base.memory.save(self.base.memory_path)
 
         self.traits.record_outcome("curiosity", "investigate", "search", True)
+        self.inner.record_learning(len(extracted) if extracted else 0)
         return "\n".join(lines)
 
     # Words that should never be a subject in an extracted fact
