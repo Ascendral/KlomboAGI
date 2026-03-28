@@ -137,6 +137,23 @@ def main():
                 print(f"    [{r['status']}] {r['topic']}: +{r.get('facts_gained', 0)} facts")
             print(f"\n  Done. {len(genesis.base._beliefs)} total beliefs.\n")
             continue
+        if user_input.lower().startswith("drive "):
+            mission = user_input[6:].strip()
+            cycles = 20
+            # Parse "drive learn physics 50" → mission, 50 cycles
+            parts = mission.rsplit(" ", 1)
+            if parts[-1].isdigit():
+                cycles = int(parts[-1])
+                mission = parts[0]
+            print(f"\n  Learning drive: {mission} ({cycles} cycles)")
+            genesis.drive.set_mission(mission)
+            genesis.drive.on_cycle = lambda c: print(
+                f"    Cycle {c.cycle_number}: {c.topic_learned} "
+                f"+{c.facts_gained} facts, +{c.relations_gained} relations, "
+                f"{len(c.new_gaps)} new gaps")
+            report = genesis.drive.run(max_cycles=cycles)
+            print(f"\n  {report.summary()}\n")
+            continue
         if user_input.lower() == "autolearn":
             print("\n  Auto-generating learning plan from gaps...")
             genesis.planner.plan_from_gaps(

@@ -39,6 +39,7 @@ from klomboagi.reasoning.working_mem import WorkingMemory
 from klomboagi.reasoning.metacognition import MetacognitionEngine
 from klomboagi.reasoning.focus import FocusEngine
 from klomboagi.reasoning.learning_planner import LearningPlanner
+from klomboagi.core.drive import LearningDrive
 
 
 @dataclass
@@ -193,6 +194,9 @@ class Genesis:
 
         # Learning planner — autonomous goal-directed learning
         self.planner = LearningPlanner()
+
+        # Learning drive — persistent, never stops
+        self.drive = LearningDrive(self)
 
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
