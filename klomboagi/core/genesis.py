@@ -35,6 +35,9 @@ from klomboagi.reasoning.activation import ActivationNetwork
 from klomboagi.reasoning.hypothesis import HypothesisEngine
 from klomboagi.reasoning.synthesizer import Synthesizer
 from klomboagi.reasoning.self_test import SelfTester
+from klomboagi.reasoning.working_mem import WorkingMemory
+from klomboagi.reasoning.metacognition import MetacognitionEngine
+from klomboagi.reasoning.focus import FocusEngine
 
 
 @dataclass
@@ -178,6 +181,15 @@ class Genesis:
         # Self-tester — verify own beliefs
         self.self_tester = SelfTester(self.compute)
 
+        # Working memory — short-term focus buffer (~7 items)
+        self.working_memory = WorkingMemory()
+
+        # Metacognition — thinking about thinking
+        self.metacognition = MetacognitionEngine()
+
+        # Focus engine — filter noise, find relevance
+        self.focus = FocusEngine()
+
         # Dialog context — multi-turn tracking
         self.context = DialogContext()
 
@@ -287,29 +299,40 @@ class Genesis:
         """
         self.total_turns += 1
 
+        # 0. Update working memory with this input
+        self.working_memory.add_context(message)
+
         # 1. Resolve pronouns
         resolved_message = self.context.resolve_pronoun(message)
 
         # 2. Parse intent
         intent = self.base._parse_intent(resolved_message)
 
-        # 3. Check for surprise BEFORE learning
+        # 3. Working memory — attend to mentioned concepts
+        for word in resolved_message.lower().split():
+            if len(word) > 3 and word not in self.base.COMMON_WORDS:
+                self.working_memory.attend(word, "concept", "input")
+
+        # 4. Check for surprise BEFORE learning
         surprise = self._check_surprise(intent)
 
-        # 4. Consult traits
+        # 5. Consult traits
         trait_influence = self.traits.influence({
             "description": resolved_message,
             "known_entities": self.context.entities_mentioned,
         })
 
-        # 5. Route: deep think for questions, base system for everything else
+        # 6. Route: deep think for questions, base system for everything else
         if intent["type"] == "question":
+            self.metacognition.record_question("knowledge")
             response = self._think_deep(resolved_message, intent)
         elif intent["type"] == "command" and intent.get("command") == "learn":
             response = self._active_learn(intent.get("target", ""))
+        elif intent["type"] == "correction":
+            self.metacognition.record_correction()
+            response = self.base.hear(resolved_message)
         else:
             response = self.base.hear(resolved_message)
-            # Auto-extract relations from any input
             self._extract_relations(resolved_message)
 
         # 6. Update dialog context
@@ -334,7 +357,10 @@ class Genesis:
             self.total_proactive += 1
             response += f"\n\nBy the way — {proactive}"
 
-        # 10. Auto-save state
+        # 10. Working memory tick — decay unused items
+        self.working_memory.tick()
+
+        # 11. Auto-save state
         self.save_state()
 
         return response
@@ -558,33 +584,16 @@ class Genesis:
 
         # ── PARALLEL FIRE — all systems at once ──
 
-        stop_words = {"is", "a", "an", "the", "what", "who", "where", "how",
-                      "when", "which", "why", "are", "was", "do", "does",
-                      "can", "could", "about", "tell", "me", "explain",
-                      "of", "in", "to", "for", "and", "or", "on", "at",
-                      "by", "from", "with", "as", "be", "been", "being"}
-        query_words = set(query.lower().split()) - stop_words
-        if not query_words:
-            # If ALL words were stop words, use the original minus just question words
-            query_words = set(query.lower().split()) - {"what", "is", "a", "an", "the"}
+        # System 0: FOCUS — filter noise, find what's relevant
+        focus_result = self.focus.focus(query, self.base._beliefs,
+                                        self.relations, self.working_memory)
+        known_facts = focus_result.top_beliefs()
+        relation_lines = [f"  {r}" for r in focus_result.top_relations()]
+        query_words = set(focus_result.focus_concepts)
 
-        # System 1: BELIEFS — match on SUBJECT, not full statement text
-        known_facts = []
-        for statement, belief in self.base._beliefs.items():
-            if hasattr(belief, 'subject') and belief.subject:
-                subj_words = set(belief.subject.lower().split()) - stop_words
-                if query_words & subj_words:
-                    known_facts.append(statement)
-            else:
-                stmt_words = set(statement.lower().split()) - stop_words
-                if query_words & stmt_words:
-                    known_facts.append(statement)
-
-        # System 2: RELATIONS — structural connections
-        relation_lines = []
-        for word in query_words:
-            for r in self.relations.get_all_about(word)[:5]:
-                relation_lines.append(f"  {r.source} {r.relation.value} {r.target}")
+        # Update working memory with focus concepts
+        for concept in focus_result.focus_concepts:
+            self.working_memory.attend(concept, "focus", "attention")
 
         # System 3: ACTIVATION — spreading neural fire
         activation_result = self.activation.activate(list(query_words))

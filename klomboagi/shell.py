@@ -96,6 +96,24 @@ def main():
             report = genesis.self_tester.audit(genesis.base._beliefs)
             print(f"\n{report.summary()}\n")
             continue
+        if user_input.lower() == "reflect":
+            print(f"\n{genesis.metacognition.reflect(genesis.base._beliefs, genesis.relations)}\n")
+            continue
+        if user_input.lower() == "memory":
+            print(f"\n{genesis.working_memory.dump()}\n")
+            continue
+        if user_input.lower() == "goals":
+            goals = genesis.working_memory.get_active_goals()
+            priorities = genesis.metacognition.identify_learning_priorities(
+                genesis.base._beliefs, genesis.relations)
+            print("\n  Active goals:")
+            for g in goals:
+                print(f"    → {g.description} ({g.progress:.0%})")
+            print("\n  Learning priorities:")
+            for p in priorities:
+                print(f"    → {p}")
+            print()
+            continue
         if user_input.lower().startswith("explain "):
             concept = user_input[8:].strip()
             synth = genesis.synthesizer.explain(concept)
