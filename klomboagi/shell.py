@@ -106,6 +106,15 @@ def main():
             print(f"\n  Reading and learning from: {source}")
             print(f"  {genesis.read_and_learn(source)}\n")
             continue
+        if user_input.lower().startswith("ingest"):
+            from klomboagi.core.ingest import ingest_all, ingest_report
+            parts = user_input.split()
+            domain = parts[1] if len(parts) > 1 else None
+            domains = [domain] if domain and domain != "all" else None
+            print(f"\n  Ingesting Wikipedia articles{' for ' + domain if domain else ''}...")
+            results = ingest_all(genesis, domains=domains)
+            print(f"  {ingest_report(results)}\n")
+            continue
 
         response = genesis.hear(user_input)
         # Indent response for readability

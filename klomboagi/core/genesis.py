@@ -850,66 +850,102 @@ class Genesis:
         self.traits.record_outcome("curiosity", "investigate", "search", True)
         return "\n".join(lines)
 
+    # Words that should never be a subject in an extracted fact
+    _BAD_SUBJECTS = frozenset({
+        "it", "this", "that", "which", "they", "he", "she", "we", "these",
+        "those", "there", "here", "what", "who", "where", "how", "such",
+        "its", "their", "his", "her", "our", "one", "each", "both",
+        "some", "many", "most", "all", "any", "other", "another",
+        "above", "below", "however", "therefore", "thus", "hence",
+    })
+
     def _extract_concepts(self, topic: str, raw_text: str) -> list[tuple[str, str]]:
         """
         Extract structured (subject, predicate) pairs from raw text.
 
-        Parses natural language into knowledge graph entries.
-        This is concept OWNERSHIP — the system forms its own understanding.
+        Quality filters:
+        - Subject must be 1-5 words, not a pronoun
+        - Predicate must be 5-80 chars, not start with junk
+        - No duplicate subjects
+        - First sentence of article = topic definition
         """
         concepts: list[tuple[str, str]] = []
         seen: set[str] = set()
 
-        # Clean the text — remove source tags
+        # Clean the text
         text = re.sub(r'\[(?:Wikipedia|DuckDuckGo|Wikidata|Open Library)[^\]]*\]', '', raw_text)
+        text = re.sub(r'\([^)]{0,100}\)', '', text)  # Remove parentheticals
+        text = re.sub(r'\s+', ' ', text)
 
-        # Pattern 1: "X is/are Y" statements
-        for m in re.finditer(
-            r'(?:^|[.;])\s*(?:A |An |The )?(\b[A-Z][\w\s]{1,30}?\b)\s+'
-            r'(?:is|are)\s+'
-            r'(?:a |an |the )?'
-            r'([\w\s]{2,40}?)(?:[.,;]|$)',
-            text, re.MULTILINE
-        ):
-            subj = m.group(1).strip().lower()
-            pred = m.group(2).strip().lower()
-            key = f"{subj}:{pred}"
-            if key not in seen and len(subj) > 1 and len(pred) > 1:
-                seen.add(key)
-                concepts.append((subj, pred))
+        def _valid_subject(s: str) -> bool:
+            s = s.strip().lower()
+            words = s.split()
+            if not words or len(words) > 5:
+                return False
+            if words[0] in self._BAD_SUBJECTS:
+                return False
+            if len(s) < 2:
+                return False
+            return True
 
-        # Pattern 2: "X, a type of Y" or "X, known as Y"
-        for m in re.finditer(
-            r'(\b[\w\s]{2,25}?\b),\s+(?:a type of|a kind of|known as|also called)\s+([\w\s]{2,30})',
-            text, re.IGNORECASE
-        ):
-            subj = m.group(1).strip().lower()
-            pred = m.group(2).strip().lower()
-            key = f"{subj}:{pred}"
-            if key not in seen:
-                seen.add(key)
-                concepts.append((subj, pred))
+        def _valid_predicate(p: str) -> bool:
+            p = p.strip().lower()
+            if len(p) < 5 or len(p) > 80:
+                return False
+            # Must start with a real word
+            if p[0].isdigit():
+                return False
+            return True
 
-        # Pattern 3: "X belong(s) to Y" or "X are members of Y"
-        for m in re.finditer(
-            r'(\b[\w\s]{2,25}?\b)\s+(?:belongs? to|are members of|is part of)\s+([\w\s]{2,30})',
-            text, re.IGNORECASE
-        ):
-            subj = m.group(1).strip().lower()
-            pred = m.group(2).strip().lower()
+        def _add(subj: str, pred: str) -> None:
+            subj = subj.strip().lower()
+            pred = pred.strip().lower().rstrip(".")
+            if not _valid_subject(subj) or not _valid_predicate(pred):
+                return
             key = f"{subj}:{pred}"
             if key not in seen:
                 seen.add(key)
                 concepts.append((subj, pred))
 
-        # Always add the topic itself with any extracted description
-        if concepts:
-            # The first sentence often defines the topic
-            first_pred = concepts[0][1] if concepts else ""
-            if first_pred and (topic.lower(), first_pred) not in concepts:
+        # Pattern 1: "X is/are Y" (strongest signal)
+        for m in re.finditer(
+            r'(?:^|[.;]\s+)(?:A |An |The )?([\w][\w\s]{0,30}?)\s+'
+            r'(?:is|are)\s+(?:a |an |the )?([\w][\w\s,]{4,60}?)(?:[.]|$)',
+            text, re.IGNORECASE | re.MULTILINE
+        ):
+            _add(m.group(1), m.group(2))
+
+        # Pattern 2: "X, a type of/kind of/known as/also called Y"
+        for m in re.finditer(
+            r'([\w][\w\s]{1,25}?),\s+(?:a type of|a kind of|known as|also called|'
+            r'also known as|referred to as|defined as)\s+([\w\s]{2,40})',
+            text, re.IGNORECASE
+        ):
+            _add(m.group(1), m.group(2))
+
+        # Pattern 3: "X belongs to / is part of / is a branch of Y"
+        for m in re.finditer(
+            r'([\w][\w\s]{1,25}?)\s+(?:belongs? to|is part of|is a branch of|'
+            r'is a form of|is a subset of|is classified as)\s+([\w\s]{2,40})',
+            text, re.IGNORECASE
+        ):
+            _add(m.group(1), m.group(2))
+
+        # Pattern 4: "X contains / includes / consists of Y"
+        for m in re.finditer(
+            r'([\w][\w\s]{1,25}?)\s+(?:contains?|includes?|consists? of|'
+            r'comprises?|encompasses?)\s+([\w\s]{2,60})',
+            text, re.IGNORECASE
+        ):
+            _add(m.group(1), m.group(2))
+
+        # Topic definition: first sentence often defines the topic
+        if concepts and topic.lower() not in [c[0] for c in concepts]:
+            first_pred = concepts[0][1]
+            if first_pred:
                 concepts.insert(0, (topic.lower(), first_pred))
 
-        return concepts[:15]  # Cap at 15 facts per discovery
+        return concepts[:20]
 
     # ── Teaching Protocol ──
 

@@ -386,11 +386,11 @@ class TestConceptExtraction:
         # Should extract python-related facts
         assert any("python" in s for s in subjects)
 
-    def test_caps_at_15(self, genesis):
+    def test_caps_at_20(self, genesis):
         # Generate text with many facts
-        text = ". ".join(f"Thing{i} is a category{i}" for i in range(30))
+        text = ". ".join(f"Thing{i} is a great category{i} of importance" for i in range(30))
         concepts = genesis._extract_concepts("thing", text)
-        assert len(concepts) <= 15
+        assert len(concepts) <= 20
 
     def test_empty_text_returns_empty(self, genesis):
         concepts = genesis._extract_concepts("nothing", "")
