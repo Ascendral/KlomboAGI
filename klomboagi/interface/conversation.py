@@ -258,7 +258,7 @@ class Baby:
         command_words = {"learn ": "learn", "look up ": "lookup", "search ": "search",
                          "search for ": "search", "find out about ": "search",
                          "read ": "read", "forget ": "forget", "what do you know": "status",
-                         "show me": "show", "status": "status", "what do you": "status"}
+                         "show me": "show", "status": "status"}
         for phrase, cmd in command_words.items():
             if msg.startswith(phrase):
                 rest = msg[len(phrase):].strip()

@@ -822,19 +822,27 @@ class Genesis:
             if relevant_cp:
                 parts.append("Related to " + ", ".join(relevant_cp) + ".")
 
-        # 9. If we don't know much — form a hypothesis
-        if not known_facts and not relation_lines:
-            hypothesis = self.hypothesizer.hypothesize(query, list(query_words))
+        # 9. If we don't know much — try to figure it out
+        if not known_facts and not relation_lines and not generated:
+            # Try hypothesis from existing knowledge
+            hypothesis = self.hypothesizer.hypothesize(query, list(query_words) + query_terms)
             if hypothesis:
-                return prefix + hypothesis.explain()
-            # INVESTIGATE mode → search harder
-            if decision.mode == BehaviorMode.INVESTIGATE:
-                search_result = self.base._curious_lookup(query)
-                if search_result:
-                    return prefix + search_result
-            return self.base.hear(message)
+                return hypothesis.explain()
 
-        return prefix + "\n".join(parts)
+            # Try searching — use the key topic, not the full question
+            clean_query = query_terms[-1] if query_terms else query
+            search_result = self.base._curious_lookup(clean_query)
+            if search_result and "couldn't find" not in search_result.lower():
+                return search_result
+
+            # Genuinely don't know — say so naturally
+            topic = " ".join(query_terms[:2]) if query_terms else "that"
+            return f"I don't know about {topic} yet. Teach me, or tell me to learn about it."
+
+        if not parts:
+            return f"I don't have enough to say about that yet."
+
+        return " ".join(parts)
 
     def _parse_relational_question(self, query: str) -> dict | None:
         """
