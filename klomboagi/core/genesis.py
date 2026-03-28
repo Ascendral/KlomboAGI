@@ -513,6 +513,15 @@ class Genesis:
             steps = "\n  ".join(math_result.steps) if math_result.steps else ""
             return f"{math_result.result}\n  {steps}" if steps else str(math_result.result)
 
+        # 0.5. Check for "how does X connect to Y?" / "why" questions
+        connection = self._parse_connection_question(query)
+        if connection:
+            return self.relations.explain_connection(connection[0], connection[1])
+
+        why_result = self._parse_why_question(query)
+        if why_result:
+            return self._answer_why(why_result)
+
         # 1. Check for relational questions first
         relational = self._parse_relational_question(query)
         if relational:
@@ -986,6 +995,70 @@ class Genesis:
                 lines.append(f"  {direction} {r.relation.value} {r.target} ({r.confidence:.0%})")
             else:
                 lines.append(f"  {direction} {r.source} {r.relation.value} this ({r.confidence:.0%})")
+        return "\n".join(lines)
+
+    # ── Connection & Why Questions ──
+
+    def _parse_connection_question(self, query: str) -> tuple[str, str] | None:
+        """Parse "how does X connect to Y?" / "how are X and Y related?" """
+        q = query.lower().strip().rstrip("?")
+        patterns = [
+            r"how does (.+?) connect to (.+)",
+            r"how is (.+?) connected to (.+)",
+            r"how are (.+?) and (.+?) (?:connected|related|linked)",
+            r"what connects (.+?) (?:to|and|with) (.+)",
+            r"is (.+?) related to (.+)",
+            r"does (.+?) connect to (.+)",
+            r"link between (.+?) and (.+)",
+        ]
+        for pattern in patterns:
+            m = re.match(pattern, q)
+            if m:
+                return (m.group(1).strip(), m.group(2).strip())
+        return None
+
+    def _parse_why_question(self, query: str) -> str | None:
+        """Parse "why does X happen?" → trace causal chain backward."""
+        q = query.lower().strip().rstrip("?")
+        patterns = [
+            r"why does (.+?) happen",
+            r"why is there (.+)",
+            r"why does (.+?) occur",
+            r"why (.+)",
+        ]
+        for pattern in patterns:
+            m = re.match(pattern, q)
+            if m:
+                return m.group(1).strip()
+        return None
+
+    def _answer_why(self, concept: str) -> str:
+        """
+        Answer "why" by tracing causal chains backward.
+
+        "Why does acceleration happen?" → because force causes acceleration,
+        and gravity causes force.
+        """
+        # Find everything that causes this concept
+        causes = self.relations.get_backward(concept, RelationType.CAUSES)
+        if not causes:
+            # Try with prefixes
+            for prefix in ("a ", "an ", "the "):
+                causes = self.relations.get_backward(prefix + concept, RelationType.CAUSES)
+                if causes:
+                    break
+
+        if not causes:
+            return f"I don't know why {concept} happens. Teach me what causes it?"
+
+        lines = [f"Why {concept}? Because:"]
+        for r in causes:
+            lines.append(f"  {r.source} causes {r.target} ({r.confidence:.0%})")
+            # Trace one more level back
+            deeper = self.relations.get_backward(r.source, RelationType.CAUSES)
+            for d in deeper[:2]:
+                lines.append(f"    ← {d.source} causes {d.target} ({d.confidence:.0%})")
+
         return "\n".join(lines)
 
     # ── Auto-Relation Extraction ──

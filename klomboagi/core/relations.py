@@ -318,6 +318,86 @@ class RelationStore:
 
         return all_inferred
 
+    def find_path(self, source: str, target: str, max_depth: int = 5) -> list[Relation] | None:
+        """
+        Find a path between two concepts through any relation type.
+
+        This is multi-hop reasoning: "how does gravity connect to chemistry?"
+        gravity → causes → force → causes → acceleration → ... → chemistry
+
+        Returns the chain of relations, or None if no path exists.
+        """
+        if source == target:
+            return []
+
+        # BFS across all relation types
+        visited: set[str] = {source}
+        queue: list[tuple[str, list[Relation]]] = [(source, [])]
+
+        while queue:
+            current, path = queue.pop(0)
+            if len(path) >= max_depth:
+                continue
+
+            # Check forward relations
+            for r in self._forward.get(current, []):
+                if r.target == target:
+                    return path + [r]
+                if r.target not in visited:
+                    visited.add(r.target)
+                    queue.append((r.target, path + [r]))
+
+            # Check backward relations (traverse in reverse)
+            for r in self._backward.get(current, []):
+                if r.source == target:
+                    return path + [r]
+                if r.source not in visited:
+                    visited.add(r.source)
+                    queue.append((r.source, path + [r]))
+
+        return None
+
+    def explain_connection(self, source: str, target: str, max_depth: int = 5) -> str:
+        """
+        Explain how two concepts are connected.
+
+        "How does gravity connect to chemistry?"
+        → gravity -causes→ force -causes→ acceleration ... → chemistry
+        """
+        path = self.find_path(source, target, max_depth)
+        if path is None:
+            # Try with common prefixes
+            for s_prefix in ("", "a ", "an ", "the "):
+                for t_prefix in ("", "a ", "an ", "the "):
+                    path = self.find_path(s_prefix + source, t_prefix + target, max_depth)
+                    if path is not None:
+                        break
+                if path is not None:
+                    break
+
+        if path is None:
+            return f"No connection found between '{source}' and '{target}'."
+
+        if not path:
+            return f"'{source}' and '{target}' are the same concept."
+
+        # Build explanation
+        steps = []
+        for r in path:
+            steps.append(f"{r.source} --{r.relation.value}--> {r.target}")
+
+        # Confidence = product of all confidences in the chain
+        chain_conf = 1.0
+        for r in path:
+            chain_conf *= r.confidence
+        chain_conf = round(chain_conf, 3)
+
+        return (
+            f"{source} connects to {target} in {len(path)} steps "
+            f"(confidence: {chain_conf:.0%}):\n  "
+            + "\n  ".join(steps)
+        )
+
     def stats(self) -> dict:
         """Statistics about the relation store."""
         by_type: dict[str, int] = {}

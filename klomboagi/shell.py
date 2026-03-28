@@ -81,6 +81,13 @@ def main():
             concept = user_input[8:].strip()
             print(f"\n{genesis.what_connects(concept)}\n")
             continue
+        if user_input.lower().startswith("path "):
+            parts = user_input[5:].strip().split(" to ", 1)
+            if len(parts) == 2:
+                print(f"\n{genesis.relations.explain_connection(parts[0].strip(), parts[1].strip())}\n")
+            else:
+                print("  Usage: path <concept> to <concept>\n")
+            continue
 
         response = genesis.hear(user_input)
         # Indent response for readability
