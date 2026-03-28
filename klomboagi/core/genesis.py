@@ -1645,14 +1645,56 @@ class Genesis:
                 if subj in bad_subjects or len(subj) < 2:
                     to_remove.append(statement)
                     continue
+                # Subject too long (>5 words = probably a sentence fragment)
+                if len(subj.split()) > 5:
+                    to_remove.append(statement)
+                    continue
+                # Subject starts with a junk word
+                first_subj = subj.split()[0] if subj.split() else ""
+                if first_subj in ("as", "such", "one", "others", "date",
+                                  "nearby", "known", "modern", "proposed",
+                                  "hypothesized", "regarded", "international",
+                                  "escaped", "extreme", "compact", "period"):
+                    to_remove.append(statement)
+                    continue
 
             # Remove beliefs with garbage predicates
             if hasattr(belief, 'predicate') and belief.predicate:
-                pred = belief.predicate.lower()
-                if (pred.startswith(("same", "no longer", "not yet"))
-                        or ":" in pred[:20]  # Contains colons (likely garbage parsing)
-                        or pred.count(",") > 3):  # Too many commas
+                pred = belief.predicate.lower().strip()
+                words = pred.split()
+                first = words[0] if words else ""
+
+                # Starts with junk (sentence fragments from bad parsing)
+                junk_starts = ("same", "no longer", "not yet", "by ", "as ",
+                               "can ", "should ", "would ", "could ", "non ",
+                               "also ", "often ", "needed ", "considered",
+                               "has ", "had ", "have ", "being ", "been ",
+                               "about ", "gives ", "becomes ", "explored ",
+                               "effects ", "sufficiently ", "topic ", "believed",
+                               "unique ", "found", "longer ", "dependent ",
+                               "expected", "described ", "retained ", "prevents ",
+                               "bound ", "needed ", "regarded ", "proposed ")
+                if any(pred.startswith(j) for j in junk_starts):
                     to_remove.append(statement)
+                    continue
+                # Colon in first 20 chars = garbage
+                if ":" in pred[:20]:
+                    to_remove.append(statement)
+                    continue
+                # Too many commas = run-on garbage
+                if pred.count(",") > 3:
+                    to_remove.append(statement)
+                    continue
+                # Too short to be meaningful
+                if len(pred) < 5:
+                    to_remove.append(statement)
+                    continue
+                # Starts with a preposition or conjunction (sentence fragment)
+                fragment_starts = {"by", "as", "in", "on", "at", "to", "for",
+                                   "with", "from", "and", "but", "or", "nor"}
+                if first in fragment_starts:
+                    to_remove.append(statement)
+                    continue
 
         for stmt in to_remove:
             del self.base._beliefs[stmt]
