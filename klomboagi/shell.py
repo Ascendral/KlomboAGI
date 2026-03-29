@@ -205,6 +205,22 @@ def main():
                 print(f"    {src}: {count}")
             print()
             continue
+        if user_input.lower().startswith("simulate "):
+            trigger = user_input[9:].strip()
+            sim = genesis.simulator.simulate(trigger)
+            print(f"\n{sim.explain()}\n")
+            continue
+        if user_input.lower().startswith("similar "):
+            concept = user_input[8:].strip()
+            similar = genesis.semantic.similar_to(concept, top_n=10)
+            print(f"\n  Similar to '{concept}':")
+            for c, score in similar:
+                print(f"    {c}: {score:.2f}")
+            print()
+            continue
+        if user_input.lower() in ("calibration", "calibrate"):
+            print(f"\n{genesis.calibrator.report()}\n")
+            continue
         if user_input.lower() in ("autonomous", "auto-goals", "formulate"):
             goals = genesis.goal_autonomy.formulate_goals()
             print(f"\n{genesis.goal_autonomy.report()}\n")

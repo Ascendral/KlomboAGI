@@ -72,6 +72,7 @@ from klomboagi.reasoning.cost_tracker import CostTracker
 from klomboagi.reasoning.spatial import SpatialReasoner
 from klomboagi.reasoning.goal_autonomy import GoalAutonomy
 from klomboagi.reasoning.pattern_gen import PatternGeneralizer
+from klomboagi.reasoning.causal_sim import CausalSimulator, ConfidenceCalibrator, SemanticSimilarity
 
 
 @dataclass
@@ -334,6 +335,15 @@ class Genesis:
 
         # Pattern Generalization — discovers abstract principles
         self.pattern_gen = PatternGeneralizer(self.relations, self.base._beliefs)
+
+        # Causal Simulation — run mental simulations forward
+        self.simulator = CausalSimulator(self.relations, self.base._beliefs)
+
+        # Confidence Calibration — are our confidence scores accurate?
+        self.calibrator = ConfidenceCalibrator()
+
+        # Semantic Similarity — find related concepts without keyword match
+        self.semantic = SemanticSimilarity(self.base._beliefs, self.relations)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
@@ -834,6 +844,20 @@ class Genesis:
         if dp_result.system_used == 1 and dp_result.system1_confidence >= 0.6:
             # System 1 answered confidently — instant response, no System 2 needed
             return dp_result.answer
+
+        # Causal simulation: "what happens when/if X?"
+        sim_triggers = ("what happens when", "what happens if", "if i ", "if you ",
+                        "what would happen when", "simulate")
+        if any(q_lower.startswith(t) for t in sim_triggers):
+            # Extract the trigger event
+            trigger = q_lower
+            for t in sim_triggers:
+                trigger = trigger.replace(t, "").strip()
+            trigger = trigger.rstrip("?").strip()
+            if trigger:
+                sim = self.simulator.simulate(trigger)
+                if sim.steps:
+                    return sim.explain()
 
         # Spatial questions: "is X inside Y?", "is X larger than Y?"
         spatial_words = ("inside", "contain", "larger", "bigger", "smaller", "above", "below")
