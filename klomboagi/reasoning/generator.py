@@ -163,31 +163,31 @@ class ExplanationGenerator:
         if uses:
             use_names = [u.target for u in uses[:3]]
             listed = ", ".join(use_names[:-1]) + f" and {use_names[-1]}" if len(use_names) > 1 else use_names[0]
-            sentences.append(f"It uses {listed}.")
+            sentences.append(f"{self._cap(concept)} uses {listed}.")
             relations_used += len(uses[:3])
 
         # 5. What is it part of / what are its parts?
         parent = self.relations.get_forward(concept, RelationType.PART_OF)
         if parent:
-            sentences.append(f"It is part of {parent[0].target}.")
+            sentences.append(f"{self._cap(concept)} is part of {parent[0].target}.")
             relations_used += 1
 
         children = self.relations.get_backward(concept, RelationType.PART_OF)
         if children:
             child_names = [c.source for c in children[:5]]
             listed = ", ".join(child_names[:-1]) + f" and {child_names[-1]}" if len(child_names) > 1 else child_names[0]
-            sentences.append(f"It contains {listed}.")
+            sentences.append(f"{self._cap(concept)} contains {listed}.")
             relations_used += len(children[:5])
 
         # 6. What enables it / what does it enable?
         enables = self.relations.get_forward(concept, RelationType.ENABLES)
         if enables:
-            sentences.append(f"It enables {enables[0].target}.")
+            sentences.append(f"{self._cap(concept)} enables {enables[0].target}.")
             relations_used += 1
 
         enabled_by = self.relations.get_backward(concept, RelationType.ENABLES)
         if enabled_by:
-            sentences.append(f"It is made possible by {enabled_by[0].source}.")
+            sentences.append(f"{self._cap(concept)} is made possible by {enabled_by[0].source}.")
             relations_used += 1
 
         # 7. Opposite?
@@ -206,7 +206,7 @@ class ExplanationGenerator:
         if used_by:
             user_names = [u.source for u in used_by[:3]]
             listed = ", ".join(user_names[:-1]) + f" and {user_names[-1]}" if len(user_names) > 1 else user_names[0]
-            sentences.append(f"It is used by {listed}.")
+            sentences.append(f"{self._cap(concept)} is used by {listed}.")
             relations_used += 1
 
         # 9. Additional beliefs

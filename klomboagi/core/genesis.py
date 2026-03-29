@@ -78,6 +78,7 @@ from klomboagi.reasoning.contingency import ContingencyPlanner
 from klomboagi.reasoning.abstract_compose import AbstractComposer
 from klomboagi.reasoning.emotional_intel import EmotionalIntelligence
 from klomboagi.reasoning.meta_learning import MetaLearner
+from klomboagi.reasoning.belief_index import BeliefIndex
 
 
 @dataclass
@@ -364,6 +365,10 @@ class Genesis:
 
         # Meta-Learning — learn HOW to learn faster
         self.meta_learner = MetaLearner()
+
+        # Belief Index — O(1) lookup instead of O(n) scan
+        self.belief_index = BeliefIndex()
+        self.belief_index.build(self.base._beliefs)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
