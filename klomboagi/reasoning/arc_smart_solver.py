@@ -124,59 +124,81 @@ class SmartARCSolver(ARCSolverV18):
 class SmartARCSolverV2(SmartARCSolver):
     """V2: full verified pipeline, unvalidated fallback only as last resort."""
 
+    @staticmethod
+    def _loo_validate(learn_fn, train):
+        """
+        Leave-one-out cross-validation: for each training example,
+        learn from the other N-1, apply to the held-out one. If any
+        fails, the learner is overfitting.
+        """
+        if len(train) < 2:
+            return True  # Can't cross-validate with 1 example
+
+        for i in range(len(train)):
+            subset = train[:i] + train[i + 1:]
+            held_out = train[i]
+            try:
+                rule = learn_fn(subset)
+                if rule is None:
+                    return False
+                result = rule(held_out["input"])
+                if result != held_out["output"]:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    @staticmethod
+    def _try_learner(learn_fn, train, test_input, loo=True):
+        """
+        Try a learner: learn rule from train, optionally LOO validate,
+        apply to test_input. Returns result or None.
+        """
+        try:
+            rule = learn_fn(train)
+            if rule is None:
+                return None
+            result = rule(test_input)
+            if result is None:
+                return None
+            if loo and len(train) >= 3:
+                if not SmartARCSolverV2._loo_validate(learn_fn, train):
+                    return None
+            return result
+        except Exception:
+            return None
+
     def solve(self, train, test_input):
         # ── Phase 1: 106 hand-coded strategies (cross-validated) ──────────────
         result = super().solve(train, test_input)
         if result is not None:
             return result
 
-        # ── Phase 2: Learned rule families (all verified) ─────────────────────
-
-        # Per-cell color/neighborhood rules
+        # ── Phase 2: Learned rule families (LOO validated) ────────────────────
         from klomboagi.reasoning.arc_cell_rules import learn_cell_rule
-        cell_rule = learn_cell_rule(train)
-        if cell_rule is not None:
-            result = cell_rule(test_input)
-            if result is not None:
-                return result
-
-        # Object-level transformations (extract, filter, recolor)
         from klomboagi.reasoning.arc_object_rules import learn_object_rule
-        obj_rule = learn_object_rule(train)
-        if obj_rule is not None:
-            result = obj_rule(test_input)
-            if result is not None:
-                return result
-
-        # Local neighborhood pattern matching
         from klomboagi.reasoning.arc_pattern_match import learn_pattern_rule
-        pattern_rule = learn_pattern_rule(train)
-        if pattern_rule is not None:
-            result = pattern_rule(test_input)
-            if result is not None:
-                return result
-
-        # Extraction rules (output is sub-region of input)
         from klomboagi.reasoning.arc_extraction import learn_extraction_rule
-        extract_rule = learn_extraction_rule(train)
-        if extract_rule is not None:
-            result = extract_rule(test_input)
-            if result is not None:
-                return result
-
-        # Grid structure rules (dividers, quadrant combine)
         from klomboagi.reasoning.arc_grid_ops import learn_grid_rule
-        grid_rule = learn_grid_rule(train)
-        if grid_rule is not None:
-            result = grid_rule(test_input)
-            if result is not None:
-                return result
-
-        # Advanced families (symmetry, propagate, sort, draw lines)
+        from klomboagi.reasoning.arc_region import learn_region_rule
+        from klomboagi.reasoning.arc_gravity import learn_gravity_rule
         from klomboagi.reasoning.arc_advanced import learn_advanced_rule
-        adv_rule = learn_advanced_rule(train)
-        if adv_rule is not None:
-            result = adv_rule(test_input)
+
+        # Order: fast → slow, specific → general
+        # LOO=True only for pattern_match which is prone to overfitting
+        learners = [
+            (learn_cell_rule, False),        # Per-cell rules (fast, precise)
+            (learn_region_rule, False),       # Region filling (high value)
+            (learn_gravity_rule, False),      # Gravity/movement
+            (learn_object_rule, False),       # Object-level rules
+            (learn_extraction_rule, False),   # Sub-region extraction
+            (learn_grid_rule, False),         # Grid split/combine
+            (learn_advanced_rule, False),     # Symmetry, propagate, etc.
+            (learn_pattern_rule, True),       # Pattern match (can overfit → LOO)
+        ]
+
+        for learn_fn, loo in learners:
+            result = self._try_learner(learn_fn, train, test_input, loo=loo)
             if result is not None:
                 return result
 
