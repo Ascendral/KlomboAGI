@@ -292,6 +292,14 @@ def main():
             print(f"\n  Recent broadcasts: {recent}")
             print(f"  Stats: {genesis.workspace.stats()}\n")
             continue
+        if user_input.lower() in ("dedup", "deduplicate"):
+            removed = genesis.deduplicator.deduplicate(genesis.base._beliefs)
+            genesis.base.memory.save(genesis.base.memory_path)
+            print(f"\n  Removed {len(removed)} near-duplicates. {len(genesis.base._beliefs)} remaining.\n")
+            continue
+        if user_input.lower() in ("quality", "answer quality"):
+            print(f"\n{genesis.answer_quality.report()}\n")
+            continue
         if user_input.lower() in ("cleanup", "clean", "purge"):
             print(f"\n  {genesis.cleanup_memory()}\n")
             continue

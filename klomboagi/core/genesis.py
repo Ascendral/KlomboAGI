@@ -79,6 +79,7 @@ from klomboagi.reasoning.abstract_compose import AbstractComposer
 from klomboagi.reasoning.emotional_intel import EmotionalIntelligence
 from klomboagi.reasoning.meta_learning import MetaLearner
 from klomboagi.reasoning.belief_index import BeliefIndex
+from klomboagi.reasoning.dedup import BeliefDeduplicator, AnswerQualityScorer
 
 
 @dataclass
@@ -369,6 +370,12 @@ class Genesis:
         # Belief Index — O(1) lookup instead of O(n) scan
         self.belief_index = BeliefIndex()
         self.belief_index.build(self.base._beliefs)
+
+        # Deduplicator — merge near-duplicate beliefs
+        self.deduplicator = BeliefDeduplicator()
+
+        # Answer Quality — rate own answers, track improvement
+        self.answer_quality = AnswerQualityScorer()
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
