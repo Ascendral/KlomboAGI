@@ -1061,19 +1061,24 @@ class Genesis:
                 decision = self.behavior.decide(self.inner.state, self.traits)
                 break
 
-        # CONSTRUCTIVE MEMORY — reconstruct understanding (not raw retrieval)
+        # CONSTRUCTIVE MEMORY — try focus concepts first (best match), then terms
         constructed = None
-        for qt in query_terms:
+        construct_candidates = list(focus_result.focus_concepts[:3]) + query_terms
+        for qt in construct_candidates:
             mem = self.constructive.reconstruct(qt)
             if mem.confidence > 0.1 and len(mem.fragments) > 0:
                 constructed = mem
                 break
 
-        # EXPLANATION GENERATOR — construct prose from relations
-        # Try query_terms, then ONLY focus concepts that match query_terms
+        # EXPLANATION GENERATOR — try focus concepts first (exact match), then terms
         generated = ""
-        safe_focus = [c for c in query_words if any(qt in c for qt in query_terms)]
-        for word in query_terms + safe_focus:
+        # Focus concepts are ranked by relevance — try them first
+        safe_focus = [c for c in focus_result.focus_concepts
+                     if any(qt in c.lower() for qt in query_terms)]
+        # Also try the full query phrase
+        full_phrase = " ".join(query_terms)
+        candidates = safe_focus + [full_phrase] + query_terms
+        for word in candidates:
             exp = self.generator.explain(word)
             if exp.novel and exp.relations_used > 0:
                 generated = exp.text
@@ -1106,7 +1111,11 @@ class Genesis:
         parts = []
 
         if constructed and constructed.confidence > 0.2 and generated:
-            parts.append(generated)
+            # BOTH available — definition first, then relations
+            parts.append(constructed.reconstruction)
+            # Add generated only if it adds NEW info not in the definition
+            if not any(s in constructed.reconstruction.lower() for s in generated.lower().split(".")[:1]):
+                parts.append(generated)
         elif constructed and constructed.confidence > 0.2:
             parts.append(constructed.reconstruction)
         elif generated:
