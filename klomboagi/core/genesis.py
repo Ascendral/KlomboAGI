@@ -19,6 +19,7 @@ from __future__ import annotations
 import time
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from klomboagi.interface.conversation import Baby, Memory
 from klomboagi.core.traits import TraitSystem, Trait, Ability, Skill
@@ -63,6 +64,9 @@ from klomboagi.senses.llm_translator import LLMTranslator
 from klomboagi.reasoning.first_principles import FirstPrinciplesEngine
 from klomboagi.reasoning.experiential import ExperientialLearner
 from klomboagi.reasoning.deep_transfer import DeepTransferEngine
+from klomboagi.reasoning.conversation_memory import ConversationMemory
+from klomboagi.reasoning.multi_step import MultiStepSolver
+from klomboagi.reasoning.self_improve import SelfImprover
 
 
 @dataclass
@@ -294,6 +298,16 @@ class Genesis:
         # Deep Transfer — apply techniques across domains
         self.deep_transfer = DeepTransferEngine(self.relations, self.base._beliefs)
 
+        # Conversation Memory — remember past sessions
+        mem_dir = str(Path(self.base.memory_path).parent)
+        self.conversation_memory = ConversationMemory(mem_dir)
+
+        # Multi-Step Solver — plan and execute complex problems
+        self.solver = MultiStepSolver(self)
+
+        # Self-Improvement — identify and fix own weaknesses
+        self.self_improver = SelfImprover(self)
+
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
             self.base._beliefs, self.relations,
@@ -419,6 +433,10 @@ class Genesis:
 
         # 2. Parse intent
         intent = self.base._parse_intent(resolved_message)
+
+        # 2.5. Conversation memory — track topics
+        if self.context.current_topic:
+            self.conversation_memory.record_topic(self.context.current_topic)
 
         # 3. Working memory + ACT-R decay + attention economy
         for word in resolved_message.lower().split():

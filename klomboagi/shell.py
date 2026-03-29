@@ -40,10 +40,17 @@ def main():
         if not user_input:
             continue
         if user_input.lower() in ("quit", "exit", "bye"):
+            # Save conversation memory
+            genesis.conversation_memory.end_session(
+                facts_learned=genesis.total_turns,
+                surprises=genesis.total_surprises,
+                corrections=genesis.metacognition.metrics.corrections_received,
+                turns=genesis.total_turns,
+            )
             print(f"\n  Session: {genesis.total_turns} turns, "
                   f"{genesis.total_surprises} surprises, "
                   f"{genesis.total_proactive} proactive questions.")
-            print("  Goodbye.")
+            print("  Session saved to memory. Goodbye.")
             break
         if user_input.lower() == "status":
             print(f"\n{genesis.status()}\n")
@@ -197,6 +204,19 @@ def main():
             for src, count in sorted(sources.items(), key=lambda x: -x[1]):
                 print(f"    {src}: {count}")
             print()
+            continue
+        if user_input.lower().startswith("solve "):
+            question = user_input[6:].strip()
+            sol = genesis.solver.solve(question)
+            print(f"\n{sol.explain()}\n")
+            continue
+        if user_input.lower() in ("improve", "self-improve"):
+            print("\n  Running self-improvement cycle...")
+            cycle = genesis.self_improver.improve()
+            print(f"  {genesis.self_improver.report()}\n")
+            continue
+        if user_input.lower() in ("history", "past", "conversations"):
+            print(f"\n{genesis.conversation_memory.summary()}\n")
             continue
         if user_input.lower() in ("transfers", "transfer"):
             transfers = genesis.deep_transfer.scan_all()
