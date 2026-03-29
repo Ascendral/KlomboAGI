@@ -205,6 +205,9 @@ def main():
                 print(f"    {src}: {count}")
             print()
             continue
+        if user_input.lower() in ("costs", "cost", "efficiency"):
+            print(f"\n{genesis.cost_tracker.report()}\n")
+            continue
         if user_input.lower() == "infer":
             print("\n  Running global inference...")
             derived = genesis.inference_engine.run(max_derivations=200)

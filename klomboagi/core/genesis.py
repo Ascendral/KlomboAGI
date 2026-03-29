@@ -68,6 +68,7 @@ from klomboagi.reasoning.conversation_memory import ConversationMemory
 from klomboagi.reasoning.multi_step import MultiStepSolver
 from klomboagi.reasoning.self_improve import SelfImprover
 from klomboagi.reasoning.inference_engine import GlobalInferenceEngine, QuestionDecomposer, BeliefPropagator
+from klomboagi.reasoning.cost_tracker import CostTracker
 
 
 @dataclass
@@ -319,6 +320,9 @@ class Genesis:
         # Belief Propagator — corrections cascade to dependents
         self.belief_propagator = BeliefPropagator(self.base._beliefs)
 
+        # Cost Tracker — economics teaches better than warnings
+        self.cost_tracker = CostTracker()
+
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
             self.base._beliefs, self.relations,
@@ -435,6 +439,7 @@ class Genesis:
         8. Return response
         """
         self.total_turns += 1
+        self.cost_tracker.start("hear_cycle")
 
         # 0. Update working memory with this input
         self.working_memory.add_context(message)
@@ -546,7 +551,10 @@ class Genesis:
             working_memory_items=len(self.working_memory._items),
         )
 
-        # 13. Auto-save state
+        # 13. Cost tracking — record this cycle
+        self.cost_tracker.end("hear_cycle", success=True)
+
+        # 14. Auto-save state
         self.save_state()
 
         return response
