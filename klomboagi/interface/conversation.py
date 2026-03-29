@@ -307,7 +307,12 @@ class Baby:
             r"absorbs?|releases?|stores?|transports?|connects?|supports?|"
             r"prevents?|allows?|controls?|regulates?|affects?|influences?|"
             r"makes?|takes?|gives?|leads?|follows?|moves?|changes?|grows?|"
-            r"includes?|consists? of|depends? on|results? in|leads? to"
+            r"includes?|consists? of|depends? on|results? in|leads? to|"
+            r"eats?|drinks?|breathes?|lives? in|belongs? to|comes? from|"
+            r"pollinates?|transmits?|receives?|sends?|carries?|delivers?|"
+            r"protects?|destroys?|builds?|forms?|combines?|separates?|"
+            r"surrounds?|covers?|fills?|empties?|heats?|cools?|melts?|"
+            r"orbits?|rotates?|spins?|reflects?|emits?|detects?|measures?"
         )
         svo_match = re.match(
             rf"^(?:a |an |the )?(.+?)\s+({svo_verbs})\s+(?:a |an |the )?(.+?)\.?$",
@@ -343,6 +348,16 @@ class Baby:
         "give", "gives", "lead", "leads", "follow", "follows",
         "move", "moves", "change", "changes", "grow", "grows",
         "include", "includes", "depend", "depends", "result", "results",
+        "eat", "eats", "drink", "drinks", "breathe", "breathes",
+        "pollinate", "pollinates", "transmit", "transmits",
+        "receive", "receives", "send", "sends", "carry", "carries",
+        "deliver", "delivers", "protect", "protects", "destroy", "destroys",
+        "build", "builds", "form", "forms", "combine", "combines",
+        "separate", "separates", "surround", "surrounds", "cover", "covers",
+        "fill", "fills", "empty", "empties", "heat", "heats", "cool", "cools",
+        "melt", "melts", "orbit", "orbits", "rotate", "rotates", "spin", "spins",
+        "reflect", "reflects", "emit", "emits", "detect", "detects", "measure", "measures",
+        "live", "lives",
     })
 
     def _learn_from_teaching(self, intent: dict) -> str:
