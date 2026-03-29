@@ -23,8 +23,9 @@ from klomboagi.world.model import WorldModel
 
 
 class RuntimeLoop:
-    def __init__(self, storage: StorageManager) -> None:
+    def __init__(self, storage: StorageManager, genesis=None) -> None:
         self.storage = storage
+        self.genesis = genesis  # Bridge to the Genesis brain — shared knowledge
         self.executive = Executive(storage)
         self.missions = MissionManager(storage)
         self.scheduler = Scheduler(storage)
@@ -134,6 +135,9 @@ class RuntimeLoop:
             active_task = self._select_active_task(tasks)
             learned_procedures = self.consolidator.retrieve(str(mission["description"]))
             learned_facts = self.semantic_memory.retrieve(str(mission["description"]))
+
+            # Bridge: consult Genesis brain for relevant knowledge
+            genesis_knowledge = self._query_genesis(str(mission["description"]))
             memory = self.working_memory.load_or_create(
                 str(mission["id"]),
                 str(mission["description"]),
@@ -177,7 +181,7 @@ class RuntimeLoop:
                 active_task_id=next_action.get("task_id"),
                 active_plan_id=str(plan["id"]),
                 blockers=blockers,
-                relevant_memories=[f"Mission priority is {mission['priority']}.", *learned_procedures, *learned_facts],
+                relevant_memories=[f"Mission priority is {mission['priority']}.", *learned_procedures, *learned_facts, *genesis_knowledge],
                 verification_alerts=list(verification.get("issues", [])) + list(verification.get("warnings", [])),
                 critique_notes=list(critique.get("notes", [])),
                 last_action=str(next_action["type"]),
@@ -356,8 +360,63 @@ class RuntimeLoop:
                 blockers.append(str(task["blocked_reason"]))
         return blockers
 
+    def _query_genesis(self, description: str) -> list[str]:
+        """
+        Bridge: query the Genesis brain for relevant knowledge.
+
+        Returns a list of relevant facts/beliefs from Genesis's knowledge graph.
+        If Genesis is not connected, returns empty list (graceful degradation).
+        """
+        if not self.genesis:
+            return []
+        try:
+            # Search Genesis beliefs for anything relevant to this mission
+            relevant = []
+            desc_words = set(description.lower().split())
+            stop = {"the", "a", "an", "to", "for", "and", "or", "in", "of", "is", "are",
+                    "with", "that", "this", "from", "by", "on", "at"}
+            desc_words -= stop
+
+            # Check beliefs
+            for stmt, belief in self.genesis.base._beliefs.items():
+                stmt_words = set(stmt.lower().split()) - stop
+                if desc_words & stmt_words and len(relevant) < 5:
+                    relevant.append(f"[brain] {stmt}")
+
+            # Check concept store (studied knowledge)
+            for word in desc_words:
+                facts = self.genesis.base.memory.concepts.get(word, {}).get("facts", [])
+                for fact in facts[:2]:
+                    if isinstance(fact, str) and len(fact) > 20 and fact not in relevant:
+                        relevant.append(f"[brain] {fact[:150]}")
+                        if len(relevant) >= 10:
+                            break
+
+            return relevant
+        except Exception:
+            return []
+
+    def _teach_genesis(self, description: str, outcome: str) -> None:
+        """
+        Bridge: feed learnings back to Genesis brain.
+
+        After completing a task, teach Genesis what we learned.
+        """
+        if not self.genesis:
+            return
+        try:
+            statement = f"task '{description[:50]}' resulted in {outcome}"
+            self.genesis.hear(statement)
+        except Exception:
+            pass
+
     def _apply_action_outcome(self, mission: dict[str, object], next_action: dict[str, object]) -> dict[str, object]:
-        return self.executor.execute(mission, next_action)
+        result = self.executor.execute(mission, next_action)
+        # Feed outcome back to Genesis brain
+        self._teach_genesis(
+            str(next_action.get("description", "")),
+            str(result.get("status", "unknown")))
+        return result
 
     def _record_cycle_trace(
         self,

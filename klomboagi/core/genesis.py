@@ -2542,3 +2542,55 @@ class Genesis:
                 lines.append(f"    {rtype:15s} {count}")
 
         return "\n".join(lines)
+
+    # ── Mission Execution (Bridge to RuntimeLoop) ──
+
+    def run_task(self, description: str) -> str:
+        """
+        Execute a task using the full brain + tools.
+
+        This bridges Genesis (the brain) with the execution pipeline.
+        Uses PureReasoningExecutor for algorithmic task solving.
+        """
+        from klomboagi.agent.executor import PureReasoningExecutor
+
+        executor = PureReasoningExecutor()
+        result = executor.execute({"description": description})
+
+        # Learn from outcome
+        if result.get("success"):
+            self.inner.record_success()
+            self.experiential.attempt(
+                description, "task_execution", str(result.get("output", ""))[:100], 0.8)
+            self.experiential.learn_from_success(self.experiential.attempts[-1])
+        else:
+            self.inner.record_failure()
+            self.failure_memory.record(
+                description=description,
+                context="task_execution",
+                approach=result.get("approach", "unknown"),
+                what_went_wrong=result.get("error", "task failed"),
+            )
+
+        lines = [f"Task: {description}"]
+        lines.append(f"Status: {'success' if result.get('success') else 'failed'}")
+        if result.get("output"):
+            lines.append(f"Output: {str(result['output'])[:300]}")
+        if result.get("error"):
+            lines.append(f"Error: {result['error']}")
+        return "\n".join(lines)
+
+    def get_runtime_loop(self):
+        """
+        Get a RuntimeLoop connected to this brain.
+
+        Usage:
+            genesis = Genesis()
+            runtime = genesis.get_runtime_loop()
+            runtime.run_cycle()  # uses Genesis's knowledge for planning
+        """
+        from klomboagi.core.loop import RuntimeLoop
+        from klomboagi.storage.manager import StorageManager
+
+        storage = StorageManager.bootstrap()
+        return RuntimeLoop(storage, genesis=self)

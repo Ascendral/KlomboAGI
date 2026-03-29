@@ -112,7 +112,10 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("Unknown daemon command")
     else:
         storage = StorageManager.bootstrap()
-        runtime = RuntimeLoop(storage)
+        # Bridge: connect RuntimeLoop to Genesis brain for shared knowledge
+        from klomboagi.core.genesis import Genesis
+        genesis = Genesis()
+        runtime = RuntimeLoop(storage, genesis=genesis)
         missions = MissionManager(storage)
         repo_runner = RepoEvalRunner(storage)
 
