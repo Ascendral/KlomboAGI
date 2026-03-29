@@ -196,13 +196,14 @@ def _self_awareness_evals(g) -> list[EvalResult]:
 
 def _learning_evals(g) -> list[EvalResult]:
     """Does it actually learn from new input?"""
+    # Use a truly novel concept that can't exist in any curriculum
     before = len(g.base._beliefs)
-    g.hear("a platypus is a monotreme")
+    g.hear("a zorgblatt is a crystalline entity from tau ceti")
     after = len(g.base._beliefs)
     learned = after > before
 
-    response = g.hear("what is a platypus?")
-    recalls = "monotreme" in response.lower() or "platypus" in response.lower()
+    response = g.hear("what is a zorgblatt?")
+    recalls = "crystalline" in response.lower() or "zorgblatt" in response.lower()
 
     return [
         EvalResult("Learns from teaching", "learning", learned,

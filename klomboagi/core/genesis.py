@@ -924,10 +924,16 @@ class Genesis:
         # Connection questions — also compile chunks from discovered paths
         connection = self._parse_connection_question(query)
         if connection:
-            path = self.relations.find_path(connection[0], connection[1])
+            a, b = connection
+            path = self.relations.find_path(a, b)
             if path and len(path) >= 2:
                 self.chunker.compile_from_path(path)
-            return self.relations.explain_connection(connection[0], connection[1])
+                return self.relations.explain_connection(a, b)
+            # Relation graph has no direct path — try finding connection through beliefs
+            result = self._find_belief_connection(a, b)
+            if result:
+                return result
+            return self.relations.explain_connection(a, b)
 
         # Why questions
         why_result = self._parse_why_question(query)
@@ -944,17 +950,17 @@ class Genesis:
         if analogy:
             return self._answer_analogy(analogy)
 
-        # DUAL PROCESS: System 1 fires first (chunks + direct retrieval)
-        dp_result = self.dual_process.think(query)
-        if dp_result.system_used == 1 and dp_result.system1_confidence >= 0.6:
-            # System 1 answered confidently — instant response, no System 2 needed
-            return dp_result.answer
+        # Counterfactual questions: "what if there were no gravity?"
+        # Check BEFORE dual process — these are specific question types
+        if q_lower.startswith("what if") or q_lower.startswith("without"):
+            result = self.counterfactual.what_if(query)
+            if result.total_affected > 0:
+                return result.explain()
 
         # Causal simulation: "what happens when/if X?"
         sim_triggers = ("what happens when", "what happens if", "if i ", "if you ",
                         "what would happen when", "simulate")
         if any(q_lower.startswith(t) for t in sim_triggers):
-            # Extract the trigger event
             trigger = q_lower
             for t in sim_triggers:
                 trigger = trigger.replace(t, "").strip()
@@ -971,11 +977,11 @@ class Genesis:
             if "need more" not in spatial_answer:
                 return spatial_answer
 
-        # Counterfactual questions: "what if there were no gravity?"
-        if query.lower().startswith("what if") or query.lower().startswith("without"):
-            result = self.counterfactual.what_if(query)
-            if result.total_affected > 0:
-                return result.explain()
+        # DUAL PROCESS: System 1 fires first (chunks + direct retrieval)
+        dp_result = self.dual_process.think(query)
+        if dp_result.system_used == 1 and dp_result.system1_confidence >= 0.6:
+            # System 1 answered confidently — instant response, no System 2 needed
+            return dp_result.answer
 
         # ── BEHAVIORAL DECISION — inner state drives approach ──
 
@@ -1141,10 +1147,21 @@ class Genesis:
         elif generated:
             parts.append(generated)
         elif known_facts:
-            for f in known_facts[:3]:
+            # Synthesize a natural answer from beliefs, not a raw dump
+            seen_preds = set()
+            for f in known_facts[:5]:
                 b = self.base._beliefs.get(f)
                 if b and hasattr(b, 'predicate') and b.predicate and len(b.predicate) < 80:
-                    parts.append(f"{b.subject} is {b.predicate}.".capitalize())
+                    pred = b.predicate.strip()
+                    if pred in seen_preds:
+                        continue
+                    seen_preds.add(pred)
+                    parts.append(f"{b.statement.capitalize()}.")
+            # Also weave in relations if they add new info
+            for r_line in relation_lines[:3]:
+                r_text = r_line.strip()
+                if r_text and not any(r_text.lower() in p.lower() for p in parts):
+                    parts.append(r_text.capitalize() + ".")
 
         # If NOTHING produced an answer — obey free energy decision
         if not parts:
@@ -2082,6 +2099,79 @@ class Genesis:
 
     # ── Connection & Why Questions ──
 
+    def _find_belief_connection(self, a: str, b: str) -> str | None:
+        """
+        Find connections between two concepts through shared beliefs.
+
+        If we know:
+          "chlorophyll" appears in belief about "plants"
+          "plants" appears in belief about "photosynthesis"
+          "photosynthesis produces oxygen as a byproduct" (mentions "oxygen")
+        Then chlorophyll → plants → photosynthesis → oxygen.
+
+        Uses BFS through beliefs, max depth 4.
+        Extracts significant words from beliefs, not just registered concepts.
+        """
+        a_lower = a.lower()
+        b_lower = b.lower()
+
+        common = {"is", "a", "an", "the", "of", "in", "to", "for", "and", "or",
+                  "by", "as", "on", "at", "from", "with", "that", "this", "how",
+                  "also", "its", "are", "was", "were", "be", "been", "being",
+                  "not", "but", "found", "needed", "about", "between", "into"}
+
+        # Build adjacency by extracting all significant words from each belief
+        concept_links: dict[str, set[str]] = {}
+        belief_index: dict[str, list[str]] = {}
+
+        for stmt, belief in self.base._beliefs.items():
+            stmt_lower = stmt.lower()
+            # Extract all significant words (4+ chars, not common words)
+            words = set(re.findall(r'\b([a-z]{4,})\b', stmt_lower)) - common
+            # Also add registered concepts
+            for concept in self.base.memory.concepts:
+                if concept.lower() in stmt_lower:
+                    words.add(concept.lower())
+            # Add subject
+            if hasattr(belief, 'subject') and belief.subject:
+                words.add(belief.subject.lower())
+
+            # Link all words that appear in the same belief
+            for w in words:
+                concept_links.setdefault(w, set())
+                belief_index.setdefault(w, []).append(stmt)
+                for other in words:
+                    if other != w:
+                        concept_links[w].add(other)
+
+        # BFS from a to b (or any word containing b)
+        start_nodes = [w for w in concept_links if a_lower in w or w in a_lower]
+        if not start_nodes:
+            return None
+
+        visited = set(start_nodes)
+        queue = [(node, [node]) for node in start_nodes]
+        while queue:
+            current, path = queue.pop(0)
+            if len(path) > 4:
+                continue
+            for neighbor in concept_links.get(current, set()):
+                if b_lower in neighbor or neighbor in b_lower:
+                    full_path = path + [neighbor]
+                    lines = [f"Connection: {a} → {b}"]
+                    for i in range(len(full_path) - 1):
+                        c1, c2 = full_path[i], full_path[i + 1]
+                        for stmt in belief_index.get(c1, []):
+                            if c2 in stmt.lower():
+                                lines.append(f"  {stmt.capitalize()}")
+                                break
+                    return "\n".join(lines)
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
+
+        return None
+
     def _parse_connection_question(self, query: str) -> tuple[str, str] | None:
         """Parse "how does X connect to Y?" / "how are X and Y related?" """
         q = query.lower().strip().rstrip("?")
@@ -2117,22 +2207,59 @@ class Genesis:
 
     def _answer_why(self, concept: str) -> str:
         """
-        Answer "why" by tracing causal chains backward.
+        Answer "why" by tracing causal chains and effects.
 
-        "Why does acceleration happen?" → because force causes acceleration,
-        and gravity causes force.
+        "Why does acceleration happen?" → because force causes acceleration
+        "Why is photosynthesis important?" → because photosynthesis produces oxygen
         """
-        # Find everything that causes this concept
-        causes = self.relations.get_backward(concept, RelationType.CAUSES)
+        # Clean concept — strip "is X important/significant/necessary"
+        clean = concept
+        importance_words = ("important", "significant", "necessary", "essential",
+                           "crucial", "vital", "needed", "useful", "valuable")
+        asking_about_importance = False
+        for word in importance_words:
+            if word in concept.lower():
+                asking_about_importance = True
+                # Extract the actual subject: "is photosynthesis important" → "photosynthesis"
+                clean = re.sub(rf"\b(?:is|are)\s+", "", concept)
+                clean = re.sub(rf"\s*{word}\s*", "", clean).strip()
+                break
+
+        # If asking about importance, look at what this concept CAUSES/ENABLES (forward effects)
+        if asking_about_importance and clean:
+            effects = self.relations.get_forward(clean, RelationType.CAUSES)
+            effects += self.relations.get_forward(clean, RelationType.ENABLES)
+            # Also gather all beliefs about this concept
+            relevant_beliefs = [b for s, b in self.base._beliefs.items()
+                               if hasattr(b, 'subject') and b.subject == clean]
+
+            if effects or relevant_beliefs:
+                lines = [f"{clean.capitalize()} is important because:"]
+                for r in effects:
+                    lines.append(f"  It {r.relation.value.replace('_', 's ')} {r.target}.")
+                for b in relevant_beliefs[:3]:
+                    lines.append(f"  {b.statement.capitalize()}.")
+                return "\n".join(lines)
+
+        # Standard: find everything that causes this concept
+        causes = self.relations.get_backward(clean, RelationType.CAUSES)
         if not causes:
             # Try with prefixes
             for prefix in ("a ", "an ", "the "):
-                causes = self.relations.get_backward(prefix + concept, RelationType.CAUSES)
+                causes = self.relations.get_backward(prefix + clean, RelationType.CAUSES)
                 if causes:
                     break
 
         if not causes:
-            return f"I don't know why {concept} happens. Teach me what causes it?"
+            # Last resort: gather beliefs about the concept
+            relevant = [b for s, b in self.base._beliefs.items()
+                       if hasattr(b, 'subject') and clean in b.subject]
+            if relevant:
+                lines = [f"I'm not sure why {clean} specifically, but here's what I know:"]
+                for b in relevant[:3]:
+                    lines.append(f"  {b.statement.capitalize()}.")
+                return "\n".join(lines)
+            return f"I don't know why {clean} happens. Teach me what causes it?"
 
         lines = [f"Why {concept}? Because:"]
         for r in causes:
@@ -2201,21 +2328,9 @@ class Genesis:
                     self.relations.add(source, rel_type, target,
                                       confidence=0.5, domain="conversation")
 
-            nlu_facts = self.nlu.extract_facts(message)
-            for subj, pred in nlu_facts:
-                if len(subj) > 1 and len(pred) > 3:
-                    statement = f"{subj} is {pred}"
-                    if statement not in self.base._beliefs:
-                        self.base._evidence_counter += 1
-                        belief = Belief(
-                            statement=statement,
-                            truth=TruthValue.from_single_observation(True),
-                            stamp=EvidenceStamp.new(self.base._evidence_counter),
-                            subject=subj, predicate=pred, source="nlu",
-                        )
-                        self.base._beliefs[statement] = belief
-                        self.base.memory.beliefs[statement] = belief.to_dict()
-                        self.base.graph.add(subj, is_a=[pred])
+            # Only extract RELATIONS here, not facts.
+            # Facts are already handled by the teaching pipeline (_learn_from_teaching).
+            # Extracting facts via NLU creates garbled duplicates.
 
     # ── State Persistence ──
 
@@ -2229,7 +2344,9 @@ class Genesis:
         import json
         from pathlib import Path
 
-        state_path = Path(self.base.memory_path).parent / "genesis_state.json"
+        # State file named after brain file to avoid cross-instance pollution
+        brain_stem = Path(self.base.memory_path).stem
+        state_path = Path(self.base.memory_path).parent / f"{brain_stem}_state.json"
 
         # Serialize traits
         trait_data = {}
@@ -2261,7 +2378,9 @@ class Genesis:
         import json
         from pathlib import Path
 
-        state_path = Path(self.base.memory_path).parent / "genesis_state.json"
+        # State file named after brain file to avoid cross-instance pollution
+        brain_stem = Path(self.base.memory_path).stem
+        state_path = Path(self.base.memory_path).parent / f"{brain_stem}_state.json"
         if not state_path.exists():
             return False
 

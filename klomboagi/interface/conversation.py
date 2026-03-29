@@ -299,14 +299,62 @@ class Baby:
                 return {"type": "teach", "subject": subject,
                         "predicate": predicate, "raw": message}
 
+        # 4.5 SVO teaching: "Plants use chlorophyll", "Photosynthesis produces oxygen"
+        # Any declarative sentence with subject + verb + object = teaching us a fact
+        svo_verbs = (
+            r"uses?|produces?|creates?|requires?|needs?|captures?|converts?|"
+            r"generates?|contains?|involves?|enables?|causes?|provides?|"
+            r"absorbs?|releases?|stores?|transports?|connects?|supports?|"
+            r"prevents?|allows?|controls?|regulates?|affects?|influences?|"
+            r"makes?|takes?|gives?|leads?|follows?|moves?|changes?|grows?|"
+            r"includes?|consists? of|depends? on|results? in|leads? to"
+        )
+        svo_match = re.match(
+            rf"^(?:a |an |the )?(.+?)\s+({svo_verbs})\s+(?:a |an |the )?(.+?)\.?$",
+            msg, re.IGNORECASE
+        )
+        if svo_match:
+            subject = svo_match.group(1).strip()
+            verb = svo_match.group(2).strip()
+            obj = svo_match.group(3).strip()
+            # Skip if subject looks like a question word or is too short
+            if (subject not in ("what", "who", "where", "how", "when", "which", "why", "it", "this", "that")
+                    and len(subject) > 1 and len(obj) > 1):
+                predicate = f"{verb} {obj}"
+                if len(predicate) > 80:
+                    predicate = predicate[:80].rsplit(" ", 1)[0]
+                return {"type": "teach", "subject": subject,
+                        "predicate": predicate, "raw": message}
+
         # 5. General statement
         return {"type": "general", "content": message, "raw": message}
+
+    # Verbs that indicate an SVO predicate (don't prepend "is")
+    _SVO_VERB_STARTS = frozenset({
+        "use", "uses", "produce", "produces", "create", "creates",
+        "require", "requires", "need", "needs", "capture", "captures",
+        "convert", "converts", "generate", "generates", "contain", "contains",
+        "involve", "involves", "enable", "enables", "cause", "causes",
+        "provide", "provides", "absorb", "absorbs", "release", "releases",
+        "store", "stores", "transport", "transports", "connect", "connects",
+        "support", "supports", "prevent", "prevents", "allow", "allows",
+        "control", "controls", "regulate", "regulates", "affect", "affects",
+        "influence", "influences", "make", "makes", "take", "takes",
+        "give", "gives", "lead", "leads", "follow", "follows",
+        "move", "moves", "change", "changes", "grow", "grows",
+        "include", "includes", "depend", "depends", "result", "results",
+    })
 
     def _learn_from_teaching(self, intent: dict) -> str:
         """Human is teaching us something. Learn it with evidence-based truth."""
         subject = intent["subject"]
         predicate = intent["predicate"]
-        statement = f"{subject} is {predicate}"
+        # SVO predicates already contain the verb — don't prepend "is"
+        first_word = predicate.split()[0].lower() if predicate else ""
+        if first_word in self._SVO_VERB_STARTS:
+            statement = f"{subject} {predicate}"
+        else:
+            statement = f"{subject} is {predicate}"
 
         # Create or revise belief with NARS truth values
         self._evidence_counter += 1
@@ -353,9 +401,9 @@ class Baby:
         connections = self._find_connections(subject)
 
         # Build response with truth value
-        response = f"Got it. {subject} is {predicate}. (confidence: {tv.confidence:.0%})"
+        response = f"Got it. {statement}. (confidence: {tv.confidence:.0%})"
         if tv.confidence > 0.7:
-            response = f"I'm now quite sure: {subject} is {predicate}. (confidence: {tv.confidence:.0%})"
+            response = f"I'm now quite sure: {statement}. (confidence: {tv.confidence:.0%})"
 
         if connections:
             response += f" Connects to: {', '.join(connections)}."
@@ -370,19 +418,14 @@ class Baby:
         if resolved:
             response += f" That answers my question about {resolved}!"
 
-        # Be curious about new concepts
+        # Note curiosity gaps about unknown concepts — but don't auto-search
+        # during a conversation. The human is teaching; trust them to provide context.
         unknowns = self._find_unknowns_in(predicate)
         if unknowns:
             gap = unknowns[0]
             self.curiosity.notice_gap(gap, context=f"Learning about {subject}")
-            response += f"\n\nI don't know what '{gap}' is yet. Let me find out..."
-            event = self.curiosity.investigate()
-            if event and event.learned:
-                self._process_discovery(gap, event.result)
-                response += f"\n{self._summarize_discovery(gap, event.result)}"
-            else:
-                response += f"\nI couldn't find information about '{gap}'. Can you tell me?"
-                self.pending_questions.append(f"What is '{gap}'?")
+            self.pending_questions.append(f"What is '{gap}'?")
+            response += f"\n\nWhat is '{gap}'?"
 
         return response
 
@@ -553,7 +596,7 @@ class Baby:
         return "Understood — I was wrong. Can you tell me what the right answer is?"
 
     def _process_general(self, message: str) -> str:
-        """Process a general statement — extract any knowledge."""
+        """Process a general statement — extract any knowledge using NLU."""
         msg = message.strip().lower()
 
         # Greetings
@@ -562,20 +605,56 @@ class Baby:
         if msg.rstrip("!.,") in greetings:
             return "Hello. What would you like to talk about?"
 
-        # Try to find "X is Y" patterns even in longer text
-        patterns = [
-            r"(\w[\w\s]*?) (?:is|are) (?:a |an |the )?(\w[\w\s]*?)(?:\.|,|$)",
-        ]
         learned = []
-        for pattern in patterns:
-            for m in re.finditer(pattern, message, re.IGNORECASE):
+
+        # Use NLU to extract structured triples from any statement
+        from klomboagi.reasoning.nlu import NLU
+        nlu = NLU()
+        triples = nlu.parse(message)
+        for triple in triples:
+            subj, pred = triple.as_belief()
+            subj = subj.strip().lower()
+            pred = pred.strip().lower()
+            # Quality filter
+            skip_subj = {"it", "this", "that", "which", "they", "he", "she", "we",
+                         "there", "here", "what", "who", "where", "how"}
+            subj_words = subj.split()
+            if (len(subj) > 1 and len(pred) > 2 and len(pred) <= 80
+                    and len(subj_words) <= 6
+                    and subj_words[0] not in skip_subj
+                    and subj != pred):
+                statement = f"{subj} is {pred}"
+                if statement not in self._beliefs:
+                    self._evidence_counter += 1
+                    belief = Belief(
+                        statement=statement,
+                        truth=TruthValue.from_single_observation(True),
+                        stamp=EvidenceStamp.new(self._evidence_counter),
+                        subject=subj, predicate=pred, source="human",
+                    )
+                    self._beliefs[statement] = belief
+                    self.memory.beliefs[statement] = belief.to_dict()
+                self.graph.add(subj, is_a=[pred])
+                if subj not in self.memory.concepts:
+                    self.memory.concepts[subj] = {"facts": [], "taught_by": "human"}
+                if pred not in self.memory.concepts[subj]["facts"]:
+                    self.memory.concepts[subj]["facts"].append(pred)
+                learned.append(f"{subj} → {pred}")
+
+        # Fallback: regex for "X is Y" patterns
+        if not learned:
+            for m in re.finditer(
+                r"(\w[\w\s]*?) (?:is|are) (?:a |an |the )?(\w[\w\s]*?)(?:\.|,|$)",
+                message, re.IGNORECASE
+            ):
                 subject = m.group(1).strip().lower()
                 obj = m.group(2).strip().lower()
                 if len(subject) > 1 and len(obj) > 1 and subject != obj:
                     self.graph.add(subject, is_a=[obj])
                     if subject not in self.memory.concepts:
                         self.memory.concepts[subject] = {"facts": [], "taught_by": "human"}
-                    self.memory.concepts[subject]["facts"].append(obj)
+                    if obj not in self.memory.concepts[subject]["facts"]:
+                        self.memory.concepts[subject]["facts"].append(obj)
                     learned.append(f"{subject} → {obj}")
 
         if learned:
