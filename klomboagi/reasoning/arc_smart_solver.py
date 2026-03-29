@@ -108,11 +108,17 @@ class SmartARCSolverV2(SmartARCSolver):
     """V2: targeted strategies for the biggest unsolved categories."""
 
     def solve(self, train, test_input):
-        # Try parent first
+        # Try parent first (106 hand-coded strategies)
         result = super().solve(train, test_input)
         if result is not None:
             return result
-        
+
+        # Try DSL program synthesis (composable primitives)
+        from klomboagi.reasoning.arc_dsl_v2 import synthesize
+        synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=3000)
+        if synth_result is not None:
+            return synth_result
+
         # V2 targeted strategies
         v2 = [
             self._try_paint_shape_with_color,
