@@ -369,6 +369,278 @@ def remove_smallest_objects(grid: Grid) -> Grid:
     return result
 
 
+def extract_unique_subgrid(grid: Grid) -> Grid:
+    """
+    If the grid has a repeating pattern with one unique section, extract it.
+    Common ARC pattern: grid is tiled but one tile is different — extract that tile.
+    """
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+
+    # Try different sub-grid sizes
+    for bh in range(2, rows // 2 + 1):
+        if rows % bh != 0:
+            continue
+        for bw in range(2, cols // 2 + 1):
+            if cols % bw != 0:
+                continue
+            # Extract all blocks
+            blocks = []
+            for br in range(0, rows, bh):
+                for bc in range(0, cols, bw):
+                    block = tuple(
+                        tuple(grid[r][c] for c in range(bc, bc + bw))
+                        for r in range(br, br + bh)
+                    )
+                    blocks.append((br, bc, block))
+
+            # Find the unique block (appears only once)
+            block_counts = Counter(b[2] for b in blocks)
+            unique = [b for b in blocks if block_counts[b[2]] == 1]
+            if len(unique) == 1:
+                br, bc, block = unique[0]
+                return [list(row) for row in block]
+
+    return grid  # No unique sub-grid found
+
+
+def extract_non_bg_bbox(grid: Grid) -> Grid:
+    """Extract the bounding box of ALL non-bg content."""
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+    min_r = min_c = float('inf')
+    max_r = max_c = -1
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] != bg:
+                min_r = min(min_r, r)
+                max_r = max(max_r, r)
+                min_c = min(min_c, c)
+                max_c = max(max_c, c)
+    if max_r < 0:
+        return grid
+    return [grid[r][min_c:max_c + 1] for r in range(min_r, max_r + 1)]
+
+
+def apply_majority_neighbor(grid: Grid) -> Grid:
+    """
+    For each bg cell, if majority of 4-neighbors are same color, adopt that color.
+    Single pass — good for "spreading" or "smoothing" patterns.
+    """
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+    result = grid_copy(grid)
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] != bg:
+                continue
+            neighbors = Counter()
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] != bg:
+                    neighbors[grid[nr][nc]] += 1
+            if neighbors:
+                top_color, top_count = neighbors.most_common(1)[0]
+                if top_count >= 2:
+                    result[r][c] = top_color
+    return result
+
+
+def outline_all_objects(grid: Grid) -> Grid:
+    """
+    For each non-bg cell that borders a bg cell, keep it.
+    Interior cells (all 4 neighbors are non-bg) become bg.
+    Produces outlines of objects.
+    """
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+    result = [[bg] * cols for _ in range(rows)]
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] == bg:
+                continue
+            # Check if this cell borders bg
+            is_border = False
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if nr < 0 or nr >= rows or nc < 0 or nc >= cols or grid[nr][nc] == bg:
+                    is_border = True
+                    break
+            if is_border:
+                result[r][c] = grid[r][c]
+    return result
+
+
+def fill_bg_between_colors(grid: Grid) -> Grid:
+    """
+    On each row and column, fill bg cells between two same-colored markers.
+    Common pattern: two dots of color X → fill the line between them with X.
+    """
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+    result = grid_copy(grid)
+
+    # Fill rows
+    for r in range(rows):
+        colors_in_row = {}
+        for c in range(cols):
+            if grid[r][c] != bg:
+                color = grid[r][c]
+                if color not in colors_in_row:
+                    colors_in_row[color] = [c]
+                else:
+                    colors_in_row[color].append(c)
+        for color, positions in colors_in_row.items():
+            if len(positions) >= 2:
+                for c in range(min(positions), max(positions) + 1):
+                    if result[r][c] == bg:
+                        result[r][c] = color
+
+    # Fill columns
+    for c in range(cols):
+        colors_in_col = {}
+        for r in range(rows):
+            if grid[r][c] != bg:
+                color = grid[r][c]
+                if color not in colors_in_col:
+                    colors_in_col[color] = [r]
+                else:
+                    colors_in_col[color].append(r)
+        for color, positions in colors_in_col.items():
+            if len(positions) >= 2:
+                for r in range(min(positions), max(positions) + 1):
+                    if result[r][c] == bg:
+                        result[r][c] = color
+
+    return result
+
+
+def split_by_horizontal_divider(grid: Grid) -> list[Grid]:
+    """Split grid at horizontal divider lines (rows of single color)."""
+    bg = get_bg(grid)
+    rows = len(grid)
+    dividers = []
+    for r in range(rows):
+        vals = set(grid[r])
+        if len(vals) == 1 and grid[r][0] != bg:
+            dividers.append(r)
+    if not dividers:
+        return [grid]
+    # Split between dividers
+    parts = []
+    prev = 0
+    for d in dividers:
+        if d > prev:
+            parts.append(grid[prev:d])
+        prev = d + 1
+    if prev < rows:
+        parts.append(grid[prev:])
+    return [p for p in parts if p]
+
+
+def split_by_vertical_divider(grid: Grid) -> list[Grid]:
+    """Split grid at vertical divider lines (columns of single color)."""
+    bg = get_bg(grid)
+    rows, cols = len(grid), len(grid[0])
+    dividers = []
+    for c in range(cols):
+        vals = set(grid[r][c] for r in range(rows))
+        if len(vals) == 1 and grid[0][c] != bg:
+            dividers.append(c)
+    if not dividers:
+        return [grid]
+    parts = []
+    prev = 0
+    for d in dividers:
+        if d > prev:
+            parts.append([row[prev:d] for row in grid])
+        prev = d + 1
+    if prev < cols:
+        parts.append([row[prev:] for row in grid])
+    return [p for p in parts if p]
+
+
+def xor_split_halves_h(grid: Grid) -> Grid:
+    """Split horizontally, XOR the two halves. Highlights differences."""
+    halves = split_by_horizontal_divider(grid)
+    if len(halves) < 2:
+        # Try simple split at middle
+        mid = len(grid) // 2
+        halves = [grid[:mid], grid[mid:]]
+    if len(halves) >= 2 and len(halves[0]) == len(halves[1]):
+        return xor_grids(halves[0], halves[1])
+    return grid
+
+
+def xor_split_halves_v(grid: Grid) -> Grid:
+    """Split vertically, XOR the two halves."""
+    halves = split_by_vertical_divider(grid)
+    if len(halves) < 2:
+        mid = len(grid[0]) // 2
+        halves = [[row[:mid] for row in grid], [row[mid:] for row in grid]]
+    if len(halves) >= 2:
+        h0, h1 = halves[0], halves[1]
+        if len(h0) == len(h1) and len(h0[0]) == len(h1[0]):
+            return xor_grids(h0, h1)
+    return grid
+
+
+def and_split_halves_h(grid: Grid) -> Grid:
+    """Split horizontally, AND (keep cells where both halves agree)."""
+    mid = len(grid) // 2
+    top, bot = grid[:mid], grid[mid:]
+    if len(top) != len(bot):
+        return grid
+    bg = get_bg(grid)
+    rows, cols = len(top), len(top[0])
+    result = [[bg] * cols for _ in range(rows)]
+    for r in range(rows):
+        for c in range(min(len(top[0]), len(bot[0]))):
+            if top[r][c] == bot[r][c] and top[r][c] != bg:
+                result[r][c] = top[r][c]
+    return result
+
+
+def and_split_halves_v(grid: Grid) -> Grid:
+    """Split vertically, AND (keep cells where both halves agree)."""
+    cols = len(grid[0])
+    mid = cols // 2
+    left = [row[:mid] for row in grid]
+    right = [row[mid:] for row in grid]
+    if len(left[0]) != len(right[0]):
+        return grid
+    bg = get_bg(grid)
+    rows = len(grid)
+    result = [[bg] * mid for _ in range(rows)]
+    for r in range(rows):
+        for c in range(mid):
+            if left[r][c] == right[r][c] and left[r][c] != bg:
+                result[r][c] = left[r][c]
+    return result
+
+
+def or_split_halves_h(grid: Grid) -> Grid:
+    """Split horizontally, OR (keep non-bg from either half)."""
+    mid = len(grid) // 2
+    top, bot = grid[:mid], grid[mid:]
+    if len(top) != len(bot):
+        return grid
+    bg = get_bg(grid)
+    return overlay(top, bot, bg)
+
+
+def or_split_halves_v(grid: Grid) -> Grid:
+    """Split vertically, OR (keep non-bg from either half)."""
+    cols = len(grid[0])
+    mid = cols // 2
+    left = [row[:mid] for row in grid]
+    right = [row[mid:] for row in grid]
+    if len(left[0]) != len(right[0]):
+        return grid
+    bg = get_bg(grid)
+    return overlay(left, right, bg)
+
+
 def sort_objects_by_size(grid: Grid) -> Grid:
     """Rearrange objects left-to-right by size (smallest first)."""
     bg = get_bg(grid)
@@ -457,6 +729,23 @@ ALL_OPS = [
     Op("smallest_object", extract_smallest_object, False, "object"),
     Op("keep_common_color", keep_most_common_color_objects, True, "object"),
     Op("remove_small", remove_smallest_objects, True, "object"),
+
+    # Sub-grid extraction
+    Op("unique_subgrid", extract_unique_subgrid, False, "extract"),
+    Op("non_bg_bbox", extract_non_bg_bbox, False, "extract"),
+
+    # Per-cell neighborhood rules
+    Op("majority_neighbor", apply_majority_neighbor, True, "cell_rule"),
+    Op("outline_objects", outline_all_objects, True, "cell_rule"),
+    Op("fill_bg_between", fill_bg_between_colors, True, "cell_rule"),
+
+    # Grid splitting + combining halves
+    Op("xor_halves_h", xor_split_halves_h, False, "split"),
+    Op("xor_halves_v", xor_split_halves_v, False, "split"),
+    Op("and_halves_h", and_split_halves_h, False, "split"),
+    Op("and_halves_v", and_split_halves_v, False, "split"),
+    Op("or_halves_h", or_split_halves_h, False, "split"),
+    Op("or_halves_v", or_split_halves_v, False, "split"),
 ]
 
 
