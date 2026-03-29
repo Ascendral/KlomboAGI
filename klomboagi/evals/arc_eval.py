@@ -102,7 +102,7 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
     """
     import arckit
     import numpy as np
-    from klomboagi.reasoning.arc_smart_solver import SmartARCSolver
+    from klomboagi.reasoning.arc_smart_solver import SmartARCSolverV2 as SmartARCSolver
 
     train_set, eval_set = arckit.load_data()
     tasks = train_set if dataset == "training" else eval_set
