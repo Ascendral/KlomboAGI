@@ -571,12 +571,29 @@ class Genesis:
                 f"Conflict: {c.belief_a} vs {c.belief_b}",
                 SignalType.CONFLICT, c.severity, "conflict_detector")
 
-        # 13. Global Workspace broadcast — most important signal to all systems
+        # 13. Global Workspace broadcast — winner shapes next cycle
         if self.context.current_topic:
             self.workspace.submit(
                 self.context.current_topic, SignalType.PERCEPTION,
                 0.5, "dialog_context")
+        if self.inner.state.wonder > 0.3:
+            self.workspace.submit(
+                "surprise_detected", SignalType.EMOTION,
+                self.inner.state.wonder, "inner_state")
+        if self.inner.state.boredom > 0.5:
+            self.workspace.submit(
+                "bored_need_stimulation", SignalType.EMOTION,
+                self.inner.state.boredom, "inner_state")
+
         broadcast = self.workspace.compete()
+        broadcast_result = self.workspace.broadcast()
+
+        # Workspace winner influences working memory priority
+        if broadcast and broadcast.signal_type == SignalType.CONFLICT:
+            # Conflict won — focus working memory on the conflict
+            self.working_memory.focus_on(broadcast.content[:30])
+        elif broadcast and broadcast.content:
+            self.working_memory.attend(broadcast.content[:30], "broadcast", "workspace")
 
         # 14. Attention economy tax — zero-sum, forces prioritization
         self.attention_economy.tax()
@@ -784,18 +801,51 @@ class Genesis:
 
     def _think_deep(self, message: str, intent: dict) -> str:
         """
-        Parallel cognition — ALL systems fire simultaneously, results merge.
+        Wrapper that adds prediction + experiential learning to every question.
 
-        Like real neurons: every subsystem activates at once.
-        The final response is the COMBINED output, weighted by confidence.
+        1. PREDICT what the answer should be (before seeing it)
+        2. Check if we've learned from similar past questions
+        3. Run the actual reasoning pipeline
+        4. COMPARE prediction to actual answer (learn from error)
+        5. Record as experiential attempt (learn from success/failure)
+        """
+        query = intent.get("query", message)
+        stop = {"what", "is", "a", "an", "the", "how", "why", "does", "do",
+                "can", "about", "you", "your", "think", "know", "tell", "me",
+                "there", "have", "has", "had", "will", "been", "being"}
+        query_terms = [w.lower().strip("?.,!") for w in query.split()
+                       if w.lower().strip("?.,!") not in stop and len(w) > 2]
 
-        Systems firing in parallel:
-        1. Math engine (computation)
-        2. Relation engine (structural connections)
-        3. Activation network (spreading neural activation)
-        4. Belief system (stored knowledge)
-        5. Reasoning engine (logical derivation)
-        6. CognitionLoop (pattern detection + transfer)
+        # PREDICTIVE: predict BEFORE answering
+        prediction = self.predictor.predict(
+            query_terms[0] if query_terms else query, self.base._beliefs)
+
+        # EXPERIENTIAL: check if past lessons suggest an approach
+        suggested = self.experiential.suggest_approach(query)
+
+        # Run the actual reasoning
+        answer = self._think_deep_inner(message, intent)
+
+        # PREDICTIVE: compare prediction to actual answer
+        self.predictor.compare(prediction, answer[:100])
+
+        # EXPERIENTIAL: record this attempt
+        has_answer = ("don't know" not in answer.lower()
+                     and "teach me" not in answer.lower()
+                     and len(answer) > 20)
+        confidence = 0.6 if has_answer else 0.1
+        att = self.experiential.attempt(query, "think_deep", answer[:100], confidence)
+
+        if has_answer:
+            self.experiential.learn_from_success(att)
+        else:
+            self.inner.record_failure()
+
+        return answer
+
+    def _think_deep_inner(self, message: str, intent: dict) -> str:
+        """
+        The actual reasoning pipeline. All systems fire in parallel.
         """
         self.deep_thinks += 1
         query = intent.get("query", message)
@@ -998,10 +1048,6 @@ class Genesis:
                 "have", "has", "had", "will", "been", "being", "there", "their"}
         query_terms = [w for w in query.lower().split() if w not in stop and len(w) > 2]
 
-        # PREDICTIVE PROCESSING — predict before answering, learn from error later
-        prediction = self.predictor.predict(
-            query_terms[0] if query_terms else query, self.base._beliefs)
-
         # FAILURE MEMORY — check if we've failed this kind of question before
         for qt in query_terms:
             warning = self.failure_memory.check_approach(qt, "answer")
@@ -1029,9 +1075,10 @@ class Genesis:
                 break
 
         # FREE ENERGY — decide: answer, search, or explore?
+        current_confidence = 0.5 if known_facts else 0.1
         fe_action = self.free_energy.select_action({
             "query": query,
-            "confidence": prediction.confidence,
+            "confidence": current_confidence,
             "has_beliefs": bool(known_facts),
             "has_relations": bool(relation_lines),
             "active_gaps": len([g for g in self.base.curiosity.gaps if not g.resolved]),
@@ -1043,7 +1090,6 @@ class Genesis:
             search_result = self.base._curious_lookup(clean_q)
             if search_result and "couldn't find" not in search_result.lower():
                 # PREDICTIVE PROCESSING — compare prediction to what we found
-                self.predictor.compare(prediction, search_result[:100])
                 return search_result
 
         # If free energy says ask human — do it
@@ -1075,7 +1121,6 @@ class Genesis:
                 clean_q = query_terms[-1] if query_terms else query
                 result = self.base._curious_lookup(clean_q)
                 if result and "couldn't find" not in result.lower():
-                    self.predictor.compare(prediction, result[:100])
                     return result
 
         # REASONING result (if meaningful)
@@ -1093,10 +1138,6 @@ class Genesis:
         for qt in query_terms:
             if any(qt in p.lower() for p in parts):
                 self.attention_economy.reward(qt, 3.0)
-
-        # PREDICTIVE PROCESSING — compare our answer to our prediction
-        if parts:
-            self.predictor.compare(prediction, parts[0][:100])
 
         # If we still have nothing — escalate through reasoning systems
         if not parts:
@@ -1125,7 +1166,6 @@ class Genesis:
             clean_query = query_terms[-1] if query_terms else query
             search_result = self.base._curious_lookup(clean_query)
             if search_result and "couldn't find" not in search_result.lower():
-                self.predictor.compare(prediction, search_result[:100])
                 self.experiential.attempt(query, "search", search_result[:100], 0.5)
                 self.experiential.learn_from_success(self.experiential.attempts[-1])
                 return search_result
