@@ -80,6 +80,9 @@ from klomboagi.reasoning.emotional_intel import EmotionalIntelligence
 from klomboagi.reasoning.meta_learning import MetaLearner
 from klomboagi.reasoning.belief_index import BeliefIndex
 from klomboagi.reasoning.dedup import BeliefDeduplicator, AnswerQualityScorer
+from klomboagi.reasoning.belief_strength import BeliefStrengthener
+from klomboagi.reasoning.context_answers import ContextualAnswerer
+from klomboagi.reasoning.auto_refresh import AutoRefresher
 
 
 @dataclass
@@ -376,6 +379,16 @@ class Genesis:
 
         # Answer Quality — rate own answers, track improvement
         self.answer_quality = AnswerQualityScorer()
+
+        # Belief Strengthener — multiple sources = higher confidence
+        self.belief_strengthener = BeliefStrengthener(
+            self.base._beliefs, self.base._evidence_counter)
+
+        # Contextual Answerer — same question, different context = different answer
+        self.contextual = ContextualAnswerer()
+
+        # Auto-Refresher — re-read Wikipedia for stale concepts
+        self.refresher = AutoRefresher(self)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(

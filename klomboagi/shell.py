@@ -292,6 +292,14 @@ def main():
             print(f"\n  Recent broadcasts: {recent}")
             print(f"  Stats: {genesis.workspace.stats()}\n")
             continue
+        if user_input.lower() in ("maintain", "maintenance"):
+            print(f"\n  {genesis.refresher.auto_maintain()}\n")
+            continue
+        if user_input.lower() in ("strength", "belief strength"):
+            stats = genesis.belief_strengthener.stats()
+            print(f"\n  Belief confidence: {stats['high_confidence']} high, "
+                  f"{stats['medium_confidence']} medium, {stats['low_confidence']} low\n")
+            continue
         if user_input.lower() in ("dedup", "deduplicate"):
             removed = genesis.deduplicator.deduplicate(genesis.base._beliefs)
             genesis.base.memory.save(genesis.base.memory_path)
