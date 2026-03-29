@@ -198,6 +198,17 @@ def main():
                 print(f"    {src}: {count}")
             print()
             continue
+        if user_input.lower() in ("transfers", "transfer"):
+            transfers = genesis.deep_transfer.scan_all()
+            print(f"\n{genesis.deep_transfer.report()}\n")
+            continue
+        if user_input.lower() in ("lessons", "learned"):
+            stats = genesis.experiential.stats()
+            print(f"\n  Experiential learning: {stats['total_attempts']} attempts, {stats['lessons_learned']} lessons")
+            for l in genesis.experiential.lessons[-5:]:
+                print(f"    {l.insight[:70]}")
+            print()
+            continue
         if user_input.lower() in ("modulators", "mods", "mode"):
             print(f"\n{genesis.modulator.explain()}\n")
             continue

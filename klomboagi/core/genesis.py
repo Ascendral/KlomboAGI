@@ -60,6 +60,9 @@ from klomboagi.reasoning.attention_economy import AttentionEconomy
 from klomboagi.reasoning.predictive import PredictiveProcessor
 from klomboagi.reasoning.constructive_memory import ConstructiveMemory
 from klomboagi.senses.llm_translator import LLMTranslator
+from klomboagi.reasoning.first_principles import FirstPrinciplesEngine
+from klomboagi.reasoning.experiential import ExperientialLearner
+from klomboagi.reasoning.deep_transfer import DeepTransferEngine
 
 
 @dataclass
@@ -280,6 +283,16 @@ class Genesis:
         # Disabled by default. Enable with: genesis.translator.enabled = True
         # genesis.translator.api_key = "sk-..."
         self.translator = LLMTranslator(enabled=False)
+
+        # First Principles — reason about things we've never seen
+        self.first_principles = FirstPrinciplesEngine(
+            self.base._beliefs, self.relations, self.activation)
+
+        # Experiential Learning — try, fail, analyze, adjust, retry
+        self.experiential = ExperientialLearner()
+
+        # Deep Transfer — apply techniques across domains
+        self.deep_transfer = DeepTransferEngine(self.relations, self.base._beliefs)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
@@ -975,20 +988,43 @@ class Genesis:
         if parts:
             self.predictor.compare(prediction, parts[0][:100])
 
-        # If we still have nothing — hypothesis → search → admit
+        # If we still have nothing — escalate through reasoning systems
         if not parts:
+            # 1. FIRST PRINCIPLES — reason from what we DO know
+            fp_result = self.first_principles.reason(query)
+            if fp_result.confidence > 0.3:
+                # Record as an experiential attempt
+                self.experiential.attempt(
+                    query, "first_principles", fp_result.answer, fp_result.confidence)
+                return fp_result.explain()
+
+            # 2. DEEP TRANSFER — apply knowledge from another domain
+            transfer = self.deep_transfer.apply_to_question(query, query_terms)
+            if transfer:
+                self.experiential.attempt(query, "deep_transfer", transfer, 0.4)
+                return transfer
+
+            # 3. HYPOTHESIS — educated guess
             hypothesis = self.hypothesizer.hypothesize(query, list(query_words) + query_terms)
             if hypothesis:
+                self.experiential.attempt(
+                    query, "hypothesis", hypothesis.explain(), hypothesis.confidence)
                 return hypothesis.explain()
 
+            # 4. SEARCH — go find out
             clean_query = query_terms[-1] if query_terms else query
             search_result = self.base._curious_lookup(clean_query)
             if search_result and "couldn't find" not in search_result.lower():
                 self.predictor.compare(prediction, search_result[:100])
+                self.experiential.attempt(query, "search", search_result[:100], 0.5)
+                self.experiential.learn_from_success(self.experiential.attempts[-1])
                 return search_result
 
+            # 5. ADMIT — honestly say we don't know
+            self.experiential.attempt(query, "none", "no answer", 0.0)
+            self.inner.record_failure()
             topic = " ".join(query_terms[:2]) if query_terms else "that"
-            return f"I don't know about {topic} yet. Teach me, or tell me to learn about it."
+            return f"I don't know about {topic} yet. I tried reasoning from what I know but couldn't reach an answer. Teach me."
 
         return " ".join(parts)
 
