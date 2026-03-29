@@ -1120,18 +1120,10 @@ class Genesis:
             "active_gaps": len([g for g in self.base.curiosity.gaps if not g.resolved]),
         })
 
-        # If free energy says search and we have nothing — search
-        if fe_action.action_type == "search" and not known_facts and not generated:
-            clean_q = query_terms[-1] if query_terms else query
-            search_result = self.base._curious_lookup(clean_q)
-            if search_result and "couldn't find" not in search_result.lower():
-                # PREDICTIVE PROCESSING — compare prediction to what we found
-                return search_result
-
-        # If free energy says ask human — do it
-        if fe_action.action_type == "ask_human" and not known_facts and not generated:
-            topic = " ".join(query_terms[:2]) if query_terms else "that"
-            return f"I don't know about {topic} yet. Can you teach me?"
+        # Don't return early for search/ask_human — let the compose pipeline
+        # and escalation chain handle it. The system should try to auto-study
+        # before giving up. A human would go to the library, not immediately
+        # say "I don't know."
 
         # KNOWLEDGE RETRIEVAL — search stored knowledge (from studying/reading)
         # This is the "I read a book about this" recall
@@ -1233,19 +1225,36 @@ class Genesis:
                     query, "hypothesis", hypothesis.explain(), hypothesis.confidence)
                 return hypothesis.explain()
 
-            # 4. SEARCH — go find out
-            clean_query = query_terms[-1] if query_terms else query
+            # 4. GO TO THE LIBRARY — study the topic, THEN answer
+            # Like a human: "I don't know, let me look it up"
+            study_topic = " ".join(query_terms[:3]) if query_terms else query
+            study_result = self.read_and_learn(study_topic)
+            if "Could not read" not in study_result:
+                # Now try answering again from what we just learned
+                retrieved = []
+                for qt in query_terms:
+                    for fact in self.base.memory.concepts.get(qt, {}).get("facts", [])[:3]:
+                        if (len(fact) > 20 and fact not in retrieved
+                                and any(t in fact.lower() for t in query_terms)):
+                            retrieved.append(fact)
+                if retrieved:
+                    self.experiential.attempt(query, "study", retrieved[0][:100], 0.6)
+                    self.experiential.learn_from_success(self.experiential.attempts[-1])
+                    self.inner.record_learning(len(retrieved))
+                    return " ".join(retrieved[:3])
+
+            # 5. Fallback: raw search
+            clean_query = " ".join(query_terms[:2]) if query_terms else query
             search_result = self.base._curious_lookup(clean_query)
             if search_result and "couldn't find" not in search_result.lower():
                 self.experiential.attempt(query, "search", search_result[:100], 0.5)
-                self.experiential.learn_from_success(self.experiential.attempts[-1])
                 return search_result
 
-            # 5. ADMIT — honestly say we don't know
+            # 6. ADMIT — honestly say we don't know
             self.experiential.attempt(query, "none", "no answer", 0.0)
             self.inner.record_failure()
             topic = " ".join(query_terms[:2]) if query_terms else "that"
-            return f"I don't know about {topic} yet. I tried reasoning from what I know but couldn't reach an answer. Teach me."
+            return f"I don't know about {topic} yet. I tried looking it up but couldn't find a clear answer. Teach me."
 
         return " ".join(parts)
 
@@ -2296,7 +2305,7 @@ class Genesis:
                     break
 
         if not causes:
-            # Last resort: gather beliefs about the concept
+            # Check stored knowledge first
             relevant = [b for s, b in self.base._beliefs.items()
                        if hasattr(b, 'subject') and clean in b.subject]
             if relevant:
@@ -2304,7 +2313,29 @@ class Genesis:
                 for b in relevant[:3]:
                     lines.append(f"  {b.statement.capitalize()}.")
                 return "\n".join(lines)
-            return f"I don't know why {clean} happens. Teach me what causes it?"
+
+            # Check concept store (studied knowledge)
+            concept_facts = self.base.memory.concepts.get(clean, {}).get("facts", [])
+            if concept_facts:
+                lines = [f"From what I've studied about {clean}:"]
+                for f in concept_facts[:3]:
+                    if isinstance(f, str) and len(f) > 20:
+                        lines.append(f"  {f[:150]}")
+                return "\n".join(lines)
+
+            # GO TO THE LIBRARY — study it, then answer
+            study_result = self.read_and_learn(clean)
+            if "Could not read" not in study_result:
+                # Check what we just learned
+                new_facts = self.base.memory.concepts.get(clean, {}).get("facts", [])
+                if new_facts:
+                    lines = [f"I just looked up {clean}:"]
+                    for f in new_facts[:3]:
+                        if isinstance(f, str) and len(f) > 20:
+                            lines.append(f"  {f[:150]}")
+                    return "\n".join(lines)
+
+            return f"I couldn't find why {clean} happens, even after looking it up. Can you teach me?"
 
         lines = [f"Why {concept}? Because:"]
         for r in causes:
