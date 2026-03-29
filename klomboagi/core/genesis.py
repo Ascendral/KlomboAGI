@@ -875,6 +875,14 @@ class Genesis:
         self.deep_thinks += 1
         query = intent.get("query", message)
 
+        # Extract query terms early — used throughout the pipeline
+        stop = {"what", "is", "a", "an", "the", "how", "why", "does", "do",
+                "can", "about", "you", "your", "think", "know", "tell", "me",
+                "there", "have", "has", "had", "will", "been", "being",
+                "are", "was", "were", "like", "would", "should", "could"}
+        query_terms = [w.lower().strip("?.,!") for w in query.split()
+                       if w.lower().strip("?.,!") not in stop and len(w) > 2]
+
         # ── Specialized question handlers (short-circuit) ──
 
         # Identity: questions about self
@@ -1012,11 +1020,12 @@ class Genesis:
         for concept in focus_result.focus_concepts:
             self.working_memory.attend(concept, "focus", "attention")
 
-        # SEARCH FIRST → go search before answering from beliefs
+        # SEARCH FIRST → study the topic (don't just search — ABSORB it)
+        # Like going to the library, not just Googling and forgetting
         if decision.mode == BehaviorMode.SEARCH_FIRST and not known_facts:
-            search_result = self.base._curious_lookup(query)
-            if search_result and "couldn't find" not in search_result.lower():
-                return f"{prefix}{search_result}"
+            study_topic = " ".join(query_terms[:3]) if query_terms else query
+            self.read_and_learn(study_topic)
+            # Don't return early — let the compose pipeline retrieve from what was absorbed
 
         # SWITCH APPROACH → try the question from a different angle
         if decision.mode == BehaviorMode.SWITCH_APPROACH:
@@ -1073,11 +1082,7 @@ class Genesis:
 
         # ── ALL SYSTEMS FIRE — compose from everything ──
 
-        stop = {"is", "a", "an", "the", "what", "who", "how", "why", "where",
-                "when", "are", "was", "do", "does", "can", "about", "tell", "me",
-                "you", "your", "think", "know", "like", "would", "should", "could",
-                "have", "has", "had", "will", "been", "being", "there", "their"}
-        query_terms = [w for w in query.lower().split() if w not in stop and len(w) > 2]
+        # query_terms already defined at top of _think_deep_inner
 
         # FAILURE MEMORY — check if we've failed this kind of question before
         for qt in query_terms:
@@ -1175,16 +1180,9 @@ class Genesis:
                 if r_text and not any(r_text.lower() in p.lower() for p in parts):
                     parts.append(r_text.capitalize() + ".")
 
-        # If NOTHING produced an answer — obey free energy decision
-        if not parts:
-            if fe_action.action_type == "ask_human":
-                topic = " ".join(query_terms[:2]) if query_terms else "that"
-                return f"I don't know about {topic} yet. Can you teach me?"
-            if fe_action.action_type in ("search", "explore"):
-                clean_q = query_terms[-1] if query_terms else query
-                result = self.base._curious_lookup(clean_q)
-                if result and "couldn't find" not in result.lower():
-                    return result
+        # If NOTHING produced an answer — DON'T give up.
+        # Go to the library first (escalation chain below).
+        # Never say "teach me" before trying to learn on our own.
 
         # REASONING result (if meaningful)
         if (reasoning_result and len(reasoning_result) > 10
