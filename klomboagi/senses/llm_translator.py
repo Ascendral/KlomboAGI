@@ -113,7 +113,7 @@ class LLMTranslator:
             api_key = os.getenv("OPENAI_API_KEY", "")
             if api_key:
                 provider = provider or "openai"
-                model = model or "gpt-4o-mini"
+                model = model or "gpt-5.4"
                 enabled = True
             else:
                 api_key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -123,7 +123,7 @@ class LLMTranslator:
                     enabled = True
 
         self.api_key = api_key
-        self.model = model or "gpt-4o-mini"
+        self.model = model or "gpt-5.4"
         self.provider = provider or ("openai" if "sk-" in api_key and not api_key.startswith("sk-ant") else "anthropic")
         self.enabled = enabled
         self.audit_log: list[AuditEntry] = []
