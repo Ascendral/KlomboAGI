@@ -129,6 +129,14 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
+        # Try grid structure rules (dividers, quadrants, split+combine)
+        from klomboagi.reasoning.arc_grid_ops import learn_grid_rule
+        grid_rule = learn_grid_rule(train)
+        if grid_rule is not None:
+            result = grid_rule(test_input)
+            if result is not None:
+                return result
+
         # Try DSL program synthesis (composable primitives)
         from klomboagi.reasoning.arc_dsl_v2 import synthesize
         synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=3000)
