@@ -101,6 +101,12 @@ class SmartARCSolver(ARCSolverV18):
             except:
                 continue
 
+        # LAST RESORT: LLM-guided program proposal (expensive — API call)
+        from klomboagi.reasoning.arc_llm_solver import solve_with_llm
+        llm_result = solve_with_llm(train, test_input)
+        if llm_result is not None:
+            return llm_result
+
         return None
 
 
