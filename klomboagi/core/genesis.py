@@ -69,6 +69,9 @@ from klomboagi.reasoning.multi_step import MultiStepSolver
 from klomboagi.reasoning.self_improve import SelfImprover
 from klomboagi.reasoning.inference_engine import GlobalInferenceEngine, QuestionDecomposer, BeliefPropagator
 from klomboagi.reasoning.cost_tracker import CostTracker
+from klomboagi.reasoning.spatial import SpatialReasoner
+from klomboagi.reasoning.goal_autonomy import GoalAutonomy
+from klomboagi.reasoning.pattern_gen import PatternGeneralizer
 
 
 @dataclass
@@ -322,6 +325,15 @@ class Genesis:
 
         # Cost Tracker — economics teaches better than warnings
         self.cost_tracker = CostTracker()
+
+        # Spatial Reasoning — positions, sizes, containment
+        self.spatial = SpatialReasoner()
+
+        # Goal Autonomy — sets own goals and pursues them
+        self.goal_autonomy = GoalAutonomy(self)
+
+        # Pattern Generalization — discovers abstract principles
+        self.pattern_gen = PatternGeneralizer(self.relations, self.base._beliefs)
 
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
@@ -822,6 +834,13 @@ class Genesis:
         if dp_result.system_used == 1 and dp_result.system1_confidence >= 0.6:
             # System 1 answered confidently — instant response, no System 2 needed
             return dp_result.answer
+
+        # Spatial questions: "is X inside Y?", "is X larger than Y?"
+        spatial_words = ("inside", "contain", "larger", "bigger", "smaller", "above", "below")
+        if any(w in query.lower() for w in spatial_words):
+            spatial_answer = self.spatial.reason(query)
+            if "need more" not in spatial_answer:
+                return spatial_answer
 
         # Counterfactual questions: "what if there were no gravity?"
         if query.lower().startswith("what if") or query.lower().startswith("without"):

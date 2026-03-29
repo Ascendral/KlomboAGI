@@ -205,6 +205,19 @@ def main():
                 print(f"    {src}: {count}")
             print()
             continue
+        if user_input.lower() in ("autonomous", "auto-goals", "formulate"):
+            goals = genesis.goal_autonomy.formulate_goals()
+            print(f"\n{genesis.goal_autonomy.report()}\n")
+            continue
+        if user_input.lower() == "pursue":
+            result = genesis.goal_autonomy.pursue_next()
+            print(f"\n  {result}\n")
+            print(f"{genesis.goal_autonomy.report()}\n")
+            continue
+        if user_input.lower() in ("principles", "patterns", "generalize"):
+            principles = genesis.pattern_gen.discover_all()
+            print(f"\n{genesis.pattern_gen.report()}\n")
+            continue
         if user_input.lower() in ("costs", "cost", "efficiency"):
             print(f"\n{genesis.cost_tracker.report()}\n")
             continue
