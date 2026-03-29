@@ -93,6 +93,24 @@ class SmartARCSolver(ARCSolverV18):
             except:
                 continue
 
+        # Store scored strategies on instance for subclass use
+        self._last_scored = scored
+        return None
+
+    def solve_unvalidated_fallback(self, train, test_input):
+        """
+        Last resort: return first non-None result from any strategy,
+        without cross-validation. Call ONLY after all verified methods fail.
+        """
+        scored = getattr(self, '_last_scored', None)
+        if scored is None:
+            # Need to rebuild scored list — just try everything
+            all_strategies = []
+            for attr in dir(self):
+                if attr.startswith('_try_') and callable(getattr(self, attr)):
+                    all_strategies.append((attr, getattr(self, attr)))
+            scored = [(1, n, f) for n, f in all_strategies]
+
         for score, sname, sfn in scored:
             try:
                 result = sfn(train, test_input)
@@ -100,26 +118,21 @@ class SmartARCSolver(ARCSolverV18):
                     return result
             except:
                 continue
-
-        # LAST RESORT: LLM-guided program proposal (expensive — API call)
-        from klomboagi.reasoning.arc_llm_solver import solve_with_llm
-        llm_result = solve_with_llm(train, test_input)
-        if llm_result is not None:
-            return llm_result
-
         return None
 
 
 class SmartARCSolverV2(SmartARCSolver):
-    """V2: targeted strategies for the biggest unsolved categories."""
+    """V2: full verified pipeline, unvalidated fallback only as last resort."""
 
     def solve(self, train, test_input):
-        # Try parent first (106 hand-coded strategies)
+        # ── Phase 1: 106 hand-coded strategies (cross-validated) ──────────────
         result = super().solve(train, test_input)
         if result is not None:
             return result
 
-        # Try per-cell rule learning (very fast, handles many same-size tasks)
+        # ── Phase 2: Learned rule families (all verified) ─────────────────────
+
+        # Per-cell color/neighborhood rules
         from klomboagi.reasoning.arc_cell_rules import learn_cell_rule
         cell_rule = learn_cell_rule(train)
         if cell_rule is not None:
@@ -127,7 +140,7 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
-        # Try object-level rule learning (extract, filter, recolor objects)
+        # Object-level transformations (extract, filter, recolor)
         from klomboagi.reasoning.arc_object_rules import learn_object_rule
         obj_rule = learn_object_rule(train)
         if obj_rule is not None:
@@ -135,7 +148,7 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
-        # Try local pattern matching (neighborhood → output)
+        # Local neighborhood pattern matching
         from klomboagi.reasoning.arc_pattern_match import learn_pattern_rule
         pattern_rule = learn_pattern_rule(train)
         if pattern_rule is not None:
@@ -143,7 +156,7 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
-        # Try extraction rules (for tasks where output is smaller than input)
+        # Extraction rules (output is sub-region of input)
         from klomboagi.reasoning.arc_extraction import learn_extraction_rule
         extract_rule = learn_extraction_rule(train)
         if extract_rule is not None:
@@ -151,7 +164,7 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
-        # Try grid structure rules (dividers, quadrants, split+combine)
+        # Grid structure rules (dividers, quadrant combine)
         from klomboagi.reasoning.arc_grid_ops import learn_grid_rule
         grid_rule = learn_grid_rule(train)
         if grid_rule is not None:
@@ -159,22 +172,25 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
-        # Try DSL program synthesis (composable primitives)
+        # Advanced families (symmetry, propagate, sort, draw lines)
+        from klomboagi.reasoning.arc_advanced import learn_advanced_rule
+        adv_rule = learn_advanced_rule(train)
+        if adv_rule is not None:
+            result = adv_rule(test_input)
+            if result is not None:
+                return result
+
+        # DSL program synthesis (composable primitives, depth 1-3)
         from klomboagi.reasoning.arc_dsl_v2 import synthesize
-        synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=3000)
+        synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=2000)
         if synth_result is not None:
             return synth_result
 
-        # V2 targeted strategies
+        # ── Phase 3: V2 hand-coded strategies (cross-validated) ───────────────
         v2 = [
             self._try_paint_shape_with_color,
-            self._try_grid_diff_overlay,
-            self._try_stamp_template,
-            self._try_color_at_grid_intersections,
             self._try_separate_and_combine,
-            self._try_replicate_subgrid,
             self._try_count_unique_colors,
-            self._try_border_color_determines,
             self._try_fill_holes_in_objects,
             self._try_extend_pattern_to_edge,
             self._try_draw_crosshairs,
@@ -188,7 +204,15 @@ class SmartARCSolverV2(SmartARCSolver):
                     return r
             except:
                 continue
-        return None
+
+        # ── Phase 4: LLM refinement loop (verified) ───────────────────────────
+        from klomboagi.reasoning.arc_llm_solver import solve_with_llm
+        llm_result = solve_with_llm(train, test_input, max_attempts=5)
+        if llm_result is not None:
+            return llm_result
+
+        # ── Phase 5: Unvalidated fallback (last resort) ───────────────────────
+        return self.solve_unvalidated_fallback(train, test_input)
 
     def _try_paint_shape_with_color(self, train, test_input):
         """A shape outline exists, fill interior with a specific color found elsewhere."""
