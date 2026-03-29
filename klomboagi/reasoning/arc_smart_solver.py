@@ -129,6 +129,14 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
+        # Try local pattern matching (neighborhood → output)
+        from klomboagi.reasoning.arc_pattern_match import learn_pattern_rule
+        pattern_rule = learn_pattern_rule(train)
+        if pattern_rule is not None:
+            result = pattern_rule(test_input)
+            if result is not None:
+                return result
+
         # Try extraction rules (for tasks where output is smaller than input)
         from klomboagi.reasoning.arc_extraction import learn_extraction_rule
         extract_rule = learn_extraction_rule(train)
