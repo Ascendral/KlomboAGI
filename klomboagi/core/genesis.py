@@ -826,8 +826,8 @@ class Genesis:
         # Run the actual reasoning
         answer = self._think_deep_inner(message, intent)
 
-        # PREDICTIVE: compare prediction to actual answer
-        self.predictor.compare(prediction, answer[:100])
+        # PREDICTIVE: compare prediction to FULL answer (not truncated)
+        self.predictor.compare(prediction, answer)
 
         # EXPERIENTIAL: record this attempt
         has_answer = ("don't know" not in answer.lower()

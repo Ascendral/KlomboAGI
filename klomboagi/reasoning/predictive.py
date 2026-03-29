@@ -107,20 +107,45 @@ class PredictiveProcessor:
         """
         Compare prediction to reality. Compute weighted error.
         """
-        # Simple error: how different are they?
+        # How different are prediction and actual?
         if not prediction.predicted or prediction.predicted == "unknown":
-            error = 1.0  # Complete miss — we had no prediction
-        elif prediction.predicted.lower() in actual.lower() or actual.lower() in prediction.predicted.lower():
-            error = 0.0  # Match
+            error = 1.0  # No prediction at all
+        elif prediction.predicted.lower() in actual.lower():
+            error = 0.0  # Exact substring match
         else:
-            # Partial match based on word overlap
-            pred_words = set(prediction.predicted.lower().split())
-            actual_words = set(actual.lower().split())
-            if pred_words and actual_words:
-                overlap = len(pred_words & actual_words) / max(len(pred_words), len(actual_words))
-                error = 1.0 - overlap
+            # Check if we got an answer about the RIGHT CONCEPT
+            # (even if the words differ, did we answer about the same thing?)
+            concept = prediction.concept.lower()
+            actual_lower = actual.lower()
+
+            # If the concept appears in the answer AND the answer isn't "don't know"
+            if concept in actual_lower and "don't know" not in actual_lower:
+                # We answered about the right thing — partial success
+                # Check word overlap for precision
+                stop = {"is", "a", "an", "the", "of", "and", "or", "in", "to", "for",
+                        "with", "that", "this", "by", "from", "on", "at", "as", "it",
+                        "causes", "enables", "part", "contains", "means", "uses"}
+                pred_words = set(prediction.predicted.lower().split()) - stop
+                actual_words = set(actual_lower.split()) - stop
+
+                if pred_words:
+                    overlap = len(pred_words & actual_words) / len(pred_words)
+                    error = max(0.0, 0.5 - overlap)  # Base error 0.5 (right concept), reduced by overlap
+                else:
+                    error = 0.3  # Right concept, no words to compare
+            elif "don't know" in actual_lower:
+                error = 1.0  # Complete miss
             else:
-                error = 1.0
+                # Wrong concept or no concept match
+                stop = {"is", "a", "an", "the", "of", "and", "or", "in", "to", "for",
+                        "with", "that", "this", "by", "from", "on", "at", "as", "it"}
+                pred_words = set(prediction.predicted.lower().split()) - stop
+                actual_words = set(actual_lower.split()) - stop
+                if pred_words and actual_words:
+                    overlap = len(pred_words & actual_words) / len(pred_words)
+                    error = 1.0 - overlap
+                else:
+                    error = 1.0
 
         # Weighted error = error * precision
         weighted = error * prediction.precision
@@ -164,11 +189,15 @@ class PredictiveProcessor:
         self._domain_precision[key] = new
 
     def accuracy(self) -> float:
-        """Overall prediction accuracy."""
+        """Overall prediction accuracy. Correct = error < 0.5 (right concept + some overlap)."""
         if not self._prediction_history:
             return 0.0
-        correct = sum(1 for pe in self._prediction_history if pe.error_magnitude < 0.3)
-        return correct / len(self._prediction_history)
+        correct = sum(1 for pe in self._prediction_history
+                     if pe.error_magnitude < 0.5 and pe.prediction.predicted != "unknown")
+        # Only count predictions where we actually predicted something
+        predicted = sum(1 for pe in self._prediction_history
+                       if pe.prediction.predicted != "unknown")
+        return correct / max(1, predicted)
 
     def stats(self) -> dict:
         return {
