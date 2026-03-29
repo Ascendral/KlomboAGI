@@ -257,8 +257,11 @@ class Baby:
         # 2. Command: "learn", "search", "look up", "status"
         command_words = {"learn ": "learn", "look up ": "lookup", "search ": "search",
                          "search for ": "search", "find out about ": "search",
-                         "read ": "read", "forget ": "forget", "what do you know": "status",
+                         "read ": "read", "forget ": "forget",
                          "show me": "show", "status": "status"}
+        # "what do you know" only maps to status if it's the WHOLE message
+        if msg in ("what do you know", "what do you know?"):
+            return {"type": "command", "command": "status", "target": "", "raw": message}
         for phrase, cmd in command_words.items():
             if msg.startswith(phrase):
                 rest = msg[len(phrase):].strip()
