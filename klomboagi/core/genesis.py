@@ -1164,49 +1164,79 @@ class Genesis:
             if len(fact) > 20 and fact not in retrieved_knowledge:
                 retrieved_knowledge.append(fact)
 
-        # COMPOSE — use retrieved knowledge, constructive memory, generator, or beliefs
+        # COMPOSE — synthesize a natural answer, not a fact dump
+        # Priority: retrieved knowledge > constructive memory > generator > beliefs
         parts = []
+        _seen_text = ""  # all added text concatenated for substring check
 
-        # Retrieved knowledge from studying takes priority — it's what we "read"
+        def _add_unique(text: str) -> None:
+            """Add text only if it's not already covered by existing parts."""
+            nonlocal _seen_text
+            low = text.lower().strip().rstrip(".")
+            if len(low) < 10:
+                return
+            # Skip if the core content (first 40 chars) already appears
+            core = low[:40]
+            if core in _seen_text:
+                return
+            # Skip if >50% of significant words already appear
+            stop = {"is", "a", "an", "the", "of", "in", "to", "for", "and", "or",
+                    "by", "as", "on", "at", "from", "with", "that", "this"}
+            sig_words = [w for w in low.split() if w not in stop and len(w) > 2]
+            if sig_words:
+                already_present = sum(1 for w in sig_words if w in _seen_text)
+                if already_present > 0.5 * len(sig_words):
+                    return
+            _seen_text += " " + low
+            parts.append(text)
+
+        # 1. Retrieved knowledge from studying (highest quality — full sentences)
         if retrieved_knowledge:
-            parts.extend(retrieved_knowledge[:3])
+            for rk in retrieved_knowledge[:3]:
+                _add_unique(rk)
 
-        if constructed and constructed.confidence > 0.2 and generated:
-            # BOTH available — definition first, then relations
-            parts.append(constructed.reconstruction)
-            # Add generated only if it adds NEW info not in the definition
-            if not any(s in constructed.reconstruction.lower() for s in generated.lower().split(".")[:1]):
-                parts.append(generated)
-        elif constructed and constructed.confidence > 0.2:
-            parts.append(constructed.reconstruction)
-        elif generated:
-            parts.append(generated)
-        elif known_facts:
-            # Synthesize a natural answer from beliefs, not a raw dump
-            seen_preds = set()
+        # 2. Definition first, then explanation
+        # A "what is X?" answer should lead with the definition.
+        if not parts:
+            # Find the best definition (belief with "is" that matches the query)
+            best_definition = None
             for f in known_facts[:5]:
                 b = self.base._beliefs.get(f)
-                if b and hasattr(b, 'predicate') and b.predicate and len(b.predicate) < 80:
-                    pred = b.predicate.strip()
-                    if pred in seen_preds:
-                        continue
-                    seen_preds.add(pred)
-                    parts.append(f"{b.statement.capitalize()}.")
-            # Also weave in relations if they add new info
-            for r_line in relation_lines[:3]:
-                r_text = r_line.strip()
-                if r_text and not any(r_text.lower() in p.lower() for p in parts):
-                    parts.append(r_text.capitalize() + ".")
+                if b and hasattr(b, 'subject') and hasattr(b, 'predicate'):
+                    # Prefer beliefs where the subject matches query terms
+                    if any(qt in b.subject.lower() for qt in query_terms):
+                        if b.predicate and len(b.predicate) > 5 and len(b.predicate) < 80:
+                            # Prefer "is" definitions over "uses/causes" relations
+                            first_word = b.predicate.split()[0].lower() if b.predicate else ""
+                            if first_word not in self.base._SVO_VERB_STARTS:
+                                best_definition = f"{b.statement.capitalize()}."
+                                break
+
+            if best_definition:
+                _add_unique(best_definition)
+                # Add generated explanation as context (if it adds info)
+                if generated:
+                    _add_unique(generated)
+            elif generated:
+                _add_unique(generated)
+            elif constructed and constructed.confidence > 0.2:
+                first_sentence = constructed.reconstruction.split(". ")[0].strip()
+                if first_sentence:
+                    _add_unique(first_sentence + ".")
+            elif known_facts:
+                for f in known_facts[:2]:
+                    b = self.base._beliefs.get(f)
+                    if b and hasattr(b, 'predicate') and b.predicate and len(b.predicate) < 80:
+                        _add_unique(f"{b.statement.capitalize()}.")
 
         # If NOTHING produced an answer — DON'T give up.
         # Go to the library first (escalation chain below).
         # Never say "teach me" before trying to learn on our own.
 
-        # REASONING result (if meaningful)
+        # REASONING result (if meaningful and adds new info)
         if (reasoning_result and len(reasoning_result) > 10
-                and "direct question" not in reasoning_result.lower()
-                and reasoning_result not in str(parts)):
-            parts.append(reasoning_result[:70] + ".")
+                and "direct question" not in reasoning_result.lower()):
+            _add_unique(reasoning_result.strip().rstrip(".") + ".")
 
         # WORKSPACE — submit the answer to global broadcast for other systems
         if parts:
@@ -1266,7 +1296,8 @@ class Genesis:
             topic = " ".join(query_terms[:2]) if query_terms else "that"
             return f"I don't know about {topic} yet, even after looking it up. Teach me."
 
-        return " ".join(parts)
+        # Cap at 3 parts for clean, focused answers
+        return " ".join(parts[:3])
 
     def _parse_relational_question(self, query: str) -> dict | None:
         """
