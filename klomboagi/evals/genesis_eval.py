@@ -196,14 +196,17 @@ def _self_awareness_evals(g) -> list[EvalResult]:
 
 def _learning_evals(g) -> list[EvalResult]:
     """Does it actually learn from new input?"""
-    # Use a truly novel concept that can't exist in any curriculum
+    # Use a unique concept with timestamp to guarantee novelty
+    import time
+    unique_id = str(int(time.time() * 1000))[-6:]
+    concept = f"xorplix{unique_id}"
     before = len(g.base._beliefs)
-    g.hear("a zorgblatt is a crystalline entity from tau ceti")
+    g.hear(f"a {concept} is a crystalline entity from tau ceti")
     after = len(g.base._beliefs)
     learned = after > before
 
-    response = g.hear("what is a zorgblatt?")
-    recalls = "crystalline" in response.lower() or "zorgblatt" in response.lower()
+    response = g.hear(f"what is a {concept}?")
+    recalls = "crystalline" in response.lower() or concept in response.lower()
 
     return [
         EvalResult("Learns from teaching", "learning", learned,

@@ -1133,8 +1133,28 @@ class Genesis:
             topic = " ".join(query_terms[:2]) if query_terms else "that"
             return f"I don't know about {topic} yet. Can you teach me?"
 
-        # COMPOSE — use constructive memory if available, else generator, else beliefs
+        # KNOWLEDGE RETRIEVAL — search stored knowledge (from studying/reading)
+        # This is the "I read a book about this" recall
+        retrieved_knowledge = []
+        for qt in query_terms:
+            concept_data = self.base.memory.concepts.get(qt, {})
+            for fact in concept_data.get("facts", [])[:3]:
+                if (len(fact) > 20 and fact not in retrieved_knowledge
+                        and any(t in fact.lower() for t in query_terms)):
+                    retrieved_knowledge.append(fact)
+        # Also check the full query phrase
+        full_phrase = " ".join(query_terms)
+        concept_data = self.base.memory.concepts.get(full_phrase, {})
+        for fact in concept_data.get("facts", [])[:3]:
+            if len(fact) > 20 and fact not in retrieved_knowledge:
+                retrieved_knowledge.append(fact)
+
+        # COMPOSE — use retrieved knowledge, constructive memory, generator, or beliefs
         parts = []
+
+        # Retrieved knowledge from studying takes priority — it's what we "read"
+        if retrieved_knowledge:
+            parts.extend(retrieved_knowledge[:3])
 
         if constructed and constructed.confidence > 0.2 and generated:
             # BOTH available — definition first, then relations
@@ -1719,54 +1739,55 @@ class Genesis:
         sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
         lines.append(f"Found {len(sentences)} sentences.")
 
-        # 3. Extract facts
+        # 3. ABSORB — like reading a book.
+        # Store sentences as retrievable knowledge, keyed by topic words.
+        # Don't try to parse into triples — just understand and store.
         facts_learned = 0
         relations_learned = 0
-
         r_stats_before = self.relations.stats()["total_relations"]
 
+        topic = source.split("/")[-1].replace("_", " ").lower()
+
+        # Store the topic as a concept with its full knowledge
+        if topic not in self.base.memory.concepts:
+            self.base.memory.concepts[topic] = {"facts": [], "taught_by": "document"}
+
+        # Index sentences by the concepts they mention — this is "reading"
         for sentence in sentences[:100]:
-            # Use NLU for structured extraction
-            triples = self.nlu.parse(sentence)
-            for triple in triples:
-                subj, pred = triple.as_belief()
-                subj = subj.strip().lower()
-                pred = pred.strip().lower()
+            clean = sentence.strip()
+            if len(clean) < 20 or len(clean) > 200:
+                continue
 
-                # Quality filter
-                subj_words = subj.split()
-                if (len(subj) > 2 and len(pred) > 5 and len(pred) <= 80
-                        and len(subj_words) <= 5
-                        and subj_words[0] not in ("it", "this", "that", "which", "they")):
-                    statement = f"{subj} is {pred}"
-                    if statement not in self.base._beliefs:
-                        self.base._evidence_counter += 1
-                        belief = Belief(
-                            statement=statement,
-                            truth=TruthValue.from_single_observation(True),
-                            stamp=EvidenceStamp.new(self.base._evidence_counter),
-                            subject=subj, predicate=pred, source="document",
-                        )
-                        self.base._beliefs[statement] = belief
-                        self.base.memory.beliefs[statement] = belief.to_dict()
-                        self.base.graph.add(subj, is_a=[pred])
-                        if subj not in self.base.memory.concepts:
-                            self.base.memory.concepts[subj] = {"facts": [], "taught_by": "document"}
-                        self.base.memory.concepts[subj]["facts"].append(pred)
-                        facts_learned += 1
+            # Store clean sentences as facts of the topic
+            if clean not in self.base.memory.concepts[topic]["facts"]:
+                self.base.memory.concepts[topic]["facts"].append(clean)
 
-                # Extract relation if applicable
-                rel = triple.as_relation()
-                if rel:
-                    rel_type_map = {
-                        "causes": RelationType.CAUSES, "requires": RelationType.REQUIRES,
-                        "part_of": RelationType.PART_OF, "uses": RelationType.USES,
-                        "enables": RelationType.ENABLES, "measures": RelationType.MEASURES,
-                    }
-                    rt = rel_type_map.get(rel[1])
-                    if rt:
-                        self.relations.add(rel[0], rt, rel[2], confidence=0.5, domain="document")
+            # Also index by every significant word in the sentence
+            words = set(re.findall(r'\b([a-z]{4,})\b', clean.lower())) - self.base.COMMON_WORDS
+            for word in words:
+                if word not in self.base.memory.concepts:
+                    self.base.memory.concepts[word] = {"facts": [], "taught_by": "document"}
+                # Store max 5 sentences per concept to avoid bloat
+                if (clean not in self.base.memory.concepts[word]["facts"]
+                        and len(self.base.memory.concepts[word]["facts"]) < 5):
+                    self.base.memory.concepts[word]["facts"].append(clean)
 
+            # Extract simple "X is Y" definitions as proper beliefs
+            m = re.match(
+                r'^(?:A |An |The )?([A-Z][\w\s]{1,25}?)\s+(?:is|are)\s+'
+                r'(?:a |an |the )?(.{5,80}?)\.?$',
+                clean
+            )
+            if m:
+                subj = m.group(1).strip().lower()
+                pred = m.group(2).strip().lower()
+                bad_starts = {"it", "this", "that", "which", "they", "there", "however"}
+                if subj.split()[0] not in bad_starts:
+                    self._store_learned_fact(subj, pred, "document")
+                    facts_learned += 1
+
+        # Extract relations from the first 2000 chars
+        self._extract_relations(content[:2000])
         r_stats_after = self.relations.stats()["total_relations"]
         relations_learned = r_stats_after - r_stats_before
 
@@ -1792,6 +1813,31 @@ class Genesis:
                 lines.append(f"  {stmt}")
 
         return "\n".join(lines)
+
+    def _store_learned_fact(self, subj: str, pred: str, source: str) -> None:
+        """Store a fact as a belief + knowledge graph entry."""
+        # Determine statement format based on predicate
+        first_word = pred.split()[0].lower() if pred else ""
+        if first_word in self.base._SVO_VERB_STARTS:
+            statement = f"{subj} {pred}"
+        else:
+            statement = f"{subj} is {pred}"
+
+        if statement not in self.base._beliefs:
+            self.base._evidence_counter += 1
+            belief = Belief(
+                statement=statement,
+                truth=TruthValue.from_single_observation(True),
+                stamp=EvidenceStamp.new(self.base._evidence_counter),
+                subject=subj, predicate=pred, source=source,
+            )
+            self.base._beliefs[statement] = belief
+            self.base.memory.beliefs[statement] = belief.to_dict()
+            self.base.graph.add(subj, is_a=[pred])
+            if subj not in self.base.memory.concepts:
+                self.base.memory.concepts[subj] = {"facts": [], "taught_by": source}
+            if pred not in self.base.memory.concepts[subj]["facts"]:
+                self.base.memory.concepts[subj]["facts"].append(pred)
 
     # ── Learning Summary ──
 
@@ -2101,16 +2147,10 @@ class Genesis:
 
     def _find_belief_connection(self, a: str, b: str) -> str | None:
         """
-        Find connections between two concepts through shared beliefs.
+        Find connections between two concepts through ALL knowledge:
+        both formal beliefs AND stored concept facts (from studying).
 
-        If we know:
-          "chlorophyll" appears in belief about "plants"
-          "plants" appears in belief about "photosynthesis"
-          "photosynthesis produces oxygen as a byproduct" (mentions "oxygen")
-        Then chlorophyll → plants → photosynthesis → oxygen.
-
-        Uses BFS through beliefs, max depth 4.
-        Extracts significant words from beliefs, not just registered concepts.
+        Uses BFS through shared sentences, max depth 4.
         """
         a_lower = a.lower()
         b_lower = b.lower()
@@ -2118,33 +2158,25 @@ class Genesis:
         common = {"is", "a", "an", "the", "of", "in", "to", "for", "and", "or",
                   "by", "as", "on", "at", "from", "with", "that", "this", "how",
                   "also", "its", "are", "was", "were", "be", "been", "being",
-                  "not", "but", "found", "needed", "about", "between", "into"}
+                  "not", "but", "found", "needed", "about", "between", "into",
+                  "such", "which", "these", "those", "than", "most", "some",
+                  "other", "more", "only", "does", "used", "using", "have", "has"}
 
-        # Build adjacency by extracting all significant words from each belief
+        # Build adjacency from ALL knowledge sources
         concept_links: dict[str, set[str]] = {}
-        belief_index: dict[str, list[str]] = {}
+        sentence_index: dict[str, list[str]] = {}  # word → sentences containing it
 
-        for stmt, belief in self.base._beliefs.items():
-            stmt_lower = stmt.lower()
-            # Extract all significant words (4+ chars, not common words)
-            words = set(re.findall(r'\b([a-z]{4,})\b', stmt_lower)) - common
-            # Also add registered concepts
-            for concept in self.base.memory.concepts:
-                if concept.lower() in stmt_lower:
-                    words.add(concept.lower())
-            # Add subject
-            if hasattr(belief, 'subject') and belief.subject:
-                words.add(belief.subject.lower())
+        # Source 1: formal beliefs
+        for stmt in self.base._beliefs:
+            self._index_sentence(stmt, concept_links, sentence_index, common)
 
-            # Link all words that appear in the same belief
-            for w in words:
-                concept_links.setdefault(w, set())
-                belief_index.setdefault(w, []).append(stmt)
-                for other in words:
-                    if other != w:
-                        concept_links[w].add(other)
+        # Source 2: concept store (studied knowledge)
+        for concept, data in self.base.memory.concepts.items():
+            for fact in data.get("facts", []):
+                if isinstance(fact, str) and len(fact) > 20:
+                    self._index_sentence(fact, concept_links, sentence_index, common)
 
-        # BFS from a to b (or any word containing b)
+        # BFS from a to b
         start_nodes = [w for w in concept_links if a_lower in w or w in a_lower]
         if not start_nodes:
             return None
@@ -2161,9 +2193,11 @@ class Genesis:
                     lines = [f"Connection: {a} → {b}"]
                     for i in range(len(full_path) - 1):
                         c1, c2 = full_path[i], full_path[i + 1]
-                        for stmt in belief_index.get(c1, []):
-                            if c2 in stmt.lower():
-                                lines.append(f"  {stmt.capitalize()}")
+                        for sent in sentence_index.get(c1, []):
+                            if c2 in sent.lower():
+                                # Truncate long sentences
+                                display = sent[:120] + ("..." if len(sent) > 120 else "")
+                                lines.append(f"  {display}")
                                 break
                     return "\n".join(lines)
                 if neighbor not in visited:
@@ -2171,6 +2205,17 @@ class Genesis:
                     queue.append((neighbor, path + [neighbor]))
 
         return None
+
+    @staticmethod
+    def _index_sentence(sentence: str, links: dict, index: dict, common: set) -> None:
+        """Index a sentence by its significant words for BFS connection finding."""
+        words = set(re.findall(r'\b([a-z]{4,})\b', sentence.lower())) - common
+        for w in words:
+            links.setdefault(w, set())
+            index.setdefault(w, []).append(sentence)
+            for other in words:
+                if other != w:
+                    links[w].add(other)
 
     def _parse_connection_question(self, query: str) -> tuple[str, str] | None:
         """Parse "how does X connect to Y?" / "how are X and Y related?" """
