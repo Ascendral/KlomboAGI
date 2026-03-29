@@ -267,6 +267,11 @@ class Baby:
                 rest = msg[len(phrase):].strip()
                 return {"type": "command", "command": cmd, "target": rest, "raw": message}
 
+        # 2.5 "you are X" = telling the system about itself, not teaching
+        if msg.startswith("you are ") or msg.startswith("you're "):
+            rest = msg.split(" ", 2)[-1] if msg.startswith("you are") else msg[7:]
+            return {"type": "general", "content": f"I am {rest.strip()}", "raw": message}
+
         # 3. Question: starts with question word or ends with ?
         question_starters = ("what ", "who ", "where ", "how ", "is ", "are ",
                              "can ", "do ", "does ", "why ", "which ", "when ",
@@ -673,6 +678,8 @@ class Baby:
         "involves", "includes", "provides", "remains", "appears", "occurs",
         "behaves", "combines", "defines", "measures", "observed", "measured",
         "fired", "powered", "composed", "formed", "called", "named",
+        "learn", "learned", "learning", "teach", "taught", "teaching",
+        "study", "studied", "studying", "grow", "growing", "grown",
         # Common adjectives/adverbs
         "good", "great", "first", "last", "little", "own", "important",
         "different", "possible", "able", "certain", "sure", "real", "whole",
