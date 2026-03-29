@@ -129,6 +129,14 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is not None:
                 return result
 
+        # Try extraction rules (for tasks where output is smaller than input)
+        from klomboagi.reasoning.arc_extraction import learn_extraction_rule
+        extract_rule = learn_extraction_rule(train)
+        if extract_rule is not None:
+            result = extract_rule(test_input)
+            if result is not None:
+                return result
+
         # Try grid structure rules (dividers, quadrants, split+combine)
         from klomboagi.reasoning.arc_grid_ops import learn_grid_rule
         grid_rule = learn_grid_rule(train)
