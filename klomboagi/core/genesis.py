@@ -67,6 +67,7 @@ from klomboagi.reasoning.deep_transfer import DeepTransferEngine
 from klomboagi.reasoning.conversation_memory import ConversationMemory
 from klomboagi.reasoning.multi_step import MultiStepSolver
 from klomboagi.reasoning.self_improve import SelfImprover
+from klomboagi.reasoning.inference_engine import GlobalInferenceEngine, QuestionDecomposer, BeliefPropagator
 
 
 @dataclass
@@ -308,6 +309,16 @@ class Genesis:
         # Self-Improvement — identify and fix own weaknesses
         self.self_improver = SelfImprover(self)
 
+        # Global Inference — derive ALL possible chains across beliefs
+        self.inference_engine = GlobalInferenceEngine(
+            self.base._beliefs, self.base._evidence_counter)
+
+        # Question Decomposer — break complex questions into simple ones
+        self.decomposer = QuestionDecomposer()
+
+        # Belief Propagator — corrections cascade to dependents
+        self.belief_propagator = BeliefPropagator(self.base._beliefs)
+
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
             self.base._beliefs, self.relations,
@@ -462,7 +473,7 @@ class Genesis:
             response = self._active_learn(intent.get("target", ""))
         elif intent["type"] == "correction":
             self.metacognition.record_correction()
-            self.inner.record_failure()  # correction = we were wrong
+            self.inner.record_failure()
             self.failure_memory.record(
                 description=resolved_message,
                 context=self.context.current_topic,
@@ -1456,9 +1467,14 @@ class Genesis:
         formed = self.concept_former.scan()
         lines.append(f"Discovered {len(formed)} concepts.")
 
-        # 5. Skill growth — integrate discoveries into trait tree
+        # 5. Global inference — derive ALL possible chains
+        lines.append("\nPhase 5: Running global inference on beliefs...")
+        inferred_beliefs = self.inference_engine.run(max_derivations=200)
+        lines.append(f"Derived {len(inferred_beliefs)} new beliefs from chains.")
+
+        # 6. Skill growth — integrate discoveries into trait tree
         if formed:
-            lines.append("\nPhase 5: Growing skill tree from discoveries...")
+            lines.append("\nPhase 6: Growing skill tree from discoveries...")
             growth_results = self.skill_growth.integrate(formed)
             lines.append(f"Skills updated: {len(growth_results)}")
             for r in growth_results[:5]:

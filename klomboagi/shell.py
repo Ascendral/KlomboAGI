@@ -205,6 +205,22 @@ def main():
                 print(f"    {src}: {count}")
             print()
             continue
+        if user_input.lower() == "infer":
+            print("\n  Running global inference...")
+            derived = genesis.inference_engine.run(max_derivations=200)
+            print(f"  Derived {len(derived)} new beliefs from chains.")
+            for d in derived[:10]:
+                print(f"    {d}")
+            print()
+            continue
+        if user_input.lower().startswith("decompose "):
+            question = user_input[10:].strip()
+            subs = genesis.decomposer.decompose(question)
+            print(f"\n  Sub-questions:")
+            for s in subs:
+                print(f"    {s}")
+            print()
+            continue
         if user_input.lower().startswith("solve "):
             question = user_input[6:].strip()
             sol = genesis.solver.solve(question)
