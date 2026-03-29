@@ -775,12 +775,16 @@ def synthesize(train: list[dict], test_input: Grid,
     """
     Find a program (sequence of ops) that maps all training inputs to outputs.
 
-    Uses iterative deepening: try depth 1, then 2, then 3.
+    Uses task analysis to narrow the search space, then iterative deepening.
     Cross-validates against ALL training examples.
-    Returns the test output if a valid program is found.
     """
     import time
     start = time.time()
+
+    # Analyze the task to narrow search
+    from klomboagi.reasoning.arc_task_analyzer import analyze_task, get_targeted_ops
+    analysis = analyze_task(train)
+    targeted_categories = get_targeted_ops(analysis)
 
     # Determine if output size differs from input
     same_size = all(
@@ -789,15 +793,29 @@ def synthesize(train: list[dict], test_input: Grid,
         for ex in train
     )
 
-    # Filter ops by size compatibility
-    if same_size:
-        ops = [op for op in ALL_OPS if op.preserves_size]
+    # Filter ops by task analysis + size compatibility
+    if targeted_categories:
+        ops = [op for op in ALL_OPS if op.category in targeted_categories]
+        # Also include size-compatible ops not in targeted categories (as fallback)
+        if same_size:
+            ops += [op for op in ALL_OPS if op.preserves_size and op not in ops]
+        else:
+            ops += [op for op in ALL_OPS if op not in ops]
     else:
-        ops = ALL_OPS
+        if same_size:
+            ops = [op for op in ALL_OPS if op.preserves_size]
+        else:
+            ops = ALL_OPS
 
-    # Also generate color-specific ops from the training data
+    # Generate color-specific ops from training data
     color_ops = _generate_color_ops(train)
     ops = ops + color_ops
+
+    # Prioritize: targeted ops first (searched more thoroughly)
+    if targeted_categories:
+        priority = [op for op in ops if op.category in targeted_categories]
+        rest = [op for op in ops if op.category not in targeted_categories]
+        ops = priority + rest
 
     for depth in range(1, max_depth + 1):
         if (time.time() - start) * 1000 > timeout_ms:

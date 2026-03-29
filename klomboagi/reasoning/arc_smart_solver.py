@@ -113,6 +113,14 @@ class SmartARCSolverV2(SmartARCSolver):
         if result is not None:
             return result
 
+        # Try per-cell rule learning (very fast, handles many same-size tasks)
+        from klomboagi.reasoning.arc_cell_rules import learn_cell_rule
+        cell_rule = learn_cell_rule(train)
+        if cell_rule is not None:
+            result = cell_rule(test_input)
+            if result is not None:
+                return result
+
         # Try DSL program synthesis (composable primitives)
         from klomboagi.reasoning.arc_dsl_v2 import synthesize
         synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=3000)
