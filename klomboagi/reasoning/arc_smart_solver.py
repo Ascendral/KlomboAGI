@@ -183,6 +183,7 @@ class SmartARCSolverV2(SmartARCSolver):
         from klomboagi.reasoning.arc_region import learn_region_rule
         from klomboagi.reasoning.arc_gravity import learn_gravity_rule
         from klomboagi.reasoning.arc_advanced import learn_advanced_rule
+        from klomboagi.reasoning.arc_tiling import learn_tiling_rule
 
         # Order: fast → slow, specific → general
         # LOO=True only for pattern_match which is prone to overfitting
@@ -190,6 +191,7 @@ class SmartARCSolverV2(SmartARCSolver):
             (learn_cell_rule, False),        # Per-cell rules (fast, precise)
             (learn_region_rule, False),       # Region filling (high value)
             (learn_gravity_rule, False),      # Gravity/movement
+            (learn_tiling_rule, False),       # Tiling/scaling
             (learn_object_rule, False),       # Object-level rules
             (learn_extraction_rule, False),   # Sub-region extraction
             (learn_grid_rule, False),         # Grid split/combine
