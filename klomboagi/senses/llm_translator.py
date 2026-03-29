@@ -100,12 +100,31 @@ class LLMTranslator:
     The LLM is a MICROPHONE, not a SPEAKER.
     It hears complex English and translates to clean data.
     The brain does ALL the thinking.
+
+    Supports both Anthropic Claude and OpenAI GPT APIs.
+    Auto-detects from env vars: OPENAI_API_KEY or ANTHROPIC_API_KEY.
     """
 
-    def __init__(self, api_key: str = "", model: str = "claude-sonnet-4-20250514",
-                 enabled: bool = False) -> None:
+    def __init__(self, api_key: str = "", model: str = "",
+                 enabled: bool = False, provider: str = "") -> None:
+        import os
+        # Auto-detect provider and key from env
+        if not api_key:
+            api_key = os.getenv("OPENAI_API_KEY", "")
+            if api_key:
+                provider = provider or "openai"
+                model = model or "gpt-4o-mini"
+                enabled = True
+            else:
+                api_key = os.getenv("ANTHROPIC_API_KEY", "")
+                if api_key:
+                    provider = provider or "anthropic"
+                    model = model or "claude-sonnet-4-20250514"
+                    enabled = True
+
         self.api_key = api_key
-        self.model = model
+        self.model = model or "gpt-4o-mini"
+        self.provider = provider or ("openai" if "sk-" in api_key and not api_key.startswith("sk-ant") else "anthropic")
         self.enabled = enabled
         self.audit_log: list[AuditEntry] = []
         self._call_count = 0
@@ -140,47 +159,79 @@ class LLMTranslator:
     def _call_llm(self, text: str) -> list[ParsedTriple]:
         """Call the LLM API to parse text. Returns tagged triples."""
         try:
-            import urllib.request
-
-            body = json.dumps({
-                "model": self.model,
-                "max_tokens": 1024,
-                "messages": [
-                    {"role": "user", "content": f"{PARSE_PROMPT}\n\nText to parse:\n{text[:2000]}"}
-                ],
-            }).encode("utf-8")
-
-            req = urllib.request.Request(
-                "https://api.anthropic.com/v1/messages",
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": self.api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-            )
-
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                response = json.loads(resp.read().decode("utf-8"))
-
-            # Extract text from response
-            content = response.get("content", [{}])
-            if content and isinstance(content, list):
-                raw = content[0].get("text", "[]")
+            if self.provider == "openai":
+                return self._call_openai(text)
             else:
-                raw = "[]"
-
-            # Track tokens
-            usage = response.get("usage", {})
-            self._total_tokens += usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-            self._call_count += 1
-
-            # Parse JSON triples
-            return self._parse_response(raw, text)
-
-        except Exception as e:
-            # On any error, fall back to rule-based
+                return self._call_anthropic(text)
+        except Exception:
             return self._fallback_parse(text)
+
+    def _call_openai(self, text: str) -> list[ParsedTriple]:
+        """Call OpenAI GPT API."""
+        import urllib.request
+
+        body = json.dumps({
+            "model": self.model,
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "system", "content": PARSE_PROMPT},
+                {"role": "user", "content": f"Text to parse:\n{text[:2000]}"},
+            ],
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            response = json.loads(resp.read().decode("utf-8"))
+
+        raw = response.get("choices", [{}])[0].get("message", {}).get("content", "[]")
+
+        usage = response.get("usage", {})
+        self._total_tokens += usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+        self._call_count += 1
+
+        return self._parse_response(raw, text)
+
+    def _call_anthropic(self, text: str) -> list[ParsedTriple]:
+        """Call Anthropic Claude API."""
+        import urllib.request
+
+        body = json.dumps({
+            "model": self.model,
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": f"{PARSE_PROMPT}\n\nText to parse:\n{text[:2000]}"}
+            ],
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            response = json.loads(resp.read().decode("utf-8"))
+
+        content = response.get("content", [{}])
+        raw = content[0].get("text", "[]") if content and isinstance(content, list) else "[]"
+
+        usage = response.get("usage", {})
+        self._total_tokens += usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        self._call_count += 1
+
+        return self._parse_response(raw, text)
 
     def _parse_response(self, raw_json: str, original_text: str) -> list[ParsedTriple]:
         """Parse the LLM's JSON response into tagged triples."""

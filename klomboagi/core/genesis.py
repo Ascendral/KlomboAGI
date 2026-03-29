@@ -300,9 +300,9 @@ class Genesis:
         self.predictor = PredictiveProcessor()
 
         # LLM Translator — language sense, NOT the brain
-        # Disabled by default. Enable with: genesis.translator.enabled = True
-        # genesis.translator.api_key = "sk-..."
-        self.translator = LLMTranslator(enabled=False)
+        # Auto-detects from env: OPENAI_API_KEY or ANTHROPIC_API_KEY
+        # The LLM parses text into structured facts. The brain does the thinking.
+        self.translator = LLMTranslator()  # auto-configures from env
 
         # First Principles — reason about things we've never seen
         self.first_principles = FirstPrinciplesEngine(
@@ -1202,35 +1202,15 @@ class Genesis:
             if any(qt in p.lower() for p in parts):
                 self.attention_economy.reward(qt, 3.0)
 
-        # If we still have nothing — escalate through reasoning systems
+        # If we still have nothing — GO TO THE LIBRARY FIRST
+        # A human doesn't try to derive answers from nothing.
+        # They go look it up, THEN reason about what they found.
         if not parts:
-            # 1. FIRST PRINCIPLES — reason from what we DO know
-            fp_result = self.first_principles.reason(query)
-            if fp_result.confidence > 0.3:
-                # Record as an experiential attempt
-                self.experiential.attempt(
-                    query, "first_principles", fp_result.answer, fp_result.confidence)
-                return fp_result.explain()
-
-            # 2. DEEP TRANSFER — apply knowledge from another domain
-            transfer = self.deep_transfer.apply_to_question(query, query_terms)
-            if transfer:
-                self.experiential.attempt(query, "deep_transfer", transfer, 0.4)
-                return transfer
-
-            # 3. HYPOTHESIS — educated guess
-            hypothesis = self.hypothesizer.hypothesize(query, list(query_words) + query_terms)
-            if hypothesis:
-                self.experiential.attempt(
-                    query, "hypothesis", hypothesis.explain(), hypothesis.confidence)
-                return hypothesis.explain()
-
-            # 4. GO TO THE LIBRARY — study the topic, THEN answer
-            # Like a human: "I don't know, let me look it up"
+            # 1. GO TO THE LIBRARY — study the topic, THEN answer
             study_topic = " ".join(query_terms[:3]) if query_terms else query
             study_result = self.read_and_learn(study_topic)
             if "Could not read" not in study_result:
-                # Now try answering again from what we just learned
+                # Answer from what we just learned
                 retrieved = []
                 for qt in query_terms:
                     for fact in self.base.memory.concepts.get(qt, {}).get("facts", [])[:3]:
@@ -1243,18 +1223,32 @@ class Genesis:
                     self.inner.record_learning(len(retrieved))
                     return " ".join(retrieved[:3])
 
-            # 5. Fallback: raw search
+            # 2. Fallback: raw search (DuckDuckGo)
             clean_query = " ".join(query_terms[:2]) if query_terms else query
             search_result = self.base._curious_lookup(clean_query)
             if search_result and "couldn't find" not in search_result.lower():
                 self.experiential.attempt(query, "search", search_result[:100], 0.5)
                 return search_result
 
-            # 6. ADMIT — honestly say we don't know
+            # 3. FIRST PRINCIPLES — reason from what we DO know
+            fp_result = self.first_principles.reason(query)
+            if fp_result.confidence > 0.3:
+                self.experiential.attempt(
+                    query, "first_principles", fp_result.answer, fp_result.confidence)
+                return fp_result.explain()
+
+            # 4. HYPOTHESIS — educated guess
+            hypothesis = self.hypothesizer.hypothesize(query, list(query_words) + query_terms)
+            if hypothesis:
+                self.experiential.attempt(
+                    query, "hypothesis", hypothesis.explain(), hypothesis.confidence)
+                return hypothesis.explain()
+
+            # 5. ADMIT — honestly say we don't know
             self.experiential.attempt(query, "none", "no answer", 0.0)
             self.inner.record_failure()
             topic = " ".join(query_terms[:2]) if query_terms else "that"
-            return f"I don't know about {topic} yet. I tried looking it up but couldn't find a clear answer. Teach me."
+            return f"I don't know about {topic} yet, even after looking it up. Teach me."
 
         return " ".join(parts)
 
@@ -1730,8 +1724,8 @@ class Genesis:
             # wiki:Quantum_mechanics → read full Wikipedia article
             topic = source[5:].strip()
             content = self.base.reader.read_wikipedia(topic)
-        elif not source.startswith("/") and not source.startswith(".") and " " not in source:
-            # Bare word like "Gravity" → try Wikipedia first, then file
+        elif not source.startswith("/") and not source.startswith("."):
+            # Topic like "Gravity" or "quantum mechanics" → try Wikipedia first
             content = self.base.reader.read_wikipedia(source)
             if not content or len(content) < 50:
                 content = self.base.reader.read(source)
