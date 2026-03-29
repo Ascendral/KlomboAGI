@@ -645,10 +645,28 @@ class Genesis:
         if followup and emotional_reading.primary.value not in ("frustrated", "impatient"):
             response += f"\n\n{followup}"
 
-        # 15. Cost tracking — record this cycle
+        # 16. Meta-Learning — track what learning approaches work
+        if intent["type"] == "question":
+            has_answer = len(response) > 20 and "don't know" not in response.lower()
+            domain = self.context.current_topic or "general"
+            self.meta_learner.record(
+                method="conversation", domain=domain,
+                duration_ms=0,  # duration tracked by cost_tracker separately
+                facts_gained=1 if has_answer else 0,
+                success=has_answer)
+
+        # 17. Belief Strengthening — periodically cross-confirm multi-source beliefs
+        if self.total_turns % 10 == 0 and len(self.base._beliefs) > 20:
+            self.belief_strengthener.cross_confirm()
+
+        # 18. Dedup — periodically clean near-duplicate beliefs
+        if self.total_turns % 20 == 0 and len(self.base._beliefs) > 50:
+            self.deduplicator.deduplicate(self.base._beliefs)
+
+        # 20. Cost tracking — record this cycle
         self.cost_tracker.end("hear_cycle", success=True)
 
-        # 14. Auto-save state
+        # 21. Auto-save state
         self.save_state()
 
         return response
