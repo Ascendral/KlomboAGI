@@ -73,6 +73,11 @@ from klomboagi.reasoning.spatial import SpatialReasoner
 from klomboagi.reasoning.goal_autonomy import GoalAutonomy
 from klomboagi.reasoning.pattern_gen import PatternGeneralizer
 from klomboagi.reasoning.causal_sim import CausalSimulator, ConfidenceCalibrator, SemanticSimilarity
+from klomboagi.reasoning.dialog_flow import DialogFlowEngine
+from klomboagi.reasoning.contingency import ContingencyPlanner
+from klomboagi.reasoning.abstract_compose import AbstractComposer
+from klomboagi.reasoning.emotional_intel import EmotionalIntelligence
+from klomboagi.reasoning.meta_learning import MetaLearner
 
 
 @dataclass
@@ -345,6 +350,21 @@ class Genesis:
         # Semantic Similarity — find related concepts without keyword match
         self.semantic = SemanticSimilarity(self.base._beliefs, self.relations)
 
+        # Dialog Flow — natural back-and-forth conversation
+        self.dialog_flow = DialogFlowEngine()
+
+        # Contingency Planning — every plan has a plan B
+        self.contingency = ContingencyPlanner(self.cost_tracker)
+
+        # Abstract Composition — invent new abstractions on the fly
+        self.composer = AbstractComposer(self.relations, self.base._beliefs)
+
+        # Emotional Intelligence — read the human's emotional state
+        self.emotional_intel = EmotionalIntelligence()
+
+        # Meta-Learning — learn HOW to learn faster
+        self.meta_learner = MetaLearner()
+
         # Constructive Memory — reconstruct, don't retrieve
         self.constructive = ConstructiveMemory(
             self.base._beliefs, self.relations,
@@ -573,7 +593,17 @@ class Genesis:
             working_memory_items=len(self.working_memory._items),
         )
 
-        # 13. Cost tracking — record this cycle
+        # 13. Emotional Intelligence — read human's state, adapt
+        emotional_reading = self.emotional_intel.read(message)
+
+        # 14. Dialog Flow — track conversation, generate follow-ups
+        self.dialog_flow.update(message, response, intent["type"],
+                               self.context.current_topic)
+        followup = self.dialog_flow.get_followup()
+        if followup and emotional_reading.primary.value not in ("frustrated", "impatient"):
+            response += f"\n\n{followup}"
+
+        # 15. Cost tracking — record this cycle
         self.cost_tracker.end("hear_cycle", success=True)
 
         # 14. Auto-save state
