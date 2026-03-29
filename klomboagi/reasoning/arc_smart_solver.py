@@ -125,6 +125,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_border_color_determines,
             self._try_fill_holes_in_objects,
             self._try_extend_pattern_to_edge,
+            self._try_draw_crosshairs,
+            self._try_denoise_repeating_block,
+            self._try_flood_fill_interior,
         ]
         for s in v2:
             try:
@@ -522,4 +525,199 @@ class SmartARCSolverV2(SmartARCSolver):
         
         if all(extend_all(ex["input"], bg) == ex["output"] for ex in train):
             return extend_all(test_input, bg)
+        return None
+
+    def _try_draw_crosshairs(self, train, test_input):
+        """
+        Two markers define a cross-hair: draw vertical line through one,
+        horizontal through the paired marker's row, connecting them.
+        Pattern: find pairs of same-color markers, draw lines through a shared anchor.
+        """
+        from collections import Counter, defaultdict
+
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+
+        def find_markers(grid, bg):
+            """Find isolated non-bg cells (markers)."""
+            rows, cols = len(grid), len(grid[0])
+            markers = defaultdict(list)
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        markers[grid[r][c]].append((r, c))
+            return markers
+
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+
+        def apply_crosshairs(grid, bg_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            markers = find_markers(grid, bg_val)
+
+            for color, positions in markers.items():
+                if len(positions) == 2:
+                    (r1, c1), (r2, c2) = positions
+                    if r1 == r2:
+                        # Same row — draw horizontal line between them
+                        for c in range(min(c1, c2), max(c1, c2) + 1):
+                            result[r1][c] = color
+                    elif c1 == c2:
+                        # Same column — draw vertical line between them
+                        for r in range(min(r1, r2), max(r1, r2) + 1):
+                            result[r][c1] = color
+                    else:
+                        # Different row and col — draw L-shape or cross
+                        # Draw vertical through c1 from r1 toward r2
+                        for r in range(min(r1, r2), max(r1, r2) + 1):
+                            result[r][c1] = color
+                        # Draw horizontal through r2 from c1 toward c2
+                        for c in range(min(c1, c2), max(c1, c2) + 1):
+                            result[r2][c] = color
+            return result
+
+        if all(apply_crosshairs(ex["input"], bg) == ex["output"] for ex in train):
+            return apply_crosshairs(test_input, bg)
+        return None
+
+    def _try_denoise_repeating_block(self, train, test_input):
+        """
+        Grid has a repeating block pattern with some cells corrupted.
+        Output = clean version where each block matches the majority pattern.
+        """
+        from collections import Counter
+
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+
+        # Try to detect block size from grid structure (look for separator lines)
+        def find_block_size(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Check for repeating row patterns
+            for bh in range(2, rows // 2 + 1):
+                if rows % bh == 0:
+                    # Check if blocks repeat
+                    blocks = []
+                    for i in range(0, rows, bh):
+                        blocks.append(tuple(tuple(row) for row in grid[i:i+bh]))
+                    if len(set(blocks)) <= len(blocks) // 2:  # Some blocks match
+                        return bh
+            return None
+
+        # Try to find the "clean" block pattern via majority voting
+        def denoise(grid, block_h, block_w):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+
+            # Collect all blocks
+            blocks = []
+            for br in range(0, rows, block_h):
+                for bc in range(0, cols, block_w):
+                    block = []
+                    for r in range(br, min(br + block_h, rows)):
+                        row = []
+                        for c in range(bc, min(bc + block_w, cols)):
+                            row.append(grid[r][c])
+                        block.append(tuple(row))
+                    blocks.append((br, bc, tuple(block)))
+
+            # Majority vote per cell position within the block
+            clean_block = []
+            for local_r in range(block_h):
+                row = []
+                for local_c in range(block_w):
+                    votes = Counter()
+                    for br, bc, block in blocks:
+                        if local_r < len(block) and local_c < len(block[local_r]):
+                            votes[block[local_r][local_c]] += 1
+                    row.append(votes.most_common(1)[0][0])
+                clean_block.append(row)
+
+            # Apply clean block everywhere
+            for br in range(0, rows, block_h):
+                for bc in range(0, cols, block_w):
+                    for lr in range(block_h):
+                        for lc in range(block_w):
+                            r, c = br + lr, bc + lc
+                            if r < rows and c < cols:
+                                result[r][c] = clean_block[lr][lc]
+            return result
+
+        # Try various block sizes
+        for bh in range(2, min(len(test_input), 12)):
+            for bw in range(2, min(len(test_input[0]), 12)):
+                if len(test_input) % bh == 0 and len(test_input[0]) % bw == 0:
+                    if all(denoise(ex["input"], bh, bw) == ex["output"] for ex in train):
+                        return denoise(test_input, bh, bw)
+        return None
+
+    def _try_flood_fill_interior(self, train, test_input):
+        """
+        Shapes made of color 1 have a colored marker inside.
+        Fill the interior of each shape with the marker's color.
+        """
+        from collections import Counter
+
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+
+        # Determine bg and wall color
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+        wall_candidates = Counter(all_v).most_common(3)
+        wall = wall_candidates[1][0] if len(wall_candidates) > 1 else None
+        if wall is None or wall == bg:
+            return None
+
+        def fill_shapes(grid, bg_val, wall_val):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+
+            # Find connected regions of bg enclosed by wall
+            visited = [[False] * cols for _ in range(rows)]
+
+            for r in range(rows):
+                for c in range(cols):
+                    if visited[r][c] or grid[r][c] == wall_val:
+                        continue
+                    # BFS to find this region
+                    region = []
+                    queue = [(r, c)]
+                    touches_border = False
+                    marker_color = None
+
+                    while queue:
+                        cr, cc = queue.pop(0)
+                        if cr < 0 or cr >= rows or cc < 0 or cc >= cols:
+                            touches_border = True
+                            continue
+                        if visited[cr][cc] or grid[cr][cc] == wall_val:
+                            continue
+                        visited[cr][cc] = True
+                        region.append((cr, cc))
+                        if grid[cr][cc] != bg_val and grid[cr][cc] != wall_val:
+                            marker_color = grid[cr][cc]
+                        if cr == 0 or cr == rows - 1 or cc == 0 or cc == cols - 1:
+                            touches_border = True
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            queue.append((cr + dr, cc + dc))
+
+                    if not touches_border and marker_color is not None:
+                        for rr, cc in region:
+                            if grid[rr][cc] == bg_val:
+                                result[rr][cc] = marker_color
+
+            return result
+
+        if all(fill_shapes(ex["input"], bg, wall) == ex["output"] for ex in train):
+            return fill_shapes(test_input, bg, wall)
         return None
