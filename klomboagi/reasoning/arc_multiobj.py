@@ -102,6 +102,7 @@ def learn_multiobj_rule(train: list[dict]) -> Callable | None:
         _try_row_col_paint,
         _try_nearest_border_recolor,
         _try_fill_interior_from_external,
+        _try_project_dots_onto_block,
         _try_dot_to_block_line,
     ]:
         try:
@@ -1814,4 +1815,97 @@ def _try_dot_to_block_line(train):
         return None
     if all(r == ex["output"] for r, ex in zip(results, train)):
         return apply_dot_line
+    return None
+
+
+def _try_project_dots_onto_block(train):
+    """
+    Isolated dots project their color onto the nearest edge cell of a
+    rectangular block. Only the block's edge cell changes; the line
+    between dot and block stays background.
+
+    Handles task 1f642eb9.
+    """
+    same_size = all(
+        len(ex["input"]) == len(ex["output"]) and
+        len(ex["input"][0]) == len(ex["output"][0])
+        for ex in train
+    )
+    if not same_size:
+        return None
+
+    def _grid_bg_local(grid):
+        flat = [c for row in grid for c in row]
+        return Counter(flat).most_common(1)[0][0] if flat else 0
+
+    def _find_rect_and_dots_local(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        color_cells = {}
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v != bg_val:
+                    color_cells.setdefault(v, []).append((r, c))
+
+        if len(color_cells) < 2:
+            return None, None, None, None
+
+        rect_color = None
+        rect_bbox = None
+        for color, cells in sorted(color_cells.items(), key=lambda x: -len(x[1])):
+            rs = [r for r, c in cells]
+            cs = [c for r, c in cells]
+            rmin, rmax = min(rs), max(rs)
+            cmin, cmax = min(cs), max(cs)
+            expected = (rmax - rmin + 1) * (cmax - cmin + 1)
+            if len(cells) == expected and expected >= 4:
+                rect_color = color
+                rect_bbox = (rmin, rmax, cmin, cmax)
+                break
+
+        if rect_color is None:
+            return None, None, None, None
+
+        dots = []
+        for color, cells in color_cells.items():
+            if color == rect_color:
+                continue
+            for r, c in cells:
+                dots.append((r, c, color))
+
+        return rect_bbox, rect_color, dots, bg_val
+
+    def apply_project(grid):
+        rows, cols = len(grid), len(grid[0])
+        bg_val = _grid_bg_local(grid)
+        info = _find_rect_and_dots_local(grid, bg_val)
+        if info[0] is None:
+            return grid
+        rect_bbox, rect_color, dots, _ = info
+        rmin, rmax, cmin, cmax = rect_bbox
+
+        result = [row[:] for row in grid]
+        for dr, dc, color in dots:
+            in_col_range = cmin <= dc <= cmax
+            in_row_range = rmin <= dr <= rmax
+
+            if in_col_range and not in_row_range:
+                # Project vertically to nearest horizontal edge
+                if dr < rmin:
+                    result[rmin][dc] = color
+                else:
+                    result[rmax][dc] = color
+            elif in_row_range and not in_col_range:
+                # Project horizontally to nearest vertical edge
+                if dc < cmin:
+                    result[dr][cmin] = color
+                else:
+                    result[dr][cmax] = color
+
+        return result
+
+    if all(apply_project(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_project(ex["input"]) == ex["output"] for ex in train):
+        return apply_project
     return None
