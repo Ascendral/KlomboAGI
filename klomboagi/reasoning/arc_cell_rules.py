@@ -797,3 +797,53 @@ def learn_cross_from_dots(train: list[dict]) -> callable | None:
     if all(apply_cross(ex["input"]) == ex["output"] for ex in train):
         return apply_cross
     return None
+
+
+# ─── Diamond Expansion from Dots ─────────────────────────────────────────────
+
+def learn_diamond_expand(train: list[dict]) -> callable | None:
+    """
+    Each dot in the first row expands into a diamond/V pattern downward.
+    Even rows: center column. Odd rows: left and right columns.
+
+    Handles task 3ac3eb23.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    # All non-bg cells must be in row 0
+    for ex in train:
+        inp = ex["input"]
+        for r in range(1, len(inp)):
+            if any(v != bg for v in inp[r]):
+                return None
+
+    def apply_diamond(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        result = [[bg_val] * cols for _ in range(rows)]
+
+        # Find dots in row 0
+        dots = [(c, grid[0][c]) for c in range(cols) if grid[0][c] != bg_val]
+
+        for dot_c, color in dots:
+            for r in range(rows):
+                if r % 2 == 0:
+                    if 0 <= dot_c < cols:
+                        result[r][dot_c] = color
+                else:
+                    if 0 <= dot_c - 1 < cols:
+                        result[r][dot_c - 1] = color
+                    if 0 <= dot_c + 1 < cols:
+                        result[r][dot_c + 1] = color
+
+        return result
+
+    if all(apply_diamond(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_diamond(ex["input"]) == ex["output"] for ex in train):
+        return apply_diamond
+    return None

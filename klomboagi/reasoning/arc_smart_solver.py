@@ -173,12 +173,12 @@ class SmartARCSolverV2(SmartARCSolver):
         from klomboagi.reasoning.arc_cell_rules import (
             learn_span_fill_rule, learn_color_key_swap, learn_template_row_stamp,
             learn_grid_gap_fill, learn_single_cell_paint, learn_connect_dot_pairs,
-            learn_cross_from_dots
+            learn_cross_from_dots, learn_diamond_expand
         )
         for p0_fn in [learn_span_fill_rule, learn_color_key_swap,
                        learn_template_row_stamp, learn_grid_gap_fill,
                        learn_single_cell_paint, learn_connect_dot_pairs,
-                       learn_cross_from_dots]:
+                       learn_cross_from_dots, learn_diamond_expand]:
             result = SmartARCSolverV2._try_learner(p0_fn, train, test_input, loo=False)
             if result is not None:
                 return result
