@@ -847,3 +847,103 @@ def learn_diamond_expand(train: list[dict]) -> callable | None:
     if all(apply_diamond(ex["input"]) == ex["output"] for ex in train):
         return apply_diamond
     return None
+
+
+# ─── Arrow Ray Shoot ─────────────────────────────────────────────────────────
+
+def learn_arrow_ray(train: list[dict]) -> callable | None:
+    """
+    A triangle/arrow of one color has a differently-colored dot at its base.
+    The dot shoots a ray in the direction the arrow points, to the grid edge.
+
+    The arrow points AWAY from its widest row/col toward its narrowest.
+    The ray extends from the tip (narrow end) outward.
+
+    Handles task 25d487eb.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    def apply_arrow_ray(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+
+        # Find non-bg cells
+        from collections import Counter
+        color_cells = {}
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val:
+                    color_cells.setdefault(grid[r][c], []).append((r, c))
+
+        if len(color_cells) < 2:
+            return result
+
+        # Arrow color = most cells, dot color = fewest
+        sorted_colors = sorted(color_cells.items(), key=lambda x: -len(x[1]))
+        arrow_color = sorted_colors[0][0]
+        dot_color = sorted_colors[1][0]
+        dot_cells = color_cells[dot_color]
+        arrow_cells = color_cells[arrow_color]
+
+        if len(dot_cells) != 1:
+            return result
+        dot_r, dot_c = dot_cells[0]
+
+        # Find arrow bounding box
+        a_rows = [r for r, c in arrow_cells]
+        a_cols = [c for r, c in arrow_cells]
+        a_rmin, a_rmax = min(a_rows), max(a_rows)
+        a_cmin, a_cmax = min(a_cols), max(a_cols)
+
+        # Determine arrow direction by finding which end is narrow
+        # Count cells per row and per col
+        row_counts = Counter(r for r, c in arrow_cells)
+        col_counts = Counter(c for r, c in arrow_cells)
+
+        # Arrow points toward the narrow end
+        # Check vertical direction (top vs bottom narrower)
+        top_width = row_counts.get(a_rmin, 0)
+        bot_width = row_counts.get(a_rmax, 0)
+        left_height = col_counts.get(a_cmin, 0)
+        right_height = col_counts.get(a_cmax, 0)
+
+        # Determine direction: the tip (narrow end) is where the ray goes
+        dr, dc = 0, 0
+        if top_width < bot_width:
+            dr, dc = -1, 0  # points up
+        elif bot_width < top_width:
+            dr, dc = 1, 0   # points down
+        elif left_height < right_height:
+            dr, dc = 0, -1  # points left
+        elif right_height < left_height:
+            dr, dc = 0, 1   # points right
+        else:
+            return result
+
+        # Shoot ray from the tip in the arrow direction
+        # Find the tip position (narrowest end, same row/col as dot)
+        if dr != 0:  # vertical arrow
+            tip_r = a_rmin if dr == -1 else a_rmax
+            r, c = tip_r + dr, dot_c
+        else:  # horizontal arrow
+            tip_c = a_cmin if dc == -1 else a_cmax
+            r, c = dot_r, tip_c + dc
+
+        while 0 <= r < rows and 0 <= c < cols:
+            if result[r][c] == bg_val:
+                result[r][c] = dot_color
+            r += dr
+            c += dc
+
+        return result
+
+    if all(apply_arrow_ray(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_arrow_ray(ex["input"]) == ex["output"] for ex in train):
+        return apply_arrow_ray
+    return None
