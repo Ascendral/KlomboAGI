@@ -25,6 +25,7 @@ def learn_tiling_rule(train: list[dict]) -> callable | None:
     for fn in [
         _try_upscale,
         _try_self_tile,
+        _try_self_tile_inverted,
         _try_tile_hv,
         _try_pixel_to_block,
         _try_downsample,
@@ -117,6 +118,47 @@ def _try_self_tile(train):
     return None
 
 
+def _try_self_tile_inverted(train):
+    """
+    For each non-bg cell at (r,c), stamp the INVERTED input at output block (r*rows, c*cols).
+    Inversion: bg → input_color, non-bg → bg.
+    """
+    bg = _bg(train)
+    ex0 = train[0]
+    ir, ic = len(ex0["input"]), len(ex0["input"][0])
+    otr, otc = len(ex0["output"]), len(ex0["output"][0])
+
+    if otr != ir * ir or otc != ic * ic:
+        return None
+
+    def self_tile_inv(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        result = [[bg_val] * (cols * cols) for _ in range(rows * rows)]
+
+        # Build inverted pattern: bg→primary_color, non-bg→bg
+        non_bg = [v for row in grid for v in row if v != bg_val]
+        if not non_bg:
+            return result
+        primary = Counter(non_bg).most_common(1)[0][0]
+        inverted = [[primary if grid[r][c] == bg_val else bg_val
+                     for c in range(cols)] for r in range(rows)]
+
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val:
+                    # Place inverted at (r*rows, c*cols)
+                    for dr in range(rows):
+                        for dc in range(cols):
+                            result[r * rows + dr][c * cols + dc] = inverted[dr][dc]
+        return result
+
+    fn = lambda grid, bg_val=bg: self_tile_inv(grid, bg_val)
+    if all(fn(ex["input"]) == ex["output"] for ex in train):
+        return fn
+
+    return None
+
+
 def _try_tile_hv(train):
     """Output = input tiled horizontally or vertically (2x1, 1x2, 2x2, 3x3)."""
     ex0 = train[0]
@@ -163,6 +205,57 @@ def _try_tile_hv(train):
 
     if all(tile_with_hflip(ex["input"]) == ex["output"] for ex in train):
         return tile_with_hflip
+
+    # Alternating H-flip per tile-row (even rows: original, odd rows: hflipped)
+    # Columns tiled without flip
+    def tile_row_hflip(grid, tile_r=tr, tile_c=tc):
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for tri in range(tile_r):
+            for row in grid:
+                if tri % 2 == 0:
+                    result.append(row * tile_c)
+                else:
+                    result.append(row[::-1] * tile_c)
+        return result
+
+    if all(tile_row_hflip(ex["input"]) == ex["output"] for ex in train):
+        return tile_row_hflip
+
+    # Alternating V-flip per tile-col (even cols: original, odd cols: vflipped)
+    def tile_col_vflip(grid, tile_r=tr, tile_c=tc):
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for _ in range(tile_r):
+            for row in grid:
+                result.append(row * tile_c)
+        # Now flip alternating column blocks
+        h = len(result)
+        w = len(result[0]) if result else 0
+        for tci in range(1, tile_c, 2):
+            c0 = tci * cols
+            for r in range(rows):
+                for c in range(cols):
+                    src_r = rows - 1 - r
+                    for tri in range(tile_r):
+                        result[tri * rows + r][c0 + c] = grid[src_r][c]
+        return result
+
+    if all(tile_col_vflip(ex["input"]) == ex["output"] for ex in train):
+        return tile_col_vflip
+
+    # Full alternating: even tile rows use original, odd use both-flipped
+    def tile_full_alt(grid, tile_r=tr, tile_c=tc):
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for tri in range(tile_r):
+            src_rows = grid if tri % 2 == 0 else [row[::-1] for row in grid[::-1]]
+            for row in src_rows:
+                result.append(row * tile_c)
+        return result
+
+    if all(tile_full_alt(ex["input"]) == ex["output"] for ex in train):
+        return tile_full_alt
 
     return None
 

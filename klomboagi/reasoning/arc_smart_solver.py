@@ -188,6 +188,7 @@ class SmartARCSolverV2(SmartARCSolver):
         from klomboagi.reasoning.arc_ranking import learn_ranking_rule
         from klomboagi.reasoning.arc_legend import learn_legend_rule
         from klomboagi.reasoning.arc_compose import learn_compose_rule
+        from klomboagi.reasoning.arc_multiobj import learn_multiobj_rule
 
         # Order: fast → slow, specific → general
         # LOO=True only for pattern_match which is prone to overfitting
@@ -201,6 +202,7 @@ class SmartARCSolverV2(SmartARCSolver):
             (learn_gravity_rule, False),      # Gravity/movement
             (learn_tiling_rule, False),       # Tiling/scaling
             (learn_object_rule, False),       # Object-level rules
+            (learn_multiobj_rule, False),     # Multi-object/composition rules
             (learn_extraction_rule, False),   # Sub-region extraction
             (learn_grid_rule, False),         # Grid split/combine
             (learn_advanced_rule, False),     # Symmetry, propagate, etc.
