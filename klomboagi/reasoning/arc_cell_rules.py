@@ -285,3 +285,177 @@ def _try_position_rule(train: list[dict]) -> callable | None:
             return apply_rule
 
     return None
+
+
+def learn_span_fill_rule(train: list[dict]) -> callable | None:
+    """
+    Try fill-row-span: in each row, fill between leftmost and rightmost cell of each color.
+    """
+    for ex in train:
+        if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+            return None
+
+    from collections import defaultdict
+
+    def fill_row_span(grid: Grid) -> Grid:
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for r in range(rows):
+            color_cols: dict[int, list] = defaultdict(list)
+            for c in range(cols):
+                if grid[r][c] != 0:
+                    color_cols[grid[r][c]].append(c)
+            for color, col_list in color_cols.items():
+                if len(col_list) >= 2:
+                    for c in range(min(col_list), max(col_list) + 1):
+                        result[r][c] = color
+        return result
+
+    # Must not be identity
+    if all(fill_row_span(ex["input"]) == ex["input"] for ex in train):
+        return None
+
+    if all(fill_row_span(ex["input"]) == ex["output"] for ex in train):
+        return fill_row_span
+
+    # Try column span instead: in each col, fill between topmost and bottommost cell
+    def fill_col_span(grid: Grid) -> Grid:
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for c in range(cols):
+            color_rows: dict[int, list] = defaultdict(list)
+            for r in range(rows):
+                if grid[r][c] != 0:
+                    color_rows[grid[r][c]].append(r)
+            for color, row_list in color_rows.items():
+                if len(row_list) >= 2:
+                    for r in range(min(row_list), max(row_list) + 1):
+                        result[r][c] = color
+        return result
+
+    if all(fill_col_span(ex["input"]) == ex["input"] for ex in train):
+        return None
+
+    if all(fill_col_span(ex["input"]) == ex["output"] for ex in train):
+        return fill_col_span
+
+    return None
+
+
+# ─── Color Key Swap ──────────────────────────────────────────────────────────
+
+def learn_color_key_swap(train: list[dict]) -> callable | None:
+    """
+    Top-left 2×2 defines two color-swap pairs.
+
+    Key layout:
+        [a, b]   →  swap a↔b
+        [c, d]   →  swap c↔d
+
+    All non-zero, non-key cells in the grid are recolored according to
+    these pairs.  The key itself is left untouched.
+    Handles task 0becf7df.
+    """
+    # Same-size, at least 3×3
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+            return None
+        if len(inp) < 3 or len(inp[0]) < 3:
+            return None
+
+    def apply_key_swap(grid):
+        a, b = grid[0][0], grid[0][1]
+        c, d = grid[1][0], grid[1][1]
+        # All four key cells must be non-zero and distinct pairs
+        if 0 in (a, b, c, d):
+            return None
+        swap = {a: b, b: a, c: d, d: c}
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for r in range(rows):
+            for cc in range(cols):
+                if r < 2 and cc < 2:
+                    continue  # preserve key
+                v = grid[r][cc]
+                if v in swap:
+                    result[r][cc] = swap[v]
+        return result
+
+    results = [apply_key_swap(ex["input"]) for ex in train]
+    if any(r is None for r in results):
+        return None
+    # Must actually change something
+    if all(r == ex["input"] for r, ex in zip(results, train)):
+        return None
+    if all(r == ex["output"] for r, ex in zip(results, train)):
+        return apply_key_swap
+    return None
+
+
+# ─── Template Row Stamp ──────────────────────────────────────────────────────
+
+def learn_template_row_stamp(train: list[dict]) -> callable | None:
+    """
+    Row 0 is a template pattern.  One column (the "marker column") has
+    isolated non-bg cells at certain rows — those rows get the template
+    pattern stamped with a learned stamp color.
+
+    Handles task 2281f1f4.
+    """
+    # Same-size
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0  # typical ARC background
+
+    # ── Identify marker column: column where non-bg cells appear only in
+    #    scattered single rows (not row 0) ──
+    def _find_marker_col(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        for c in range(cols - 1, -1, -1):  # try rightmost first
+            markers = [r for r in range(1, rows) if grid[r][c] != bg_val]
+            if markers and grid[0][c] == bg_val:
+                return c, markers
+        return None, []
+
+    # ── Identify template row: row 0 ──
+    # ── Find stamp color from training output ──
+    stamp_colors = set()
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        mc, markers = _find_marker_col(inp, bg)
+        if mc is None:
+            return None
+        template_positions = [c for c in range(len(inp[0]))
+                              if inp[0][c] != bg and c != mc]
+        if not template_positions:
+            return None
+        for mr in markers:
+            for c in template_positions:
+                if out[mr][c] != bg:
+                    stamp_colors.add(out[mr][c])
+    if len(stamp_colors) != 1:
+        return None
+    stamp_color = stamp_colors.pop()
+
+    def apply_stamp(grid, bg_val=bg, sc=stamp_color):
+        rows, cols = len(grid), len(grid[0])
+        mc, markers = _find_marker_col(grid, bg_val)
+        if mc is None:
+            return grid
+        template_positions = [c for c in range(cols)
+                              if grid[0][c] != bg_val and c != mc]
+        result = [row[:] for row in grid]
+        for mr in markers:
+            for c in template_positions:
+                result[mr][c] = sc
+        return result
+
+    if all(apply_stamp(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_stamp(ex["input"]) == ex["output"] for ex in train):
+        return apply_stamp
+    return None

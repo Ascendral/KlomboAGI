@@ -25,6 +25,7 @@ def _bg(train):
 def learn_advanced_rule(train: list[dict]) -> callable | None:
     """Try all advanced strategies, return first that works."""
     for fn in [
+        _try_complete_symmetry,
         _try_symmetry,
         _try_color_propagate,
         _try_object_transform,
@@ -1410,5 +1411,91 @@ def _try_diagonal_continuation(train):
 
     if all(apply_diagonal(ex["input"], bg) == ex["output"] for ex in train):
         return lambda g, b=bg: apply_diagonal(g, b)
+
+    return None
+
+
+# ─── 4-fold Symmetry Completion ───────────────────────────────────────────────
+
+def _try_complete_symmetry(train):
+    """
+    Complete D4 (8-fold dihedral) symmetry around the pattern's center.
+
+    The input has a partially-symmetric pattern; the output adds the missing
+    cells using ALL 8 symmetry operations of a square (reflections across
+    both axes + both diagonals + 90/180/270° rotations).
+    Works for patterns like 11852cab.
+    """
+    same_size = all(
+        len(ex["input"]) == len(ex["output"]) and
+        len(ex["input"][0]) == len(ex["output"][0])
+        for ex in train
+    )
+    if not same_size:
+        return None
+
+    bg = _bg(train)
+
+    def find_center(grid, bg_val):
+        cells = [(r, c) for r in range(len(grid))
+                 for c in range(len(grid[0])) if grid[r][c] != bg_val]
+        if not cells:
+            return None, None
+        cr = round(sum(r for r, c in cells) / len(cells))
+        cc = round(sum(c for r, c in cells) / len(cells))
+        return cr, cc
+
+    def _d4_orbit(dr, dc):
+        """All 8 images of (dr,dc) under the D4 dihedral group."""
+        return {(dr, dc), (-dr, dc), (dr, -dc), (-dr, -dc),
+                (dc, dr), (-dc, dr), (dc, -dr), (-dc, -dr)}
+
+    def complete_d4(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        cr, cc = find_center(grid, bg_val)
+        if cr is None:
+            return grid
+        result = [row[:] for row in grid]
+        cells = [(r, c, grid[r][c]) for r in range(rows)
+                 for c in range(cols) if grid[r][c] != bg_val]
+        for r, c, color in cells:
+            dr, dc = r - cr, c - cc
+            for odr, odc in _d4_orbit(dr, dc):
+                nr, nc = cr + odr, cc + odc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    if result[nr][nc] == bg_val:
+                        result[nr][nc] = color
+        return result
+
+    # Try D4 (8-fold) first
+    fn8 = lambda grid, b=bg: complete_d4(grid, b)
+    if not all(fn8(ex["input"]) == ex["input"] for ex in train):
+        if all(fn8(ex["input"]) == ex["output"] for ex in train):
+            return fn8
+
+    # Fall back to 4-fold (axis reflections only, no diagonal swap)
+    def complete_4fold(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        cr, cc = find_center(grid, bg_val)
+        if cr is None:
+            return grid
+        result = [row[:] for row in grid]
+        cells = [(r, c, grid[r][c]) for r in range(rows)
+                 for c in range(cols) if grid[r][c] != bg_val]
+        for r, c, color in cells:
+            dr, dc = r - cr, c - cc
+            for nr, nc in [(cr + dr, cc + dc), (cr + dr, cc - dc),
+                           (cr - dr, cc + dc), (cr - dr, cc - dc)]:
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    if result[nr][nc] == bg_val:
+                        result[nr][nc] = color
+        return result
+
+    fn4 = lambda grid, b=bg: complete_4fold(grid, b)
+    if not all(fn4(ex["input"]) == ex["input"] for ex in train):
+        if all(fn4(ex["input"]) == ex["output"] for ex in train):
+            return fn4
+
+    return None
 
     return None
