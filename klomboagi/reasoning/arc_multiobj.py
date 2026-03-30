@@ -101,6 +101,7 @@ def learn_multiobj_rule(train: list[dict]) -> Callable | None:
         _try_color_specific_neighbors,
         _try_row_col_paint,
         _try_nearest_border_recolor,
+        _try_fill_interior_from_external,
         _try_dot_to_block_line,
     ]:
         try:
@@ -1615,6 +1616,92 @@ def _try_nearest_border_recolor(train):
     if all(fn(ex["input"]) == ex["output"] for ex in train):
         return fn
 
+    return None
+
+
+def _try_fill_interior_from_external(train):
+    """
+    Fill a rectangle's interior with the color of a nearby small object,
+    then remove the small object.
+
+    Handles task 465b7d93.
+    """
+    bg = _bg(train)
+
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    def flood_outside(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        outside = [[False] * cols for _ in range(rows)]
+        queue = []
+        for r in range(rows):
+            for c in [0, cols - 1]:
+                if grid[r][c] == bg_val and not outside[r][c]:
+                    outside[r][c] = True
+                    queue.append((r, c))
+        for c in range(cols):
+            for r in [0, rows - 1]:
+                if grid[r][c] == bg_val and not outside[r][c]:
+                    outside[r][c] = True
+                    queue.append((r, c))
+        while queue:
+            r, c = queue.pop(0)
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    if not outside[nr][nc] and grid[nr][nc] == bg_val:
+                        outside[nr][nc] = True
+                        queue.append((nr, nc))
+        return outside
+
+    def apply_fill_remove(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        outside = flood_outside(grid, bg_val)
+
+        # Find interior bg cells
+        interior = [(r, c) for r in range(rows) for c in range(cols)
+                     if grid[r][c] == bg_val and not outside[r][c]]
+        if not interior:
+            return None
+
+        # Find the outline color (adjacent to interior)
+        outline_colors = set()
+        for r, c in interior:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] != bg_val:
+                    outline_colors.add(grid[nr][nc])
+
+        # Find external non-bg, non-outline cells (the small donor object)
+        ext_colors = set()
+        ext_cells = []
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val and grid[r][c] not in outline_colors:
+                    if outside[r][c] or (r, c) not in set(interior):
+                        ext_colors.add(grid[r][c])
+                        ext_cells.append((r, c))
+
+        if len(ext_colors) != 1 or not ext_cells:
+            return None
+        fill_color = ext_colors.pop()
+
+        result = [row[:] for row in grid]
+        for r, c in interior:
+            result[r][c] = fill_color
+        for r, c in ext_cells:
+            result[r][c] = bg_val
+        return result
+
+    results = [apply_fill_remove(ex["input"]) for ex in train]
+    if any(r is None for r in results):
+        return None
+    if all(r == ex["input"] for r, ex in zip(results, train)):
+        return None
+    if all(r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: apply_fill_remove(g, b)
     return None
 
 
