@@ -25,6 +25,7 @@ def _bg(train):
 def learn_advanced_rule(train: list[dict]) -> callable | None:
     """Try all advanced strategies, return first that works."""
     for fn in [
+        _try_spiral_fill,
         _try_complete_symmetry,
         _try_symmetry,
         _try_color_propagate,
@@ -1498,4 +1499,83 @@ def _try_complete_symmetry(train):
 
     return None
 
+    return None
+
+
+# ─── Spiral Fill ──────────────────────────────────────────────────────────────
+
+def _try_spiral_fill(train):
+    """
+    Input is all-background; output is a clockwise spiral of wall-color
+    with a 1-cell-wide path of background winding inward.
+
+    The spiral starts with a full top row (wall), then the path enters
+    at (1,0) and spirals clockwise inward.
+    Handles task 28e73c20.
+    """
+    bg = _bg(train)
+
+    # All inputs must be uniform bg
+    for ex in train:
+        if not all(v == bg for row in ex["input"] for v in row):
+            return None
+
+    # All outputs must be same-size and have exactly 2 colors
+    wall_colors = set()
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+        out_colors = {v for row in ex["output"] for v in row}
+        non_bg = out_colors - {bg}
+        if len(non_bg) != 1:
+            return None
+        wall_colors.add(non_bg.pop())
+
+    if len(wall_colors) != 1:
+        return None
+    wall = wall_colors.pop()
+
+    def make_spiral(grid, bg_val=bg, wall_val=wall):
+        rows, cols = len(grid), len(grid[0])
+        n = rows  # Assume square
+        result = [[wall_val] * cols for _ in range(rows)]
+
+        # Pre-compute segment lengths for the spiral path
+        # Pattern: N-1, then pairs (N-3, N-3), (N-5, N-5), ...
+        # For even N: ends with a single 1. For odd N: ends with pair (2, 2).
+        segs = [n - 1]
+        k = n - 3
+        while k >= 2:
+            segs.append(k)
+            segs.append(k)
+            k -= 2
+        if k == 1:
+            segs.append(1)
+
+        # Carve path following segments
+        dirs = [(0, 1), (1, 0), (0, -1), (-1, 0)]  # R, D, L, U
+        r, c = 1, 0
+        di = 0
+
+        for seg_len in segs:
+            dr, dc = dirs[di]
+            for _ in range(seg_len):
+                if 0 <= r < rows and 0 <= c < cols:
+                    result[r][c] = bg_val
+                r += dr
+                c += dc
+            # Back up one step
+            r -= dr
+            c -= dc
+            # Turn right and advance one step
+            di = (di + 1) % 4
+            dr, dc = dirs[di]
+            r += dr
+            c += dc
+
+        return result
+
+    if all(make_spiral(ex["input"]) == ex["output"] for ex in train):
+        return make_spiral
     return None
