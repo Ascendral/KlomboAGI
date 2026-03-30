@@ -32,20 +32,28 @@ from typing import Callable
 Grid = list[list[int]]
 
 PROPOSE_PROMPT = """You are an ARC (Abstraction and Reasoning Corpus) puzzle solver.
-Given input/output grid pairs, write a Python function that transforms any input grid to the correct output grid.
+Given input/output grid pairs, find the transformation rule and implement it.
+
+APPROACH — analyze step by step:
+1. Compare input/output sizes (same? different?)
+2. What changes? (which cells differ, what colors appear/disappear)
+3. Identify objects (connected non-zero regions, lines, shapes)
+4. How do objects relate to output? (moved, recolored, extracted, stamped)
+5. What's the GENERAL rule? (not specific to these examples)
+
+Then write a Python function `def transform(grid):` that implements the rule.
 
 Rules:
-- Write ONLY the function, starting with `def transform(grid):`
-- `grid` is a list[list[int]] (2D array of integers 0-9)
+- `grid` is a list[list[int]] (2D array of ints 0-9)
 - Return a list[list[int]]
 - Use ONLY standard Python (no imports except: copy, collections)
-- The function must be GENERAL — it must work for ANY input following the same pattern
-- Do NOT hardcode specific grids — derive the rule
+- The function must work for ANY input following the same pattern
+- Do NOT hardcode values from the examples
 
 Training examples:
 {examples}
 
-Study the transformation pattern carefully, then write the transform function:
+First describe the pattern in 2-3 sentences, then write the transform function:
 """
 
 REFINE_PROMPT = """You are an ARC puzzle solver. Your previous transform function was INCORRECT.
