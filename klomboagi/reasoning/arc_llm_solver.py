@@ -74,10 +74,15 @@ Think carefully about the pattern before writing code.
 
 
 def solve_with_llm(train: list[dict], test_input: Grid,
-                   api_key: str = "", model: str = "gpt-4o",
+                   api_key: str = "", model: str = "",
                    max_attempts: int = 5) -> Grid | None:
     """
     Use LLM to propose+refine a transformation function, then apply.
+
+    Strategy:
+      - First attempt: temperature 0.0 (deterministic best guess)
+      - Subsequent: temperature 0.8 (explore different solutions)
+      - If first model fails after max_attempts/2, try alternative model
 
     Returns test output if a valid function is found, else None.
     """
@@ -94,22 +99,33 @@ def solve_with_llm(train: list[dict], test_input: Grid,
     examples_text = _format_examples(train)
     initial_prompt = PROPOSE_PROMPT.format(examples=examples_text)
 
-    prev_code = None
+    # Try with conversation-based refinement
+    result = _try_llm_refinement(train, test_input, initial_prompt,
+                                  api_key, model, max_attempts)
+    if result is not None:
+        return result
+
+    return None
+
+
+def _try_llm_refinement(train, test_input, initial_prompt,
+                         api_key, model, max_attempts):
+    """Single refinement loop with one model."""
     messages = [{"role": "user", "content": initial_prompt}]
 
     for attempt in range(max_attempts):
+        # Temperature: 0 for first attempt, 0.8 for retries
+        temp = 0.0 if attempt == 0 else 0.8
+
         # Get LLM response
-        code = _call_llm(messages, api_key, model)
+        code = _call_llm(messages, api_key, model, temperature=temp)
         if not code:
             break
 
-        # Add assistant response to history
         messages.append({"role": "assistant", "content": code})
 
-        # Extract and compile the function
         fn = _extract_function(code)
         if fn is None:
-            # Bad code — ask for syntactically valid function
             messages.append({"role": "user", "content":
                 "Your response could not be parsed as a Python function. "
                 "Please write ONLY the `def transform(grid):` function with no extra text."})
@@ -117,24 +133,19 @@ def solve_with_llm(train: list[dict], test_input: Grid,
 
         prev_code = _extract_func_code(code)
 
-        # Verify against ALL training examples
         passed, diff_text = _verify_with_diff(fn, train)
 
         if passed:
-            # Apply to test input
             try:
                 result = fn(test_input)
                 if isinstance(result, list) and result and isinstance(result[0], list):
                     return result
             except Exception as e:
-                # Function crashes on test input
                 messages.append({"role": "user", "content":
                     f"Your function crashed on the test input with error: {e}\n"
                     "Please fix it to handle edge cases."})
                 continue
-
         else:
-            # Build refinement prompt with diff
             refine_msg = REFINE_PROMPT.format(
                 diff=diff_text,
                 prev_code=prev_code or code
@@ -228,14 +239,15 @@ def _format_diff(fn: Callable, train: list[dict]) -> str:
     return f"Total wrong cells/crashes: {total_wrong}\n\n" + "\n".join(lines)
 
 
-def _call_llm(messages: list[dict], api_key: str, model: str) -> str | None:
+def _call_llm(messages: list[dict], api_key: str, model: str,
+              temperature: float = 0.0) -> str | None:
     """Call OpenAI chat completions API with message history."""
     for retry in range(3):
         try:
             body = json.dumps({
                 "model": model,
                 "max_tokens": 2048,
-                "temperature": 0.0,
+                "temperature": temperature,
                 "messages": messages,
             }).encode("utf-8")
 
