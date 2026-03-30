@@ -565,3 +565,91 @@ def learn_grid_gap_fill(train: list[dict]) -> callable | None:
     if all(apply_gap_fill(ex["input"]) == ex["output"] for ex in train):
         return apply_gap_fill
     return None
+
+
+# ─── Single-Cell Row/Col Paint ───────────────────────────────────────────────
+
+def learn_single_cell_paint(train: list[dict]) -> callable | None:
+    """
+    Each isolated non-bg cell paints its entire row or entire column.
+
+    Direction (row vs col) is learned per-color from training.
+    Handles task 178fcbfb.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    # ── Learn direction per color from training (two-pass) ──
+    color_dir: dict[int, str] = {}  # color → "row" or "col"
+
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        rows, cols = len(inp), len(inp[0])
+        # Pass 1: find row-painters (entire output row = color)
+        row_paint_rows: set[int] = set()
+        for r in range(rows):
+            for c in range(cols):
+                v = inp[r][c]
+                if v == bg:
+                    continue
+                if all(out[r][cc] == v for cc in range(cols)):
+                    if v in color_dir and color_dir[v] != "row":
+                        return None
+                    color_dir[v] = "row"
+                    row_paint_rows.add(r)
+
+        # Pass 2: find col-painters (column = color except at row-paint rows)
+        for r in range(rows):
+            for c in range(cols):
+                v = inp[r][c]
+                if v == bg or r in row_paint_rows:
+                    continue
+                # Check if column c has v at every non-row-paint row
+                is_col = all(
+                    out[rr][c] == v
+                    for rr in range(rows) if rr not in row_paint_rows
+                )
+                if is_col:
+                    if v in color_dir and color_dir[v] != "col":
+                        return None
+                    color_dir[v] = "col"
+                else:
+                    return None
+
+    if not color_dir:
+        return None
+
+    def apply_paint(grid, bg_val=bg, cdir=color_dir):
+        rows, cols = len(grid), len(grid[0])
+        # Collect cells with directions
+        row_paints: dict[int, int] = {}   # row → color
+        col_paints: dict[int, int] = {}   # col → color
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v == bg_val or v not in cdir:
+                    continue
+                if cdir[v] == "row":
+                    row_paints[r] = v
+                else:
+                    col_paints[c] = v
+
+        result = [[bg_val] * cols for _ in range(rows)]
+        # Col paints first (rows override)
+        for c, color in col_paints.items():
+            for r in range(rows):
+                result[r][c] = color
+        for r, color in row_paints.items():
+            for c in range(cols):
+                result[r][c] = color
+        return result
+
+    if all(apply_paint(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_paint(ex["input"]) == ex["output"] for ex in train):
+        return apply_paint
+    return None

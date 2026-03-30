@@ -172,10 +172,11 @@ class SmartARCSolverV2(SmartARCSolver):
         # ── Phase 0: High-confidence specific learners (before hand-coded) ─────
         from klomboagi.reasoning.arc_cell_rules import (
             learn_span_fill_rule, learn_color_key_swap, learn_template_row_stamp,
-            learn_grid_gap_fill
+            learn_grid_gap_fill, learn_single_cell_paint
         )
         for p0_fn in [learn_span_fill_rule, learn_color_key_swap,
-                       learn_template_row_stamp, learn_grid_gap_fill]:
+                       learn_template_row_stamp, learn_grid_gap_fill,
+                       learn_single_cell_paint]:
             result = SmartARCSolverV2._try_learner(p0_fn, train, test_input, loo=False)
             if result is not None:
                 return result
@@ -188,7 +189,7 @@ class SmartARCSolverV2(SmartARCSolver):
         # ── Phase 2: Learned rule families (LOO validated) ────────────────────
         from klomboagi.reasoning.arc_cell_rules import (
             learn_cell_rule, learn_span_fill_rule, learn_color_key_swap,
-            learn_template_row_stamp, learn_grid_gap_fill
+            learn_template_row_stamp, learn_grid_gap_fill, learn_single_cell_paint
         )
         from klomboagi.reasoning.arc_object_rules import learn_object_rule
         from klomboagi.reasoning.arc_pattern_match import learn_pattern_rule
@@ -212,6 +213,7 @@ class SmartARCSolverV2(SmartARCSolver):
             (learn_color_key_swap, False),   # 2×2 color key swap
             (learn_template_row_stamp, False), # Template row stamp at marker rows
             (learn_grid_gap_fill, False),    # Fill gaps in block grid
+            (learn_single_cell_paint, False), # Single cell → row or col paint
             (learn_region_rule, False),       # Region filling (high value)
             (learn_context_rule, False),      # Context-based (Voronoi, border/interior)
             (learn_ranking_rule, False),      # Ranking by height, diagonal tile, stamp
