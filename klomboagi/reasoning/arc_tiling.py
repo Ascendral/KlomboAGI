@@ -27,6 +27,8 @@ def learn_tiling_rule(train: list[dict]) -> callable | None:
         _try_self_tile,
         _try_self_tile_inverted,
         _try_tile_hv,
+        _try_rotation_tile,
+        _try_tile_mark_diagonal,
         _try_pixel_to_block,
         _try_downsample,
         _try_unique_tile_extract,
@@ -560,5 +562,199 @@ def _try_scale_by_color_count(train):
 
     if all(upscale_by_distinct(ex["input"]) == ex["output"] for ex in train):
         return upscale_by_distinct
+
+    return None
+
+
+def _try_rotation_tile(train):
+    """
+    2×2 tiling using rotations:
+      orig    | rot90CW
+      ---------+---------
+      rot90CCW | rot180
+
+    All examples must double in both dimensions.
+    """
+    for ex in train:
+        ir, ic = len(ex["input"]), len(ex["input"][0])
+        otr, otc = len(ex["output"]), len(ex["output"][0])
+        if otr != 2 * ir or otc != 2 * ic:
+            return None
+
+    def rot90cw(grid):
+        # rows×cols → cols×rows
+        rows, cols = len(grid), len(grid[0])
+        return [[grid[rows - 1 - c][r] for c in range(rows)] for r in range(cols)]
+
+    def rot90ccw(grid):
+        # rows×cols → cols×rows
+        rows, cols = len(grid), len(grid[0])
+        return [[grid[c][cols - 1 - r] for c in range(rows)] for r in range(cols)]
+
+    def rot180(grid):
+        return [row[::-1] for row in grid[::-1]]
+
+    # 90° rotations only work cleanly for tiling if grid is square
+    # (non-square grids produce different-height tiles that can't be side-by-side)
+    ex0_ir, ex0_ic = len(train[0]["input"]), len(train[0]["input"][0])
+    if ex0_ir == ex0_ic:
+        def make_rotation_tile(grid):
+            cw = rot90cw(grid)
+            ccw = rot90ccw(grid)
+            r180 = rot180(grid)
+            rows = len(grid)
+            result = []
+            for r in range(rows):
+                result.append(grid[r] + cw[r])
+            for r in range(rows):
+                result.append(ccw[r] + r180[r])
+            return result
+
+        if all(make_rotation_tile(ex["input"]) == ex["output"] for ex in train):
+            return make_rotation_tile
+
+    # Try other rotation arrangements (square only)
+    if ex0_ir == ex0_ic:
+        def make_rotation_tile_v2(grid):
+            """rot90CW | orig / rot180 | rot90CCW"""
+            cw = rot90cw(grid); ccw = rot90ccw(grid); r180 = rot180(grid)
+            rows = len(grid); result = []
+            for r in range(rows): result.append(cw[r] + grid[r])
+            for r in range(rows): result.append(r180[r] + ccw[r])
+            return result
+
+        if all(make_rotation_tile_v2(ex["input"]) == ex["output"] for ex in train):
+            return make_rotation_tile_v2
+
+        def make_rotation_tile_v3(grid):
+            """rot90CCW | rot180 / orig | rot90CW"""
+            cw = rot90cw(grid); ccw = rot90ccw(grid); r180 = rot180(grid)
+            rows = len(grid); result = []
+            for r in range(rows): result.append(ccw[r] + r180[r])
+            for r in range(rows): result.append(grid[r] + cw[r])
+            return result
+
+        if all(make_rotation_tile_v3(ex["input"]) == ex["output"] for ex in train):
+            return make_rotation_tile_v3
+
+        def make_rotation_tile_v4(grid):
+            """rot180 | rot90CCW / rot90CW | orig"""
+            cw = rot90cw(grid); ccw = rot90ccw(grid); r180 = rot180(grid)
+            rows = len(grid); result = []
+            for r in range(rows): result.append(r180[r] + ccw[r])
+            for r in range(rows): result.append(cw[r] + grid[r])
+            return result
+
+        if all(make_rotation_tile_v4(ex["input"]) == ex["output"] for ex in train):
+            return make_rotation_tile_v4
+
+    # Try reflection-based 2×2 tiling: rot180|vflip / hflip|orig
+    def rot180_local(grid):
+        return [row[::-1] for row in grid[::-1]]
+
+    def vflip_local(grid):
+        return grid[::-1]
+
+    def hflip_local(grid):
+        return [row[::-1] for row in grid]
+
+    def make_reflect_tile(grid):
+        """rot180 | vflip / hflip | orig"""
+        r180 = rot180_local(grid); vf = vflip_local(grid); hf = hflip_local(grid)
+        rows = len(grid)
+        result = []
+        for r in range(rows):
+            result.append(r180[r] + vf[r])
+        for r in range(rows):
+            result.append(hf[r] + grid[r])
+        return result
+
+    if all(make_reflect_tile(ex["input"]) == ex["output"] for ex in train):
+        return make_reflect_tile
+
+    def make_reflect_tile_v2(grid):
+        """vflip | rot180 / orig | hflip"""
+        r180 = rot180_local(grid); vf = vflip_local(grid); hf = hflip_local(grid)
+        rows = len(grid)
+        result = []
+        for r in range(rows):
+            result.append(vf[r] + r180[r])
+        for r in range(rows):
+            result.append(grid[r] + hf[r])
+        return result
+
+    if all(make_reflect_tile_v2(ex["input"]) == ex["output"] for ex in train):
+        return make_reflect_tile_v2
+
+    def make_reflect_tile_v3(grid):
+        """hflip | orig / rot180 | vflip"""
+        r180 = rot180_local(grid); vf = vflip_local(grid); hf = hflip_local(grid)
+        rows = len(grid)
+        result = []
+        for r in range(rows):
+            result.append(hf[r] + grid[r])
+        for r in range(rows):
+            result.append(r180[r] + vf[r])
+        return result
+
+    if all(make_reflect_tile_v3(ex["input"]) == ex["output"] for ex in train):
+        return make_reflect_tile_v3
+
+    def make_reflect_tile_v4(grid):
+        """orig | hflip / vflip | rot180"""
+        r180 = rot180_local(grid); vf = vflip_local(grid); hf = hflip_local(grid)
+        rows = len(grid)
+        result = []
+        for r in range(rows):
+            result.append(grid[r] + hf[r])
+        for r in range(rows):
+            result.append(vf[r] + r180[r])
+        return result
+
+    if all(make_reflect_tile_v4(ex["input"]) == ex["output"] for ex in train):
+        return make_reflect_tile_v4
+
+    return None
+
+
+def _try_tile_mark_diagonal(train):
+    """
+    Output = input tiled 2×2, then bg cells with a diagonal non-bg neighbor are marked 8.
+
+    Handles tasks where tiling + diagonal marking gives the output.
+    """
+    bg = _bg(train)
+
+    # All outputs must be exactly 2× input size
+    for ex in train:
+        ir, ic = len(ex["input"]), len(ex["input"][0])
+        otr, otc = len(ex["output"]), len(ex["output"][0])
+        if otr != 2 * ir or otc != 2 * ic:
+            return None
+
+    def apply_tile_mark(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+
+        # Tile 2×2
+        tiled = []
+        for _ in range(2):
+            for row in grid:
+                tiled.append(row + row)
+
+        # Mark diagonal neighbors
+        tr, tc = len(tiled), len(tiled[0])
+        result = [row[:] for row in tiled]
+        for r in range(tr):
+            for c in range(tc):
+                if tiled[r][c] == bg_val:
+                    for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < tr and 0 <= nc < tc and tiled[nr][nc] != bg_val:
+                            result[r][c] = 8
+                            break
+        return result
+
+    if all(apply_tile_mark(ex["input"]) == ex["output"] for ex in train):
+        return apply_tile_mark
 
     return None

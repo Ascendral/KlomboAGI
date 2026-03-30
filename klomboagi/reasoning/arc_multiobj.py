@@ -99,6 +99,7 @@ def learn_multiobj_rule(train: list[dict]) -> Callable | None:
         _try_corner_frame_extract,
         _try_most_common_object,
         _try_color_specific_neighbors,
+        _try_row_col_paint,
     ]:
         try:
             rule = fn(train)
@@ -1466,5 +1467,72 @@ def _try_color_specific_neighbors(train):
 
     if all(apply_neighbors(ex["input"], bg) == ex["output"] for ex in train):
         return lambda g, b=bg: apply_neighbors(g, b)
+
+    return None
+
+
+def _try_row_col_paint(train):
+    """
+    Non-bg objects in the input define which rows/columns get fully painted.
+    - If object width > height: paint ALL rows the object occupies with that color
+    - If object height > width: paint ALL columns the object occupies with that color
+    Row paints override column paints.
+
+    Handles task 9344f635 and similar.
+    """
+    # Must be same-size input/output
+    same_size = all(
+        len(ex["input"]) == len(ex["output"]) and
+        len(ex["input"][0]) == len(ex["output"][0])
+        for ex in train
+    )
+    if not same_size:
+        return None
+
+    bg = _bg(train)
+
+    def apply_row_col_paint(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        result = [[bg_val] * cols for _ in range(rows)]
+
+        # Find all non-bg objects
+        objects = _find_objects(grid, bg_val)
+
+        # Separate into row-painters and col-painters
+        col_paints = {}   # col_idx → color
+        row_paints = {}   # row_idx → color
+
+        for obj in objects:
+            color = obj["primary"]
+            cells = obj["cells"]
+            obj_rows = set(r for r, c in cells)
+            obj_cols = set(c for r, c in cells)
+            height = len(obj_rows)
+            width = len(obj_cols)
+
+            if width > height:
+                # Row painter: paint each row the object occupies
+                for r in obj_rows:
+                    row_paints[r] = color
+            elif height > width:
+                # Column painter: paint each col the object occupies
+                for c in obj_cols:
+                    col_paints[c] = color
+            # else: square or single cell — ambiguous, skip
+
+        # Start with bg, apply col paints first
+        for c, color in col_paints.items():
+            for r in range(rows):
+                result[r][c] = color
+
+        # Then apply row paints (override cols)
+        for r, color in row_paints.items():
+            for c in range(cols):
+                result[r][c] = color
+
+        return result
+
+    if all(apply_row_col_paint(ex["input"]) == ex["output"] for ex in train):
+        return apply_row_col_paint
 
     return None
