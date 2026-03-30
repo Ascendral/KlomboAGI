@@ -40,6 +40,9 @@ def learn_advanced_rule(train: list[dict]) -> callable | None:
         _try_output_is_single_color,
         _try_output_is_row_count,
         _try_output_encodes_object_count,
+        _try_tile_denoise_majority,
+        _try_expand_cross_shape,
+        _try_diagonal_gravity_stack,
     ]:
         try:
             rule = fn(train)
@@ -739,5 +742,442 @@ def _try_output_encodes_object_count(train):
                 return [[color] * n]
             if all(apply_fn(ex["input"]) == ex["output"] for ex in train):
                 return apply_fn
+
+    return None
+
+
+# ─── Tile denoise by majority vote ───────────────────────────────────────────
+
+def _try_tile_denoise_majority(train):
+    """
+    Input has a repeating pattern (tiles) with noise scattered.
+    Separator lines (single-color rows/cols) divide tiles.
+    Output = same grid with all tiles replaced by the majority-vote canonical tile.
+    """
+    bg = _bg(train)
+
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    def find_sep_lines(grid):
+        rows, cols = len(grid), len(grid[0])
+        sep_rows, sep_cols = [], []
+        for r in range(rows):
+            vals = set(grid[r])
+            if len(vals) == 1:
+                sep_rows.append(r)
+        for c in range(cols):
+            vals = set(grid[r][c] for r in range(rows))
+            if len(vals) == 1:
+                sep_cols.append(c)
+        return sep_rows, sep_cols
+
+    def denoise_tiles(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        sep_rows, sep_cols = find_sep_lines(grid)
+
+        if not sep_rows and not sep_cols:
+            return None
+
+        sep_row_set = set(sep_rows)
+        sep_col_set = set(sep_cols)
+
+        row_bounds = [0] + [r + 1 for r in sorted(sep_rows)] + [rows]
+        col_bounds = [0] + [c + 1 for c in sorted(sep_cols)] + [cols]
+
+        # Extract all tile sub-grids (non-separator regions with actual content)
+        tiles = []
+        tile_positions = []
+        for i in range(len(row_bounds) - 1):
+            r0, r1 = row_bounds[i], row_bounds[i + 1]
+            if r1 - r0 == 0:
+                continue
+            for j in range(len(col_bounds) - 1):
+                c0, c1 = col_bounds[j], col_bounds[j + 1]
+                if c1 - c0 == 0:
+                    continue
+                tile = [[grid[r][c] for c in range(c0, c1)] for r in range(r0, r1)]
+                tiles.append(tile)
+                tile_positions.append((r0, r1, c0, c1))
+
+        if len(tiles) < 2:
+            return None
+
+        # Check all tiles same dimensions
+        h0, w0 = len(tiles[0]), len(tiles[0][0]) if tiles[0] else 0
+        if not all(len(t) == h0 and (len(t[0]) if t else 0) == w0 for t in tiles):
+            return None
+
+        # Majority vote per position
+        canonical = []
+        for r in range(h0):
+            row = []
+            for c in range(w0):
+                vals = [tiles[ti][r][c] for ti in range(len(tiles))]
+                row.append(Counter(vals).most_common(1)[0][0])
+            canonical.append(row)
+
+        # Must differ from at least one tile (otherwise nothing to denoise)
+        if all(t == canonical for t in tiles):
+            return None
+
+        # Rebuild output
+        result = [row[:] for row in grid]
+        for (r0, r1, c0, c1) in tile_positions:
+            for r in range(r0, r1):
+                for c in range(c0, c1):
+                    result[r][c] = canonical[r - r0][c - c0]
+
+        return result
+
+    # Check first example has separator lines in input
+    in_sr, in_sc = find_sep_lines(train[0]["input"])
+    out_sr, out_sc = find_sep_lines(train[0]["output"])
+
+    # Need separators in at least 2 directions for tile grid
+    # If input has incomplete separators, fall through to output-based approach
+    input_has_full_seps = bool(in_sr) and bool(in_sc)
+
+    if not in_sr and not in_sc:
+        if not out_sr and not out_sc:
+            return None
+
+        # Build denoise_tiles using separator structure from OUTPUT
+        def denoise_tiles_output_sep(grid, bg_val, sep_rows_out, sep_cols_out):
+            rows, cols = len(grid), len(grid[0])
+            row_bounds = [0] + [r + 1 for r in sorted(sep_rows_out)] + [rows]
+            col_bounds = [0] + [c + 1 for c in sorted(sep_cols_out)] + [cols]
+
+            all_locs = []
+            for i in range(len(row_bounds) - 1):
+                r0, r1 = row_bounds[i], row_bounds[i + 1]
+                if r1 - r0 == 0:
+                    continue
+                for j in range(len(col_bounds) - 1):
+                    c0, c1 = col_bounds[j], col_bounds[j + 1]
+                    if c1 - c0 == 0:
+                        continue
+                    all_locs.append((r0, r1, c0, c1))
+
+            # Filter: only use tiles of the MOST COMMON size
+            size_count = Counter((r1-r0, c1-c0) for r0,r1,c0,c1 in all_locs)
+            if not size_count:
+                return None
+            dominant_h, dominant_w = size_count.most_common(1)[0][0]
+            tiles_loc = [(r0,r1,c0,c1) for r0,r1,c0,c1 in all_locs
+                        if (r1-r0) == dominant_h and (c1-c0) == dominant_w]
+
+            if len(tiles_loc) < 2:
+                return None
+
+            tiles = [[[grid[r][c] for c in range(c0, c1)] for r in range(r0, r1)]
+                     for r0, r1, c0, c1 in tiles_loc]
+
+            h0, w0 = dominant_h, dominant_w
+            canonical = []
+            for r in range(h0):
+                row = []
+                for c in range(w0):
+                    vals = [tiles[ti][r][c] for ti in range(len(tiles))]
+                    row.append(Counter(vals).most_common(1)[0][0])
+                canonical.append(row)
+
+            if all(t == canonical for t in tiles):
+                return None
+
+            result = [row[:] for row in grid]
+            # Fill separator lines with bg
+            for r in sep_rows_out:
+                for c in range(cols):
+                    result[r][c] = bg_val
+            for c in sep_cols_out:
+                for r in range(rows):
+                    result[r][c] = bg_val
+
+            # Fill all dominant-size tile locations with canonical
+            for (r0, r1, c0, c1) in tiles_loc:
+                for r in range(r0, r1):
+                    for c in range(c0, c1):
+                        result[r][c] = canonical[r - r0][c - c0]
+
+            # Fill other (non-dominant) tile locations with bg
+            for (r0, r1, c0, c1) in all_locs:
+                if (r1-r0) != dominant_h or (c1-c0) != dominant_w:
+                    for r in range(r0, r1):
+                        for c in range(c0, c1):
+                            result[r][c] = bg_val
+
+            return result
+
+        out_sr2, out_sc2 = find_sep_lines(train[0]["output"])
+        results = [denoise_tiles_output_sep(ex["input"], bg, out_sr2, out_sc2) for ex in train]
+        if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+            return lambda g, b=bg, sr=out_sr2, sc=out_sc2: \
+                denoise_tiles_output_sep(g, b, sr, sc)
+        return None
+
+    # If input has only partial separators, try using per-example output sep structure
+    if not input_has_full_seps and out_sr and out_sc:
+        def per_example_denoise(grid, bg_val):
+            # Derive separator structure from this grid's own approximate sep lines
+            # Use output sep structure from the first training example as template
+            r_srs, r_scs = find_sep_lines(grid)
+            # If partial, infer from spacing
+            if r_srs and not r_scs:
+                # Find tile width from column periodicity
+                pass
+            if r_scs and not r_srs:
+                pass
+            # Fall back: use output sep from whichever training example has same structure
+            return None
+
+        # Per-example approach: for each training example, get its own output sep
+        def denoise_per_example(ex_input, ex_output, bg_val):
+            e_out_sr, e_out_sc = find_sep_lines(ex_output)
+            if not e_out_sr and not e_out_sc:
+                return None
+            return denoise_tiles_output_sep(ex_input, bg_val, e_out_sr, e_out_sc)
+
+        # Check if per-example approach works on training
+        train_results = [denoise_per_example(ex["input"], ex["output"], bg) for ex in train]
+        if all(r is not None and r == ex["output"] for r, ex in zip(train_results, train)):
+            # For test: use partially-visible separators in test input to find full structure
+            # Strategy: find the most "separator-like" rows/cols
+            def denoise_from_partial_seps(grid, bg_val):
+                rows, cols = len(grid), len(grid[0])
+                # Find rows with max bg fraction
+                row_bg = [sum(1 for v in grid[r] if v == bg_val) / cols for r in range(rows)]
+                col_bg = [sum(1 for r in range(rows) if grid[r][c] == bg_val) / rows
+                          for c in range(cols)]
+
+                # Strict sep lines first
+                sep_rows = [r for r in range(rows) if row_bg[r] == 1.0]
+                sep_cols = [c for c in range(cols) if col_bg[c] == 1.0]
+
+                if sep_rows and sep_cols:
+                    return denoise_tiles_output_sep(grid, bg_val, sep_rows, sep_cols)
+
+                # Infer from detected separator + periodicity
+                if sep_rows and not sep_cols:
+                    # Find tile width by checking the most bg-heavy cols
+                    bg_sorted_cols = sorted(range(cols), key=lambda c: -col_bg[c])
+                    candidates = sorted(bg_sorted_cols[:max(1, cols//5)])
+                    if candidates:
+                        return denoise_tiles_output_sep(grid, bg_val, sep_rows, candidates)
+
+                if sep_cols and not sep_rows:
+                    bg_sorted_rows = sorted(range(rows), key=lambda r: -row_bg[r])
+                    candidates = sorted(bg_sorted_rows[:max(1, rows//5)])
+                    if candidates:
+                        return denoise_tiles_output_sep(grid, bg_val, candidates, sep_cols)
+
+                return None
+
+            return lambda g, b=bg: denoise_from_partial_seps(g, b)
+
+    results = [denoise_tiles(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: denoise_tiles(g, b)
+
+    return None
+
+
+# ─── Expand cross shape ───────────────────────────────────────────────────────
+
+def _try_expand_cross_shape(train):
+    """
+    Input has small cross shapes (center_color + 4 arm_color neighbors).
+    Output expands each cross: arms extend 2 steps, center color appears
+    at diagonal positions (distance 1 and 2 from center).
+    """
+    bg = _bg(train)
+
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    def find_crosses(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        crosses = []
+        for r in range(1, rows - 1):
+            for c in range(1, cols - 1):
+                v = grid[r][c]
+                if v == bg_val:
+                    continue
+                arm_color = None
+                arms = []
+                ok = True
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = r + dr, c + dc
+                    nv = grid[nr][nc]
+                    if nv == bg_val or nv == v:
+                        ok = False
+                        break
+                    if arm_color is None:
+                        arm_color = nv
+                    elif nv != arm_color:
+                        ok = False
+                        break
+                    arms.append((nr, nc))
+                if ok and len(arms) == 4:
+                    crosses.append((r, c, v, arm_color))
+        return crosses
+
+    def expand_cross(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        crosses = find_crosses(grid, bg_val)
+        if not crosses:
+            return None
+        result = [row[:] for row in grid]
+        for cr, cc, center_color, arm_color in crosses:
+            # Extend arms (distance 2)
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cr + 2 * dr, cc + 2 * dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = arm_color
+            # Center color at distance-1 diagonals
+            for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = center_color
+            # Center color at distance-2 diagonals
+            for dr, dc in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = center_color
+        return result
+
+    results = [expand_cross(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: expand_cross(g, b)
+
+    # Variant: only distance-1 diagonals (no distance-2)
+    def expand_cross_v2(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        crosses = find_crosses(grid, bg_val)
+        if not crosses:
+            return None
+        result = [row[:] for row in grid]
+        for cr, cc, center_color, arm_color in crosses:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cr + 2 * dr, cc + 2 * dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = arm_color
+            for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                nr, nc = cr + dr, cc + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = center_color
+        return result
+
+    results = [expand_cross_v2(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: expand_cross_v2(g, b)
+
+    return None
+
+
+# ─── Diagonal gravity stacking ────────────────────────────────────────────────
+
+def _try_diagonal_gravity_stack(train):
+    """
+    Rectangular objects form a diagonal staircase stack.
+    Objects are sorted by column (left-to-right), then stacked from a corner:
+    each object's top-left = previous object's bottom-right.
+    Later objects overwrite the shared corner pixel.
+    """
+    bg = _bg(train)
+
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    def find_rect_objects(grid, bg_val):
+        """Find solid-color rectangular objects."""
+        rows, cols = len(grid), len(grid[0])
+        visited = [[False] * cols for _ in range(rows)]
+        objects = []
+        for sr in range(rows):
+            for sc in range(cols):
+                if visited[sr][sc] or grid[sr][sc] == bg_val:
+                    continue
+                cells = []
+                color = grid[sr][sc]
+                queue = [(sr, sc)]
+                while queue:
+                    r, c = queue.pop(0)
+                    if r < 0 or r >= rows or c < 0 or c >= cols:
+                        continue
+                    if visited[r][c] or grid[r][c] != color:
+                        continue
+                    visited[r][c] = True
+                    cells.append((r, c))
+                    for dr2, dc2 in [(-1,0),(1,0),(0,-1),(0,1)]:
+                        queue.append((r+dr2, c+dc2))
+                if cells:
+                    min_r = min(r for r, c in cells)
+                    max_r = max(r for r, c in cells)
+                    min_c = min(c for r, c in cells)
+                    max_c = max(c for r, c in cells)
+                    h, w = max_r - min_r + 1, max_c - min_c + 1
+                    if len(cells) == h * w:
+                        objects.append({
+                            "r0": min_r, "c0": min_c, "h": h, "w": w,
+                            "color": color,
+                        })
+        return objects
+
+    def staircase_stack(grid, bg_val, sort_by="col_asc", corner="top_left"):
+        rows, cols = len(grid), len(grid[0])
+        objects = find_rect_objects(grid, bg_val)
+        if not objects:
+            return grid
+
+        # Sort objects by position
+        if sort_by == "col_asc":
+            objects.sort(key=lambda o: o["c0"])
+        elif sort_by == "col_desc":
+            objects.sort(key=lambda o: -o["c0"])
+        elif sort_by == "row_asc":
+            objects.sort(key=lambda o: o["r0"])
+        elif sort_by == "row_desc":
+            objects.sort(key=lambda o: -o["r0"])
+        elif sort_by == "size_desc":
+            objects.sort(key=lambda o: -(o["h"] * o["w"]))
+
+        result = [[bg_val] * cols for _ in range(rows)]
+
+        # Stack from corner: each object's top-left = previous object's bottom-right
+        if corner == "top_left":
+            cur_r, cur_c = 0, 0
+            for obj in objects:
+                h, w = obj["h"], obj["w"]
+                for dr in range(h):
+                    for dc in range(w):
+                        r, c = cur_r + dr, cur_c + dc
+                        if 0 <= r < rows and 0 <= c < cols:
+                            result[r][c] = obj["color"]
+                cur_r += h - 1
+                cur_c += w - 1
+        elif corner == "top_right":
+            cur_r, cur_c = 0, cols - 1
+            for obj in objects:
+                h, w = obj["h"], obj["w"]
+                c_start = cur_c - w + 1
+                for dr in range(h):
+                    for dc in range(w):
+                        r, c = cur_r + dr, c_start + dc
+                        if 0 <= r < rows and 0 <= c < cols:
+                            result[r][c] = obj["color"]
+                cur_r += h - 1
+                cur_c = c_start + w - 1 - (w - 1)
+
+        return result
+
+    for sort_by in ["col_asc", "col_desc", "row_asc", "row_desc", "size_desc"]:
+        for corner in ["top_left", "top_right"]:
+            results = [staircase_stack(ex["input"], bg, sort_by, corner) for ex in train]
+            if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+                return lambda g, b=bg, sb=sort_by, co=corner: staircase_stack(g, b, sb, co)
 
     return None
