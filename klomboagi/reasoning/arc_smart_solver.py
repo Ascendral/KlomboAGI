@@ -187,6 +187,7 @@ class SmartARCSolverV2(SmartARCSolver):
         from klomboagi.reasoning.arc_context_rules import learn_context_rule
         from klomboagi.reasoning.arc_ranking import learn_ranking_rule
         from klomboagi.reasoning.arc_legend import learn_legend_rule
+        from klomboagi.reasoning.arc_compose import learn_compose_rule
 
         # Order: fast → slow, specific → general
         # LOO=True only for pattern_match which is prone to overfitting
@@ -196,6 +197,7 @@ class SmartARCSolverV2(SmartARCSolver):
             (learn_context_rule, False),      # Context-based (Voronoi, border/interior)
             (learn_ranking_rule, False),      # Ranking by height, diagonal tile, stamp
             (learn_legend_rule, False),       # Color legend/key mapping
+            (learn_compose_rule, False),      # Compositional (remove color, mask, filter+crop)
             (learn_gravity_rule, False),      # Gravity/movement
             (learn_tiling_rule, False),       # Tiling/scaling
             (learn_object_rule, False),       # Object-level rules
