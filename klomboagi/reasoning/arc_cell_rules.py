@@ -728,3 +728,72 @@ def learn_single_cell_paint(train: list[dict]) -> callable | None:
     if all(apply_paint(ex["input"]) == ex["output"] for ex in train):
         return apply_paint
     return None
+
+
+# ─── Cross from Dots ─────────────────────────────────────────────────────────
+
+def learn_cross_from_dots(train: list[dict]) -> callable | None:
+    """
+    Each dot paints BOTH its full row AND full column with its color.
+    Where two different-color crosses overlap → a learned intersection color.
+
+    Handles task 23581191.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    # Learn intersection color from training
+    int_colors = set()
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        rows, cols = len(inp), len(inp[0])
+        for r in range(rows):
+            for c in range(cols):
+                if out[r][c] != bg and out[r][c] != inp[r][c]:
+                    # Check if this is a new color not in input
+                    if out[r][c] not in {v for row in inp for v in row if v != bg}:
+                        int_colors.add(out[r][c])
+    if len(int_colors) != 1:
+        return None
+    int_color = int_colors.pop()
+
+    def apply_cross(grid, bg_val=bg, ic=int_color):
+        rows, cols = len(grid), len(grid[0])
+        # Find dots
+        dots = []
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val:
+                    dots.append((r, c, grid[r][c]))
+
+        if len(dots) < 2:
+            return grid
+
+        # Paint row and col for each dot
+        result = [[bg_val] * cols for _ in range(rows)]
+        # Track which colors are assigned per cell
+        cell_colors: dict = {}  # (r,c) -> set of colors
+
+        for dr, dc, color in dots:
+            for c in range(cols):
+                cell_colors.setdefault((dr, c), set()).add(color)
+            for r in range(rows):
+                cell_colors.setdefault((r, dc), set()).add(color)
+
+        for (r, c), colors in cell_colors.items():
+            if len(colors) == 1:
+                result[r][c] = list(colors)[0]
+            else:
+                result[r][c] = ic  # intersection
+
+        return result
+
+    if all(apply_cross(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_cross(ex["input"]) == ex["output"] for ex in train):
+        return apply_cross
+    return None
