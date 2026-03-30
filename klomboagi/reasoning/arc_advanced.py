@@ -26,6 +26,7 @@ def learn_advanced_rule(train: list[dict]) -> callable | None:
     """Try all advanced strategies, return first that works."""
     for fn in [
         _try_spiral_fill,
+        _try_concentric_expand,
         _try_complete_symmetry,
         _try_symmetry,
         _try_color_propagate,
@@ -1578,4 +1579,127 @@ def _try_spiral_fill(train):
 
     if all(make_spiral(ex["input"]) == ex["output"] for ex in train):
         return make_spiral
+    return None
+
+
+# ─── Concentric Rectangle Expansion ──────────────────────────────────────────
+
+def _try_concentric_expand(train):
+    """
+    Input: bordered rectangle (color B) with interior (color I) on bg.
+    Output: swap B↔I in original pattern, add outer ring of B extending
+    outward by interior_size cells.
+
+    Handles task 3befdf3e.
+    """
+    bg = _bg(train)
+
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    def _expand_one_rect(result, grid, rmin, rmax, cmin, cmax, bg_val):
+        """Expand one bordered rectangle in place."""
+        rows, cols = len(grid), len(grid[0])
+
+        # Find border color
+        edge_colors = Counter()
+        for r in range(rmin, rmax + 1):
+            for c in range(cmin, cmax + 1):
+                v = grid[r][c]
+                if v != bg_val and (r == rmin or r == rmax or c == cmin or c == cmax):
+                    edge_colors[v] += 1
+        if not edge_colors:
+            return False
+        border_color = edge_colors.most_common(1)[0][0]
+
+        # Find interior color
+        int_colors = set()
+        for r in range(rmin + 1, rmax):
+            for c in range(cmin + 1, cmax):
+                if grid[r][c] != border_color and grid[r][c] != bg_val:
+                    int_colors.add(grid[r][c])
+        if len(int_colors) != 1:
+            return False
+        interior_color = int_colors.pop()
+
+        int_h = rmax - rmin - 1
+        int_w = cmax - cmin - 1
+        if int_h <= 0 or int_w <= 0:
+            return False
+
+        # Center: swap interior → border_color
+        for r in range(rmin + 1, rmax):
+            for c in range(cmin + 1, cmax):
+                if 0 <= r < rows and 0 <= c < cols:
+                    result[r][c] = border_color
+
+        # Ring 1: swap border → interior_color
+        for r in range(rmin, rmax + 1):
+            for c in range(cmin, cmax + 1):
+                if grid[r][c] == border_color:
+                    result[r][c] = interior_color
+
+        # Ring 2: cross-shaped extension
+        for r in range(max(0, rmin - int_h), rmin):
+            for c in range(cmin, min(cols, cmax + 1)):
+                result[r][c] = border_color
+        for r in range(rmax + 1, min(rows, rmax + 1 + int_h)):
+            for c in range(cmin, min(cols, cmax + 1)):
+                result[r][c] = border_color
+        for r in range(rmin, rmax + 1):
+            for c in range(max(0, cmin - int_w), cmin):
+                result[r][c] = border_color
+            for c in range(cmax + 1, min(cols, cmax + 1 + int_w)):
+                result[r][c] = border_color
+
+        return True
+
+    def apply_expand(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        result = [[bg_val] * cols for _ in range(rows)]
+
+        # Find connected components of non-bg cells
+        visited = [[False] * cols for _ in range(rows)]
+        rects = []
+        for sr in range(rows):
+            for sc in range(cols):
+                if visited[sr][sc] or grid[sr][sc] == bg_val:
+                    continue
+                # BFS to find connected component
+                comp = []
+                queue = [(sr, sc)]
+                while queue:
+                    r, c = queue.pop(0)
+                    if visited[r][c]:
+                        continue
+                    visited[r][c] = True
+                    comp.append((r, c))
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if (0 <= nr < rows and 0 <= nc < cols and
+                                not visited[nr][nc] and grid[nr][nc] != bg_val):
+                            queue.append((nr, nc))
+                if comp:
+                    rs = [r for r, c in comp]
+                    cs = [c for r, c in comp]
+                    rects.append((min(rs), max(rs), min(cs), max(cs)))
+
+        if not rects:
+            return None
+
+        for rmin, rmax, cmin, cmax in rects:
+            if not _expand_one_rect(result, grid, rmin, rmax, cmin, cmax, bg_val):
+                return None
+
+        return result
+
+    results = [apply_expand(ex["input"]) for ex in train]
+    if any(r is None for r in results):
+        return None
+    if all(r == ex["input"] for r, ex in zip(results, train)):
+        return None
+    if all(r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: apply_expand(g, b)
     return None
