@@ -459,3 +459,109 @@ def learn_template_row_stamp(train: list[dict]) -> callable | None:
     if all(apply_stamp(ex["input"]) == ex["output"] for ex in train):
         return apply_stamp
     return None
+
+
+# ─── Grid Gap Fill ───────────────────────────────────────────────────────────
+
+def learn_grid_gap_fill(train: list[dict]) -> callable | None:
+    """
+    Fill gaps in a regular block grid with 2 (inner) or 1 (edge/trailing).
+
+    Input: regular grid of NxN blocks of color C with zero-gaps.
+    Output: gaps between blocks → 2, gaps at edges → 1, outside → 0.
+
+    Rules based on V-position × H-position:
+      gap_row × in_group  → 2     gap_row × between → 2     gap_row × outer → 1
+      blk_row × in_group  → keep  blk_row × between → 2     blk_row × outer → 0
+      trail   × in_group  → 0     trail   × between → 1     trail   × outer → 0
+
+    Handles task 137f0df0.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    def _group_runs(indices):
+        """Group sorted indices into consecutive runs → list of sets."""
+        if not indices:
+            return []
+        groups, cur = [], {indices[0]}
+        for i in indices[1:]:
+            if i == max(cur) + 1:
+                cur.add(i)
+            else:
+                groups.append(cur)
+                cur = {i}
+        groups.append(cur)
+        return groups
+
+    def apply_gap_fill(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+
+        # Find block color (non-bg color present in many cells)
+        from collections import Counter
+        flat = [v for row in grid for v in row if v != bg_val]
+        if not flat:
+            return grid
+        block_color = Counter(flat).most_common(1)[0][0]
+
+        # Find block rows and cols
+        blk_rows = sorted({r for r in range(rows)
+                           for c in range(cols) if grid[r][c] == block_color})
+        blk_cols = sorted({c for r in range(rows)
+                           for c in range(cols) if grid[r][c] == block_color})
+        if not blk_rows or not blk_cols:
+            return grid
+
+        row_groups = _group_runs(blk_rows)
+        col_groups = _group_runs(blk_cols)
+
+        # Classify each column
+        all_blk_cols = set().union(*col_groups)
+        between_cols = set()
+        for i in range(len(col_groups) - 1):
+            lo = max(col_groups[i]) + 1
+            hi = min(col_groups[i + 1])
+            between_cols.update(range(lo, hi))
+        outer_cols = set(range(cols)) - all_blk_cols - between_cols
+
+        # Classify each row
+        all_blk_rows = set().union(*row_groups)
+        gap_rows = set()
+        for i in range(len(row_groups) - 1):
+            lo = max(row_groups[i]) + 1
+            hi = min(row_groups[i + 1])
+            gap_rows.update(range(lo, hi))
+        rmin, rmax = min(all_blk_rows), max(all_blk_rows)
+        trail_rows = set(range(rmax + 1, rows)) | set(range(0, rmin))
+
+        result = [row[:] for row in grid]
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val:
+                    continue  # Keep blocks as-is
+
+                if r in gap_rows:
+                    if c in between_cols or c in all_blk_cols:
+                        result[r][c] = 2
+                    elif c in outer_cols:
+                        result[r][c] = 1
+                elif r in all_blk_rows:
+                    if c in between_cols:
+                        result[r][c] = 2
+                    # outer → 0 (already bg)
+                elif r in trail_rows:
+                    if c in between_cols:
+                        result[r][c] = 1
+                    # in_group or outer → 0 (already bg)
+
+        return result
+
+    if all(apply_gap_fill(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_gap_fill(ex["input"]) == ex["output"] for ex in train):
+        return apply_gap_fill
+    return None
