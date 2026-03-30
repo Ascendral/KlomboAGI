@@ -461,6 +461,81 @@ def learn_template_row_stamp(train: list[dict]) -> callable | None:
     return None
 
 
+# ─── Connect Dot Pairs ──────────────────────────────────────────────────────
+
+def learn_connect_dot_pairs(train: list[dict]) -> callable | None:
+    """
+    Pairs of same-color dots sharing a row or column are connected
+    by a line of a learned fill color between them.
+
+    Handles task 253bf280.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    # Learn dot color and fill color from training
+    dot_colors = set()
+    fill_colors = set()
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        rows, cols = len(inp), len(inp[0])
+        for r in range(rows):
+            for c in range(cols):
+                if inp[r][c] != bg:
+                    dot_colors.add(inp[r][c])
+                if out[r][c] != bg and out[r][c] != inp[r][c]:
+                    fill_colors.add(out[r][c])
+
+    if len(dot_colors) != 1 or len(fill_colors) > 1:
+        return None
+    dot_color = dot_colors.pop()
+    fill_color = fill_colors.pop() if fill_colors else None
+    if fill_color is None:
+        return None  # No change detected
+
+    def apply_connect(grid, bg_val=bg, dc=dot_color, fc=fill_color):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+
+        # Find all dot positions
+        dots = [(r, c) for r in range(rows) for c in range(cols)
+                if grid[r][c] == dc]
+
+        # Group by row
+        from collections import defaultdict
+        by_row = defaultdict(list)
+        by_col = defaultdict(list)
+        for r, c in dots:
+            by_row[r].append(c)
+            by_col[c].append(r)
+
+        # Connect pairs sharing a row
+        for r, col_list in by_row.items():
+            if len(col_list) == 2:
+                c1, c2 = sorted(col_list)
+                for c in range(c1 + 1, c2):
+                    result[r][c] = fc
+
+        # Connect pairs sharing a column
+        for c, row_list in by_col.items():
+            if len(row_list) == 2:
+                r1, r2 = sorted(row_list)
+                for r in range(r1 + 1, r2):
+                    result[r][c] = fc
+
+        return result
+
+    if all(apply_connect(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_connect(ex["input"]) == ex["output"] for ex in train):
+        return apply_connect
+    return None
+
+
 # ─── Grid Gap Fill ───────────────────────────────────────────────────────────
 
 def learn_grid_gap_fill(train: list[dict]) -> callable | None:
