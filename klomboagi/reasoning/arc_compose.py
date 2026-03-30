@@ -229,33 +229,41 @@ def _try_split_by_divider_and_combine(train):
                 # Could be shrinking — output = combined half
                 pass
 
-    def find_divider(grid, bg_val):
-        """Find a column or row that is entirely one non-bg color."""
+    def find_all_dividers(grid, bg_val):
+        """Find ALL rows/cols that are entirely one non-bg color. Returns list of (type, pos, color)."""
         rows, cols = len(grid), len(grid[0])
-        # Column dividers
+        dividers = []
         for c in range(cols):
             vals = set(grid[r][c] for r in range(rows))
             if len(vals) == 1 and vals != {bg_val}:
-                return ("col", c, list(vals)[0])
-        # Row dividers
+                dividers.append(("col", c, list(vals)[0]))
         for r in range(rows):
             vals = set(grid[r][c] for c in range(cols))
             if len(vals) == 1 and vals != {bg_val}:
-                return ("row", r, list(vals)[0])
+                dividers.append(("row", r, list(vals)[0]))
+        return dividers
+
+    # Find all dividers in first example, then find one that's consistent across all
+    first_dividers = find_all_dividers(train[0]["input"], bg)
+    if not first_dividers:
         return None
 
-    # Find divider info from first training example
-    div0 = find_divider(train[0]["input"], bg)
-    if div0 is None:
+    # Find a (type, color) combination that appears in ALL training examples
+    div_type, div_color = None, None
+    for candidate in first_dividers:
+        ctype, _, ccolor = candidate
+        consistent = True
+        for ex in train[1:]:
+            divs = find_all_dividers(ex["input"], bg)
+            if not any(d[0] == ctype and d[2] == ccolor for d in divs):
+                consistent = False
+                break
+        if consistent:
+            div_type, div_color = ctype, ccolor
+            break
+
+    if div_type is None:
         return None
-
-    # Check all training examples have same divider type and color
-    for ex in train:
-        div = find_divider(ex["input"], bg)
-        if div is None or div[0] != div0[0] or div[2] != div0[2]:
-            return None
-
-    div_type, div_color = div0[0], div0[2]
 
     # Split input at divider, combine two halves
     def split_and_combine(grid, bg_val, dtype, dcolor, op, out_color):
@@ -284,6 +292,8 @@ def _try_split_by_divider_and_combine(train):
                     lv = left[r][c] != bg_val
                     rv = right[r][c] != bg_val
                     if op == "and" and lv and rv:
+                        result[r][c] = out_color
+                    elif op == "nor" and not lv and not rv:
                         result[r][c] = out_color
                     elif op == "or" and (lv or rv):
                         result[r][c] = out_color if lv or rv else bg_val
@@ -314,6 +324,8 @@ def _try_split_by_divider_and_combine(train):
                     bv = bot[r][c] != bg_val
                     if op == "and" and tv and bv:
                         result[r][c] = out_color
+                    elif op == "nor" and not tv and not bv:
+                        result[r][c] = out_color
                     elif op == "or" and (tv or bv):
                         result[r][c] = out_color
                     elif op == "xor" and (tv ^ bv):
@@ -333,7 +345,7 @@ def _try_split_by_divider_and_combine(train):
                     out_colors.add(v)
 
     for out_color in out_colors:
-        for op in ["and", "xor", "or", "left_only", "right_only"]:
+        for op in ["and", "xor", "or", "nor", "left_only", "right_only"]:
             results = [split_and_combine(ex["input"], bg, div_type, div_color, op, out_color)
                        for ex in train]
             if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):

@@ -94,6 +94,11 @@ def learn_multiobj_rule(train: list[dict]) -> Callable | None:
         _try_inside_outside_recolor,
         _try_color_objects_by_row_position,
         _try_color_objects_by_col_position,
+        _try_cross_divider_quadrants,
+        _try_cross_quadrant_select,
+        _try_corner_frame_extract,
+        _try_most_common_object,
+        _try_color_specific_neighbors,
     ]:
         try:
             rule = fn(train)
@@ -964,6 +969,316 @@ def _try_color_objects_by_row_position(train):
     return None
 
 
+def _try_corner_frame_extract(train):
+    """
+    Input has 4 corner markers (same color) at the corners of a rectangle.
+    Those 4 points define a frame. The interior contains cells of another color.
+    Output = interior content, with the interior cells recolored to the corner marker color.
+    """
+    bg = _bg(train)
+
+    def find_4_corners(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        by_color = {}
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v != bg_val:
+                    if v not in by_color:
+                        by_color[v] = []
+                    by_color[v].append((r, c))
+
+        for color, cells in by_color.items():
+            if len(cells) != 4:
+                continue
+            rs = sorted(set(r for r, c in cells))
+            cs_vals = sorted(set(c for r, c in cells))
+            if len(rs) != 2 or len(cs_vals) != 2:
+                continue
+            r0, r1 = rs[0], rs[1]
+            c0, c1 = cs_vals[0], cs_vals[1]
+            corners = {(r0, c0), (r0, c1), (r1, c0), (r1, c1)}
+            if corners == set(cells):
+                return color, r0, r1, c0, c1
+        return None
+
+    def apply_frame_extract(grid, bg_val):
+        result = find_4_corners(grid, bg_val)
+        if result is None:
+            return None
+        frame_color, r0, r1, c0, c1 = result
+        if r1 - r0 < 2 or c1 - c0 < 2:
+            return None
+        h = r1 - r0 - 1
+        w = c1 - c0 - 1
+        output = [[bg_val] * w for _ in range(h)]
+        for r in range(h):
+            for c in range(w):
+                v = grid[r0 + 1 + r][c0 + 1 + c]
+                if v != bg_val and v != frame_color:
+                    output[r][c] = frame_color
+        return output
+
+    results = [apply_frame_extract(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: apply_frame_extract(g, b)
+
+    return None
+
+
+def _try_most_common_object(train):
+    """
+    Input contains multiple copies of the same pattern (possibly non-connected),
+    plus different noise patterns. Output = the pattern that repeats most.
+    """
+    bg = _bg(train)
+
+    def normalize_cells(cells, grid):
+        min_r = min(r for r, c in cells)
+        max_r = max(r for r, c in cells)
+        min_c = min(c for r, c in cells)
+        max_c = max(c for r, c in cells)
+        h, w = max_r - min_r + 1, max_c - min_c + 1
+        return tuple(
+            tuple(grid[min_r + dr][min_c + dc] for dc in range(w))
+            for dr in range(h)
+        )
+
+    def nearest_neighbor_cluster(cells, k):
+        """Greedily partition cells into groups of size k using nearest-neighbor."""
+        remaining = list(cells)
+        groups = []
+        while len(remaining) >= k:
+            group = [remaining.pop(0)]
+            while len(group) < k:
+                gr = sum(r for r, c in group) / len(group)
+                gc = sum(c for r, c in group) / len(group)
+                best_dist = float('inf')
+                best_idx = -1
+                for i, (r, c) in enumerate(remaining):
+                    d = (r - gr) ** 2 + (c - gc) ** 2
+                    if d < best_dist:
+                        best_dist = d
+                        best_idx = i
+                if best_idx < 0:
+                    break
+                group.append(remaining.pop(best_idx))
+            if len(group) == k:
+                groups.append(group)
+        return groups
+
+    def get_candidates(grid, bg_val):
+        """Return list of (pattern, num_copies) tuples."""
+        rows, cols = len(grid), len(grid[0])
+        # (pattern_tuple, num_copies) → track best per pattern
+        pattern_to_copies = {}
+
+        # Strategy 1: connected components
+        visited = [[False] * cols for _ in range(rows)]
+        components = []
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val and not visited[r][c]:
+                    cells = []
+                    queue = [(r, c)]
+                    visited[r][c] = True
+                    while queue:
+                        cr, cc = queue.pop()
+                        cells.append((cr, cc))
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = cr+dr, cc+dc
+                            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] != bg_val:
+                                visited[nr][nc] = True
+                                queue.append((nr, nc))
+                    components.append(cells)
+
+        if components:
+            normed = [normalize_cells(c, grid) for c in components]
+            shape_counts = Counter(normed)
+            for shape, count in shape_counts.items():
+                if count >= 2:
+                    pattern_to_copies[shape] = max(pattern_to_copies.get(shape, 0), count)
+
+        # Strategy 2: spatial clustering by color
+        by_color = {}
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v != bg_val:
+                    if v not in by_color:
+                        by_color[v] = []
+                    by_color[v].append((r, c))
+
+        for color, cells in by_color.items():
+            n = len(cells)
+            if n < 4:
+                continue
+            for k in range(2, n):
+                if n % k != 0:
+                    continue
+                num_groups = n // k
+                if num_groups < 2:
+                    continue
+                sorted_cells = sorted(cells)
+                groups = nearest_neighbor_cluster(sorted_cells, k)
+                if len(groups) != num_groups:
+                    continue
+                normed = [normalize_cells(g, grid) for g in groups]
+                if len(set(normed)) == 1:
+                    pattern_to_copies[normed[0]] = max(pattern_to_copies.get(normed[0], 0), num_groups)
+
+        # Return list of (pattern_list, copies) sorted by:
+        # 1. Has internal bg cells (non-trivial patterns first)
+        # 2. Num copies (more = more likely signal)
+        # 3. Area (larger = more informative)
+        results = []
+        for shape, copies in pattern_to_copies.items():
+            pattern = [list(row) for row in shape]
+            area = len(pattern) * len(pattern[0]) if pattern else 0
+            has_bg = any(v == bg_val for row in pattern for v in row)
+            results.append((pattern, copies, area, has_bg))
+        # Sort: has_bg desc, copies desc, area desc
+        results.sort(key=lambda x: (x[3], x[1], x[2]), reverse=True)
+        return results
+
+    # Find which candidate pattern is consistent across all training examples
+    # Build candidates from first training example, then verify on rest
+    if not train:
+        return None
+
+    candidates0 = get_candidates(train[0]["input"], bg)
+    if not candidates0:
+        return None
+
+    # Check all training examples have the correct output in candidates
+    # (candidates are (pattern, copies, area, has_bg) tuples)
+    for ex in train:
+        ex_cands = get_candidates(ex["input"], bg)
+        patterns_only = [c[0] for c in ex_cands]
+        if ex["output"] not in patterns_only:
+            return None
+
+    # Lambda: return best candidate (most copies, then largest area)
+    def apply_most_common(grid, bg_val, fn=get_candidates):
+        cands = fn(grid, bg_val)
+        if not cands:
+            return None
+        return cands[0][0]  # already sorted by (copies desc, area desc)
+
+    fn = lambda g, b=bg: apply_most_common(g, b)
+    if all(fn(ex["input"]) == ex["output"] for ex in train):
+        return fn
+
+    return None
+
+
+def _try_cross_divider_quadrants(train):
+    """
+    Input has a cross divider (same color in one full row + one full col).
+    Creates 4 quadrants, each with one object.
+    Output = 2×2 arrangement of the 4 objects (side-by-side).
+    """
+    bg = _bg(train)
+
+    def find_cross_divider(grid, bg_val):
+        """Find (div_row, div_col, div_color) where one row and one col are entirely that color."""
+        rows, cols = len(grid), len(grid[0])
+        div_rows = {}
+        div_cols = {}
+        for r in range(rows):
+            vals = set(grid[r])
+            if len(vals) == 1 and vals != {bg_val}:
+                div_rows[r] = list(vals)[0]
+        for c in range(cols):
+            vals = set(grid[r][c] for r in range(rows))
+            if len(vals) == 1 and vals != {bg_val}:
+                div_cols[c] = list(vals)[0]
+        # Find matching row+col with same color
+        for r, rv in div_rows.items():
+            for c, cv in div_cols.items():
+                if rv == cv:
+                    return r, c, rv
+        return None
+
+    def extract_object_from_region(grid, r0, r1, c0, c1, bg_val, div_color):
+        """Extract the single non-bg, non-divider object in the region as its bounding box."""
+        cells = []
+        for r in range(r0, r1):
+            for c in range(c0, c1):
+                v = grid[r][c]
+                if v != bg_val and v != div_color:
+                    cells.append((r, c))
+        if not cells:
+            return None
+        min_r = min(r for r, c in cells)
+        max_r = max(r for r, c in cells)
+        min_c = min(c for r, c in cells)
+        max_c = max(c for r, c in cells)
+        h, w = max_r - min_r + 1, max_c - min_c + 1
+        sub = [[bg_val] * w for _ in range(h)]
+        for r, c in cells:
+            sub[r - min_r][c - min_c] = grid[r][c]
+        return sub
+
+    def apply_cross_quadrants(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+        div = find_cross_divider(grid, bg_val)
+        if div is None:
+            return None
+        div_r, div_c, div_color = div
+
+        # Extract 4 quadrant objects
+        tl = extract_object_from_region(grid, 0, div_r, 0, div_c, bg_val, div_color)
+        tr = extract_object_from_region(grid, 0, div_r, div_c + 1, cols, bg_val, div_color)
+        bl = extract_object_from_region(grid, div_r + 1, rows, 0, div_c, bg_val, div_color)
+        br = extract_object_from_region(grid, div_r + 1, rows, div_c + 1, cols, bg_val, div_color)
+
+        if tl is None or tr is None or bl is None or br is None:
+            return None
+
+        # All objects must have same dimensions (or we pad to match)
+        # Find unified h and w for each half
+        top_h = max(len(tl), len(tr))
+        bot_h = max(len(bl), len(br))
+        left_w = max(len(tl[0]) if tl else 0, len(bl[0]) if bl else 0)
+        right_w = max(len(tr[0]) if tr else 0, len(br[0]) if br else 0)
+
+        def pad(obj, h, w):
+            result = [[bg_val] * w for _ in range(h)]
+            for r in range(len(obj)):
+                for c in range(len(obj[r])):
+                    result[r][c] = obj[r][c]
+            return result
+
+        tl = pad(tl, top_h, left_w)
+        tr = pad(tr, top_h, right_w)
+        bl = pad(bl, bot_h, left_w)
+        br = pad(br, bot_h, right_w)
+
+        # Build output
+        out_h = top_h + bot_h
+        out_w = left_w + right_w
+        result = [[bg_val] * out_w for _ in range(out_h)]
+        for r in range(top_h):
+            for c in range(left_w):
+                result[r][c] = tl[r][c]
+            for c in range(right_w):
+                result[r][left_w + c] = tr[r][c]
+        for r in range(bot_h):
+            for c in range(left_w):
+                result[top_h + r][c] = bl[r][c]
+            for c in range(right_w):
+                result[top_h + r][left_w + c] = br[r][c]
+        return result
+
+    # Verify all training examples
+    results = [apply_cross_quadrants(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: apply_cross_quadrants(g, b)
+
+    return None
+
+
 def _try_color_objects_by_col_position(train):
     """Same as above but for column position."""
     bg = _bg(train)
@@ -1005,5 +1320,151 @@ def _try_color_objects_by_col_position(train):
 
     if all(apply(ex["input"], bg) == ex["output"] for ex in train):
         return lambda g, b=bg: apply(g, b)
+
+    return None
+
+
+def _try_cross_quadrant_select(train):
+    """
+    Input has a cross divider (one full row + one full col of same color).
+    This creates 4 quadrants, each mostly filled with one dominant color.
+    One quadrant has a cell that differs from the dominant color.
+    Output = that unique quadrant.
+    """
+    def find_cross_and_unique_quadrant(grid):
+        rows, cols = len(grid), len(grid[0])
+
+        # Find rows that are entirely one color
+        row_dividers = []
+        for r in range(rows):
+            vals = set(grid[r])
+            if len(vals) == 1:
+                row_dividers.append((r, list(vals)[0]))
+
+        # Find cols that are entirely one color
+        col_dividers = []
+        for c in range(cols):
+            vals = set(grid[r][c] for r in range(rows))
+            if len(vals) == 1:
+                col_dividers.append((c, list(vals)[0]))
+
+        if not row_dividers or not col_dividers:
+            return None
+
+        # Find matching color between row+col dividers
+        row_div_colors = {color for _, color in row_dividers}
+        col_div_colors = {color for _, color in col_dividers}
+        shared = row_div_colors & col_div_colors
+        if not shared:
+            return None
+
+        div_color = next(iter(shared))
+        div_row = next(r for r, c in row_dividers if c == div_color)
+        div_col = next(c for c, color in col_dividers if color == div_color)
+
+        # Extract the 4 quadrants
+        q_tl = [grid[r][:div_col] for r in range(div_row)]
+        q_tr = [grid[r][div_col+1:] for r in range(div_row)]
+        q_bl = [grid[r][:div_col] for r in range(div_row+1, rows)]
+        q_br = [grid[r][div_col+1:] for r in range(div_row+1, rows)]
+
+        quadrants = [q for q in [q_tl, q_tr, q_bl, q_br] if q and q[0]]
+
+        # For each quadrant, find dominant color + check for non-dominant cell
+        unique_qs = []
+        for q in quadrants:
+            all_vals = [v for row in q for v in row]
+            if not all_vals:
+                continue
+            dominant = Counter(all_vals).most_common(1)[0][0]
+            # Has a cell different from both dominant and divider color?
+            non_dominant = [v for v in all_vals if v != dominant and v != div_color]
+            if non_dominant:
+                unique_qs.append(q)
+
+        if len(unique_qs) != 1:
+            return None
+
+        return unique_qs[0]
+
+    results = [find_cross_and_unique_quadrant(ex["input"]) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return find_cross_and_unique_quadrant
+
+    return None
+
+
+def _try_color_specific_neighbors(train):
+    """
+    Each non-bg color in input has a specific neighbor pattern added around it.
+    Example: color 1 → add color 7 in NSEW positions
+             color 2 → add color 4 in diagonal positions
+    Learns strictly: an offset (dr, dc) is a rule for color C only if EVERY
+    occurrence of C in training has that neighbor position painted the same way.
+    """
+    bg = _bg(train)
+
+    # Only applies to same-size transforms
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    # For each (src_color, dr, dc), collect ALL observed output values
+    # Key: (src_color, dr, dc) → list of output values at (r+dr, c+dc)
+    # Only when output[r+dr][c+dc] was bg in input
+    candidate_map = defaultdict(list)
+
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        rows, cols = len(inp), len(inp[0])
+        for r in range(rows):
+            for c in range(cols):
+                src = inp[r][c]
+                if src == bg:
+                    continue
+                # Only consider immediate neighbors (NSEW + diagonals, distance 1)
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < rows and 0 <= nc < cols):
+                        continue
+                    if inp[nr][nc] == bg:
+                        # This position was bg in input — record what output has
+                        out_v = out[nr][nc]
+                        candidate_map[(src, dr, dc)].append(out_v)
+
+    # Build strict neighbor map: only include (src, dr, dc) → paint_color if:
+    # 1. ALL occurrences have the SAME non-bg output value
+    # 2. At least one occurrence was actually painted (non-bg)
+    neighbor_map = {}
+    for (src, dr, dc), vals in candidate_map.items():
+        unique_vals = set(vals)
+        if len(unique_vals) == 1:
+            v = list(unique_vals)[0]
+            if v != bg:
+                neighbor_map[(src, dr, dc)] = v
+
+    if not neighbor_map:
+        return None
+
+    def apply_neighbors(grid, bg_val, nm=neighbor_map):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for r in range(rows):
+            for c in range(cols):
+                src = grid[r][c]
+                if src == bg_val:
+                    continue
+                for (s, dr, dc), paint_color in nm.items():
+                    if s != src:
+                        continue
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < rows and 0 <= nc < cols):
+                        continue
+                    if grid[nr][nc] == bg_val:
+                        result[nr][nc] = paint_color
+        return result
+
+    if all(apply_neighbors(ex["input"], bg) == ex["output"] for ex in train):
+        return lambda g, b=bg: apply_neighbors(g, b)
 
     return None

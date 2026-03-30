@@ -320,20 +320,18 @@ def _try_stamp_pattern_at_markers(train):
                 marker_color = inp[r][c]
 
                 # Check what new cells appear around this marker in the output
-                for dr in range(-2, 3):
-                    for dc in range(-2, 3):
-                        if dr == 0 and dc == 0:
-                            continue
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < rows and 0 <= nc < cols:
-                            if inp[nr][nc] == bg and out[nr][nc] != bg:
-                                delta = (dr, dc)
-                                stamp_color = out[nr][nc]
-                                if delta in stamp_patterns[marker_color]:
-                                    if stamp_patterns[marker_color][delta] != stamp_color:
-                                        return None  # Inconsistent
-                                else:
-                                    stamp_patterns[marker_color][delta] = stamp_color
+                # Only consider immediate neighbors (NSEW + diagonals, distance 1)
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        if inp[nr][nc] == bg and out[nr][nc] != bg:
+                            delta = (dr, dc)
+                            stamp_color = out[nr][nc]
+                            if delta in stamp_patterns[marker_color]:
+                                if stamp_patterns[marker_color][delta] != stamp_color:
+                                    return None  # Inconsistent
+                            else:
+                                stamp_patterns[marker_color][delta] = stamp_color
 
     if not stamp_patterns:
         return None

@@ -109,6 +109,17 @@ def _try_neighborhood_4(train: list[dict]) -> callable | None:
     if all(k[0] == v for k, v in rule_table.items()):
         return None
 
+    # Anti-overfitting check: if bg cells (value=0) map to different values via
+    # unique neighborhood signatures (one-to-one memorization), the rule will
+    # fail on test inputs with different contexts. Reject if too many unique
+    # bg-to-nonbg mappings compared to distinct target values.
+    bg_nonbg_entries = [(k, v) for k, v in rule_table.items() if k[0] == 0 and v != 0]
+    if bg_nonbg_entries:
+        unique_targets = len(set(v for _, v in bg_nonbg_entries))
+        if len(bg_nonbg_entries) > unique_targets * 3:
+            # Too many unique neighborhood signatures for few target values → overfitting
+            return None
+
     def apply_rule(grid: Grid) -> Grid:
         rows, cols = len(grid), len(grid[0])
         result = [[0] * cols for _ in range(rows)]

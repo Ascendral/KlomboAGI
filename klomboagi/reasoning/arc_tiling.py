@@ -30,6 +30,8 @@ def learn_tiling_rule(train: list[dict]) -> callable | None:
         _try_pixel_to_block,
         _try_downsample,
         _try_unique_tile_extract,
+        _try_symmetric_3x3_tile,
+        _try_scale_by_color_count,
     ]:
         try:
             rule = fn(train)
@@ -410,5 +412,153 @@ def _try_unique_tile_extract(train):
     fn = lambda grid, th=otr, tw=otc: extract_unique_tile(grid, th, tw)
     if all(fn(ex["input"]) == ex["output"] for ex in train):
         return fn
+
+    return None
+
+
+def _try_symmetric_3x3_tile(train):
+    """
+    Output = input tiled 3x3 with symmetry:
+      rot180  vflip  rot180
+      hflip   orig   hflip
+      rot180  vflip  rot180
+    """
+    # All outputs must be 3x input
+    for ex in train:
+        ir, ic = len(ex["input"]), len(ex["input"][0])
+        otr, otc = len(ex["output"]), len(ex["output"][0])
+        if otr != 3 * ir or otc != 3 * ic:
+            return None
+
+    def rot180(grid):
+        return [row[::-1] for row in grid[::-1]]
+
+    def vflip(grid):
+        return grid[::-1]
+
+    def hflip(grid):
+        return [row[::-1] for row in grid]
+
+    def make_symmetric_tile(grid):
+        r180 = rot180(grid)
+        vf = vflip(grid)
+        hf = hflip(grid)
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for tile_row in range(3):
+            for r in range(rows):
+                row = []
+                for tile_col in range(3):
+                    if tile_row == 0 and tile_col == 0:
+                        src = r180
+                    elif tile_row == 0 and tile_col == 1:
+                        src = vf
+                    elif tile_row == 0 and tile_col == 2:
+                        src = r180
+                    elif tile_row == 1 and tile_col == 0:
+                        src = hf
+                    elif tile_row == 1 and tile_col == 1:
+                        src = grid
+                    elif tile_row == 1 and tile_col == 2:
+                        src = hf
+                    elif tile_row == 2 and tile_col == 0:
+                        src = r180
+                    elif tile_row == 2 and tile_col == 1:
+                        src = vf
+                    else:
+                        src = r180
+                    row.extend(src[r])
+                result.append(row)
+        return result
+
+    if all(make_symmetric_tile(ex["input"]) == ex["output"] for ex in train):
+        return make_symmetric_tile
+
+    # Try other 3x3 symmetry arrangements
+    def make_mirror_tile(grid):
+        """
+        orig   hflip  orig
+        vflip  rot180 vflip
+        orig   hflip  orig
+        """
+        r180 = rot180(grid)
+        vf = vflip(grid)
+        hf = hflip(grid)
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for tile_row in range(3):
+            for r in range(rows):
+                row = []
+                for tile_col in range(3):
+                    if tile_row == 0 and tile_col == 0:
+                        src = grid
+                    elif tile_row == 0 and tile_col == 1:
+                        src = hf
+                    elif tile_row == 0 and tile_col == 2:
+                        src = grid
+                    elif tile_row == 1 and tile_col == 0:
+                        src = vf
+                    elif tile_row == 1 and tile_col == 1:
+                        src = r180
+                    elif tile_row == 1 and tile_col == 2:
+                        src = vf
+                    elif tile_row == 2 and tile_col == 0:
+                        src = grid
+                    elif tile_row == 2 and tile_col == 1:
+                        src = hf
+                    else:
+                        src = grid
+                    row.extend(src[r])
+                result.append(row)
+        return result
+
+    if all(make_mirror_tile(ex["input"]) == ex["output"] for ex in train):
+        return make_mirror_tile
+
+    return None
+
+
+def _try_scale_by_color_count(train):
+    """
+    Output = input upscaled by N where N = number of distinct non-bg colors.
+    """
+    bg = _bg(train)
+
+    scales = []
+    for ex in train:
+        ir, ic = len(ex["input"]), len(ex["input"][0])
+        otr, otc = len(ex["output"]), len(ex["output"][0])
+        if ir == 0 or ic == 0:
+            return None
+        if otr % ir != 0 or otc % ic != 0:
+            return None
+        sr, sc = otr // ir, otc // ic
+        if sr != sc:
+            return None
+        distinct = len(set(v for row in ex["input"] for v in row if v != bg))
+        if distinct != sr:
+            return None
+        scales.append(sr)
+
+    if not scales or len(set(scales)) == 1 and scales[0] < 2:
+        return None
+
+    def upscale_by_distinct(grid, bg_val=bg):
+        distinct = len(set(v for row in grid for v in row if v != bg_val))
+        if distinct < 2:
+            return None
+        n = distinct
+        rows, cols = len(grid), len(grid[0])
+        result = []
+        for r in range(rows):
+            for _ in range(n):
+                row = []
+                for c in range(cols):
+                    row.extend([grid[r][c]] * n)
+                result.append(row)
+        return result
+
+    if all(upscale_by_distinct(ex["input"]) == ex["output"] for ex in train):
+        return upscale_by_distinct
 
     return None

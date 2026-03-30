@@ -43,6 +43,9 @@ def learn_advanced_rule(train: list[dict]) -> callable | None:
         _try_tile_denoise_majority,
         _try_expand_cross_shape,
         _try_diagonal_gravity_stack,
+        _try_template_mask,
+        _try_latin_square_fill,
+        _try_diagonal_continuation,
     ]:
         try:
             rule = fn(train)
@@ -1179,5 +1182,233 @@ def _try_diagonal_gravity_stack(train):
             results = [staircase_stack(ex["input"], bg, sort_by, corner) for ex in train]
             if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
                 return lambda g, b=bg, sb=sort_by, co=corner: staircase_stack(g, b, sb, co)
+
+    return None
+
+
+def _try_template_mask(train):
+    """
+    Input has two regions:
+    1. A large 'template' region: one dominant color forms NxN blocks arranged
+       in a grid pattern (some cells filled, some empty/bg)
+    2. A small 'key' grid: diverse colors, same dims as the template's cell grid
+
+    Output = key_grid masked by template binary pattern (block filled → keep cell).
+
+    Strategy: find key by locating ALL non-bg, non-template cells → their bounding box.
+    """
+    bg = _bg(train)
+
+    def apply(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+
+        # Template color = most common non-bg
+        flat = [v for r in grid for v in r if v != bg_val]
+        if not flat:
+            return None
+        template_color = Counter(flat).most_common(1)[0][0]
+
+        # Key cells = non-bg AND not template_color
+        key_cells = [(r, c) for r in range(rows) for c in range(cols)
+                     if grid[r][c] != bg_val and grid[r][c] != template_color]
+        if not key_cells:
+            return None
+
+        # Key bounding box
+        kr0 = min(r for r, c in key_cells)
+        kr1 = max(r for r, c in key_cells)
+        kc0 = min(c for r, c in key_cells)
+        kc1 = max(c for r, c in key_cells)
+        out_h = kr1 - kr0 + 1
+        out_w = kc1 - kc0 + 1
+
+        # Key must be a fully dense non-bg rectangle (all cells non-bg)
+        key_grid = [[grid[kr0 + r][kc0 + c] for c in range(out_w)]
+                    for r in range(out_h)]
+        if any(key_grid[r][c] == bg_val for r in range(out_h) for c in range(out_w)):
+            return None
+
+        # Template cells (excluding key area)
+        tmpl_cells = [(r, c) for r in range(rows) for c in range(cols)
+                      if grid[r][c] == template_color and
+                      not (kr0 <= r <= kr1 and kc0 <= c <= kc1)]
+        if not tmpl_cells:
+            return None
+
+        min_tr = min(r for r, c in tmpl_cells)
+        max_tr = max(r for r, c in tmpl_cells)
+        min_tc = min(c for r, c in tmpl_cells)
+        max_tc = max(c for r, c in tmpl_cells)
+        th = max_tr - min_tr + 1
+        tw = max_tc - min_tc + 1
+
+        if th % out_h != 0 or tw % out_w != 0:
+            return None
+        bh, bw = th // out_h, tw // out_w
+
+        # Build binary mask from template blocks
+        mask = []
+        for bi in range(out_h):
+            row = []
+            for bj in range(out_w):
+                has_tmpl = any(
+                    grid[min_tr + bi * bh + dr][min_tc + bj * bw + dc] == template_color
+                    for dr in range(bh) for dc in range(bw)
+                    if 0 <= min_tr + bi * bh + dr < rows and
+                    0 <= min_tc + bj * bw + dc < cols
+                )
+                row.append(1 if has_tmpl else 0)
+            mask.append(row)
+
+        # Apply mask
+        return [[key_grid[r][c] if mask[r][c] else bg_val
+                 for c in range(out_w)] for r in range(out_h)]
+
+    results = [apply(ex["input"], bg) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return lambda g, b=bg: apply(g, b)
+
+    return None
+
+
+def _try_latin_square_fill(train):
+    """
+    Input has an N×N grid with some cells = 0 (blank).
+    Output fills the blanks such that every row and column contains
+    each value exactly once (Latin square completion).
+    Background = 0.
+    """
+    # Same-size, all outputs non-zero
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    def solve_latin(grid):
+        rows, cols = len(grid), len(grid[0])
+        if rows != cols:
+            return None
+
+        n = rows
+        board = [row[:] for row in grid]
+
+        # Find the set of values used (non-zero cells)
+        vals = set(v for row in board for v in row if v != 0)
+        if not vals:
+            return None
+
+        # Expected values in each row/col = all n values
+        # If vals has fewer than n values, can't form complete latin square
+        if len(vals) != n:
+            return None
+
+        # Constraint propagation + backtracking
+        def get_possible(r, c):
+            if board[r][c] != 0:
+                return {board[r][c]}
+            row_used = {board[r][cc] for cc in range(n) if board[r][cc] != 0}
+            col_used = {board[rr][c] for rr in range(n) if board[rr][c] != 0}
+            return vals - row_used - col_used
+
+        def solve():
+            # Find empty cell with fewest possibilities (MRV heuristic)
+            empty = []
+            for r in range(n):
+                for c in range(n):
+                    if board[r][c] == 0:
+                        poss = get_possible(r, c)
+                        if not poss:
+                            return False
+                        empty.append((len(poss), r, c))
+
+            if not empty:
+                return True  # All filled
+
+            empty.sort()
+            _, r, c = empty[0]
+            poss = get_possible(r, c)
+
+            for v in sorted(poss):
+                board[r][c] = v
+                if solve():
+                    return True
+                board[r][c] = 0
+
+            return False
+
+        if not solve():
+            return None
+        return board
+
+    results = [solve_latin(ex["input"]) for ex in train]
+    if all(r is not None and r == ex["output"] for r, ex in zip(results, train)):
+        return solve_latin
+
+    return None
+
+
+def _try_diagonal_continuation(train):
+    """
+    Input has a diagonal/linear sequence of cells (color A) with step (dr, dc).
+    Output continues the sequence with color B until the grid boundary.
+    The step is computed per-example from the source cell positions.
+    """
+    # Same-size
+    if not all(len(ex["input"]) == len(ex["output"]) and
+               len(ex["input"][0]) == len(ex["output"][0]) for ex in train):
+        return None
+
+    bg = _bg(train)
+
+    # Find new_color consistently across all training examples
+    new_colors = set()
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        rows, cols = len(inp), len(inp[0])
+        for r in range(rows):
+            for c in range(cols):
+                if out[r][c] != bg and inp[r][c] == bg:
+                    new_colors.add(out[r][c])
+    if len(new_colors) != 1:
+        return None
+    new_color = list(new_colors)[0]
+
+    def apply_diagonal(grid, bg_val, nc=new_color):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+
+        # Find all source cells (non-bg)
+        src_positions = [(r, c) for r in range(rows) for c in range(cols)
+                         if grid[r][c] != bg_val]
+        if len(src_positions) < 2:
+            return result
+
+        # Compute step from consecutive source positions (sorted)
+        src_positions.sort()
+        steps = set()
+        for i in range(1, len(src_positions)):
+            dr = src_positions[i][0] - src_positions[i-1][0]
+            dc = src_positions[i][1] - src_positions[i-1][1]
+            steps.add((dr, dc))
+
+        if len(steps) != 1:
+            return result  # No consistent step found
+
+        step = steps.pop()
+        if step == (0, 0):
+            return result
+
+        # Continue from the last source position
+        last_r, last_c = src_positions[-1]
+        r, c = last_r + step[0], last_c + step[1]
+        while 0 <= r < rows and 0 <= c < cols:
+            if result[r][c] == bg_val:
+                result[r][c] = nc
+            r += step[0]
+            c += step[1]
+
+        return result
+
+    if all(apply_diagonal(ex["input"], bg) == ex["output"] for ex in train):
+        return lambda g, b=bg: apply_diagonal(g, b)
 
     return None
