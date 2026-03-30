@@ -100,6 +100,8 @@ def learn_multiobj_rule(train: list[dict]) -> Callable | None:
         _try_most_common_object,
         _try_color_specific_neighbors,
         _try_row_col_paint,
+        _try_nearest_border_recolor,
+        _try_dot_to_block_line,
     ]:
         try:
             rule = fn(train)
@@ -1535,4 +1537,194 @@ def _try_row_col_paint(train):
     if all(apply_row_col_paint(ex["input"]) == ex["output"] for ex in train):
         return apply_row_col_paint
 
+    return None
+
+
+def _try_nearest_border_recolor(train):
+    """
+    Uniform rows or columns define borders with specific colors.
+    Non-bg, non-border cells get recolored with the color of their nearest border.
+
+    Handles 2204b7a8 and similar tasks.
+    """
+    same_size = all(
+        len(ex["input"]) == len(ex["output"]) and
+        len(ex["input"][0]) == len(ex["output"][0])
+        for ex in train
+    )
+    if not same_size:
+        return None
+
+    bg = _bg(train)
+
+    def apply_nearest_border(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+
+        # Find uniform rows (all same non-bg color)
+        horiz_borders = {}
+        for r in range(rows):
+            vals = set(grid[r])
+            if len(vals) == 1 and list(vals)[0] != bg_val:
+                horiz_borders[r] = list(vals)[0]
+
+        # Find uniform cols
+        vert_borders = {}
+        for c in range(cols):
+            vals = set(grid[r][c] for r in range(rows))
+            if len(vals) == 1 and list(vals)[0] != bg_val:
+                vert_borders[c] = list(vals)[0]
+
+        if not horiz_borders and not vert_borders:
+            return grid  # No borders found
+
+        border_colors = set(horiz_borders.values()) | set(vert_borders.values())
+        result = [row[:] for row in grid]
+
+        for r in range(rows):
+            if r in horiz_borders:
+                continue
+            for c in range(cols):
+                if c in vert_borders:
+                    continue
+                if grid[r][c] == bg_val or grid[r][c] in border_colors:
+                    continue
+                # Find nearest border
+                min_dist = float('inf')
+                nearest_color = None
+                for br, bcolor in horiz_borders.items():
+                    d = abs(r - br)
+                    if d < min_dist:
+                        min_dist = d
+                        nearest_color = bcolor
+                for bc, bcolor in vert_borders.items():
+                    d = abs(c - bc)
+                    if d < min_dist:
+                        min_dist = d
+                        nearest_color = bcolor
+                if nearest_color is not None:
+                    result[r][c] = nearest_color
+
+        return result
+
+    fn = lambda grid, b=bg: apply_nearest_border(grid, b)
+
+    # Must not be identity
+    if all(fn(ex["input"]) == ex["input"] for ex in train):
+        return None
+
+    if all(fn(ex["input"]) == ex["output"] for ex in train):
+        return fn
+
+    return None
+
+
+def _try_dot_to_block_line(train):
+    """
+    Isolated dots draw lines to the nearest edge of a rectangular block.
+
+    A dot whose column falls within the block's col range draws a vertical
+    line to the block. A dot whose row falls within the block's row range
+    draws a horizontal line. Non-aligned dots stay unchanged.
+
+    Handles task 2c608aff.
+    """
+    same_size = all(
+        len(ex["input"]) == len(ex["output"]) and
+        len(ex["input"][0]) == len(ex["output"][0])
+        for ex in train
+    )
+    if not same_size:
+        return None
+
+    def _grid_bg(grid):
+        """Background = most common color in this grid."""
+        flat = [c for row in grid for c in row]
+        return Counter(flat).most_common(1)[0][0] if flat else 0
+
+    def _find_rect_and_dots(grid, bg_val):
+        """Find the rectangle (largest single-color blob) and dot cells."""
+        rows, cols = len(grid), len(grid[0])
+        color_cells = {}
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v != bg_val:
+                    color_cells.setdefault(v, []).append((r, c))
+
+        if len(color_cells) < 2:
+            return None, None, None, None
+
+        # Rectangle = largest group that forms a solid rectangle
+        rect_color = None
+        rect_bbox = None
+        for color, cells in sorted(color_cells.items(), key=lambda x: -len(x[1])):
+            rs = [r for r, c in cells]
+            cs = [c for r, c in cells]
+            rmin, rmax = min(rs), max(rs)
+            cmin, cmax = min(cs), max(cs)
+            expected = (rmax - rmin + 1) * (cmax - cmin + 1)
+            if len(cells) == expected and expected >= 4:
+                rect_color = color
+                rect_bbox = (rmin, rmax, cmin, cmax)
+                break
+
+        if rect_color is None:
+            return None, None, None, None
+
+        # Dots = all other non-bg cells
+        dot_color = None
+        dots = []
+        for color, cells in color_cells.items():
+            if color == rect_color:
+                continue
+            for r, c in cells:
+                dots.append((r, c))
+                if dot_color is None:
+                    dot_color = color
+                elif color != dot_color:
+                    return None, None, None, None  # Multiple dot colors
+
+        return rect_bbox, rect_color, dot_color, dots
+
+    def apply_dot_line(grid):
+        rows, cols = len(grid), len(grid[0])
+        bg_val = _grid_bg(grid)
+        info = _find_rect_and_dots(grid, bg_val)
+        if info[0] is None:
+            return grid
+        rect_bbox, rect_color, dot_color, dots = info
+        rmin, rmax, cmin, cmax = rect_bbox
+
+        result = [row[:] for row in grid]
+        for dr, dc in dots:
+            in_col_range = cmin <= dc <= cmax
+            in_row_range = rmin <= dr <= rmax
+
+            if in_col_range and not in_row_range:
+                # Draw vertical line from dot to nearest horizontal edge
+                if dr < rmin:
+                    for r in range(dr, rmin):
+                        result[r][dc] = dot_color
+                else:
+                    for r in range(rmax + 1, dr + 1):
+                        result[r][dc] = dot_color
+            elif in_row_range and not in_col_range:
+                # Draw horizontal line from dot to nearest vertical edge
+                if dc < cmin:
+                    for c in range(dc, cmin):
+                        result[dr][c] = dot_color
+                else:
+                    for c in range(cmax + 1, dc + 1):
+                        result[dr][c] = dot_color
+            # Non-aligned or both-aligned → leave as-is
+
+        return result
+
+    if all(apply_dot_line(ex["input"]) == ex["input"] for ex in train):
+        return None
+    results = [apply_dot_line(ex["input"]) for ex in train]
+    if any(r is None for r in results):
+        return None
+    if all(r == ex["output"] for r, ex in zip(results, train)):
+        return apply_dot_line
     return None
