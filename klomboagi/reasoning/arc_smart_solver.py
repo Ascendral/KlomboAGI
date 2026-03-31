@@ -324,6 +324,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_attract_color_pairs,
             self._try_column_height_balance,
             self._try_perpendicular_8_blocks,
+            self._try_grid_complement_separator,
+            self._try_ones_in_8_bbox_to_3,
         ]
         for s in v2:
             try:
@@ -2707,6 +2709,79 @@ class SmartARCSolverV2(SmartARCSolver):
             result = _apply(ex["input"])
             if result is None or result != [list(map(int, r)) for r in ex["output"]]:
                 return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_grid_complement_separator(self, train, test_input):
+        """Separator rows/cols (all-zero) stay 0; non-sep cells: non-zero→0, zero→2."""
+        def _apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            sep_rows = {r for r in range(rows) if all(g[r][c] == 0 for c in range(cols))}
+            sep_cols = {c for c in range(cols) if all(g[r][c] == 0 for r in range(rows))}
+            out = []
+            for r in range(rows):
+                row = []
+                for c in range(cols):
+                    if r in sep_rows or c in sep_cols:
+                        row.append(0)
+                    elif g[r][c] != 0:
+                        row.append(0)
+                    else:
+                        row.append(2)
+                out.append(row)
+            return out
+
+        # Need at least one separator row and one separator col
+        g0 = [list(map(int, row)) for row in train[0]["input"]]
+        rows0, cols0 = len(g0), len(g0[0])
+        sep_rows0 = [r for r in range(rows0) if all(g0[r][c] == 0 for c in range(cols0))]
+        sep_cols0 = [c for c in range(cols0) if all(g0[r][c] == 0 for r in range(rows0))]
+        if not sep_rows0 or not sep_cols0:
+            return None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+
+        result = _apply(test_input)
+        if result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_ones_in_8_bbox_to_3(self, train, test_input):
+        """All 1-cells inside the bounding box of 8-cells become 3; others unchanged."""
+        def _apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            eights = [(r, c) for r in range(rows) for c in range(cols) if g[r][c] == 8]
+            if not eights:
+                return None
+            r_min = min(r for r, c in eights)
+            r_max = max(r for r, c in eights)
+            c_min = min(c for r, c in eights)
+            c_max = max(c for r, c in eights)
+            out = [row[:] for row in g]
+            for r in range(r_min, r_max + 1):
+                for c in range(c_min, c_max + 1):
+                    if g[r][c] == 1:
+                        out[r][c] = 3
+            return out
+
+        # Verify at least one 1→3 change occurs in training
+        any_change = False
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+            if result != [list(map(int, r)) for r in ex["input"]]:
+                any_change = True
+        if not any_change:
+            return None
 
         result = _apply(test_input)
         if result is None or result == [list(map(int, r)) for r in test_input]:
