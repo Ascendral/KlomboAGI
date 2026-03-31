@@ -1568,7 +1568,7 @@ class ARCSolverV6(ARCSolverV5):
     def _try_denoise(self, train: list[dict], test_input: Grid) -> Grid | None:
         """Remove isolated single cells (noise) — replace with surrounding color."""
         from collections import Counter
-        
+
         def is_isolated(grid, r, c, rows, cols):
             val = grid[r][c]
             neighbors = []
@@ -1577,24 +1577,30 @@ class ARCSolverV6(ARCSolverV5):
                 if 0 <= nr < rows and 0 <= nc < cols:
                     neighbors.append(grid[nr][nc])
             return all(n != val for n in neighbors) and len(neighbors) > 0
-        
-        def get_majority_neighbor(grid, r, c, rows, cols):
+
+        def get_majority_neighbor(grid, r, c, rows, cols, bg):
             neighbors = []
             for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
                 nr, nc = r+dr, c+dc
                 if 0 <= nr < rows and 0 <= nc < cols:
                     neighbors.append(grid[nr][nc])
-            if neighbors:
-                return Counter(neighbors).most_common(1)[0][0]
-            return grid[r][c]
+            if not neighbors:
+                return grid[r][c]
+            counts = Counter(neighbors)
+            max_count = counts.most_common(1)[0][1]
+            # Among tied candidates, prefer non-bg color
+            candidates = [v for v, cnt in counts.items() if cnt == max_count]
+            non_bg = [v for v in candidates if v != bg]
+            return non_bg[0] if non_bg else candidates[0]
         
         def denoise(grid):
             rows, cols = len(grid), len(grid[0])
+            bg = Counter(grid[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
             result = [row[:] for row in grid]
             for r in range(rows):
                 for c in range(cols):
                     if is_isolated(grid, r, c, rows, cols):
-                        result[r][c] = get_majority_neighbor(grid, r, c, rows, cols)
+                        result[r][c] = get_majority_neighbor(grid, r, c, rows, cols, bg)
             return result
         
         for ex in train:

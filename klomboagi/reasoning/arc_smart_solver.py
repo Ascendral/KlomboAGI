@@ -341,6 +341,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_bordered_rect_center,
             self._try_rect_corner_edge_interior,
             self._try_convert_isolated_cells,
+            self._try_row_permutation,
         ]
         for s in v2:
             try:
@@ -3342,5 +3343,55 @@ class SmartARCSolverV2(SmartARCSolver):
 
         result = _apply(test_input, src_color, dst_color)
         if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_row_permutation(self, train, test_input):
+        """Output rows are a fixed permutation of input rows (same size only)."""
+        # Only same-size transforms
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or \
+               len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+
+        rows = len(train[0]["input"])
+
+        def _learn_perm(ex):
+            """Return row-permutation list perm where out[r] = in[perm[r]], or None."""
+            gin = [list(map(int, r)) for r in ex["input"]]
+            gout = [list(map(int, r)) for r in ex["output"]]
+            perm = []
+            for r in range(rows):
+                src = None
+                for r2 in range(rows):
+                    if gin[r2] == gout[r]:
+                        if src is None:
+                            src = r2
+                        # If multiple matches, ambiguous — but accept if consistent
+                if src is None:
+                    return None
+                perm.append(src)
+            return perm
+
+        # Learn permutation from first example
+        perm = _learn_perm(train[0])
+        if perm is None:
+            return None
+
+        # Verify it's a true permutation (no duplicates) and not identity
+        if sorted(perm) != list(range(rows)):
+            return None
+        if perm == list(range(rows)):
+            return None  # identity
+
+        # Cross-validate on remaining examples
+        for ex in train[1:]:
+            if _learn_perm(ex) != perm:
+                return None
+
+        # Apply to test input
+        gin = [list(map(int, r)) for r in test_input]
+        result = [gin[perm[r]] for r in range(rows)]
+        if result == gin:
             return None
         return result
