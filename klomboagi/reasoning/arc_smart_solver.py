@@ -356,6 +356,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_alternating_row_shift,
             self._try_diamond_center_mark,
             self._try_extend_bars_to_cross,
+            self._try_l_shape_diagonal_ray,
+            self._try_2x2_block_corner_markers,
         ]
         for s in v2:
             try:
@@ -4294,3 +4296,175 @@ class SmartARCSolverV2(SmartARCSolver):
             out[h_row][c] = h_color
         out[h_row][v_col] = inter_color
         return out
+
+    def _try_l_shape_diagonal_ray(self, train, test_input):
+        """Each L-shaped piece (3 of 4 cells in a 2x2) shoots a diagonal ray from
+        its open (missing) corner in the direction away from the block's center,
+        until the ray goes out of bounds."""
+        from collections import Counter
+
+        def _find_l_shapes(grid):
+            rows, cols = len(grid), len(grid[0])
+            all_vals = [grid[r][c] for r in range(rows) for c in range(cols)]
+            bg = Counter(all_vals).most_common(1)[0][0]
+            shapes = []
+            seen = set()
+            for r in range(rows - 1):
+                for c in range(cols - 1):
+                    # Check 2x2 block
+                    cells = [(r, c), (r, c+1), (r+1, c), (r+1, c+1)]
+                    fg_cells = [(rr, cc) for rr, cc in cells if grid[rr][cc] != bg]
+                    bg_cells = [(rr, cc) for rr, cc in cells if grid[rr][cc] == bg]
+                    if len(fg_cells) == 3 and len(bg_cells) == 1:
+                        # Check all fg cells same color
+                        colors = set(grid[rr][cc] for rr, cc in fg_cells)
+                        if len(colors) != 1:
+                            continue
+                        fg_color = next(iter(colors))
+                        # Check none of the fg cells appear in any other shape
+                        key = frozenset(fg_cells)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        open_r, open_c = bg_cells[0]
+                        # Direction: from center of 2x2 to open corner
+                        center_r = r + 0.5
+                        center_c = c + 0.5
+                        dr = 1 if open_r > center_r else -1
+                        dc = 1 if open_c > center_c else -1
+                        shapes.append((open_r, open_c, dr, dc, fg_color))
+            return shapes, bg
+
+        def _apply(grid, shapes, bg):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for open_r, open_c, dr, dc, color in shapes:
+                r, c = open_r + dr, open_c + dc
+                while 0 <= r < rows and 0 <= c < cols:
+                    if out[r][c] != bg:
+                        break  # stop at non-bg cell
+                    out[r][c] = color
+                    r += dr
+                    c += dc
+            return out
+
+        # Validate on training examples
+        for ex in train:
+            shapes, bg = _find_l_shapes(ex["input"])
+            if not shapes:
+                return None
+            result = _apply(ex["input"], shapes, bg)
+            if result != ex["output"]:
+                return None
+
+        shapes, bg = _find_l_shapes(test_input)
+        if not shapes:
+            return None
+        return _apply(test_input, shapes, bg)
+
+    def _try_2x2_block_corner_markers(self, train, test_input):
+        """Each 2x2 block of a foreground color gets 4 corner markers placed
+        diagonally just outside the block corners: top-left=1, top-right=2,
+        bottom-left=3, bottom-right=4 (or learned colors)."""
+        from collections import Counter
+
+        def _find_2x2_blocks(grid, fg):
+            rows, cols = len(grid), len(grid[0])
+            blocks = []
+            for r in range(rows - 1):
+                for c in range(cols - 1):
+                    if (grid[r][c] == fg and grid[r][c+1] == fg and
+                            grid[r+1][c] == fg and grid[r+1][c+1] == fg):
+                        blocks.append((r, c))
+            return blocks
+
+        def _apply(grid, fg, markers):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            blocks = _find_2x2_blocks(grid, fg)
+            for r, c in blocks:
+                # (r-1, c-1) → markers[0]
+                # (r-1, c+2) → markers[1]
+                # (r+2, c-1) → markers[2]
+                # (r+2, c+2) → markers[3]
+                positions = [(r-1, c-1), (r-1, c+2), (r+2, c-1), (r+2, c+2)]
+                for (pr, pc), m in zip(positions, markers):
+                    if 0 <= pr < rows and 0 <= pc < cols:
+                        out[pr][pc] = m
+            return out
+
+        # Determine fg color and marker colors from training
+        all_in = [v for ex in train for row in ex["input"] for v in row]
+        all_out = [v for ex in train for row in ex["output"] for v in row]
+        bg = Counter(all_in).most_common(1)[0][0]
+        new_colors = sorted(set(all_out) - set(all_in))
+        if len(new_colors) != 4:
+            return None
+        markers = new_colors  # [1,2,3,4] or similar sorted order
+
+        # Find fg: color that forms 2x2 blocks
+        non_bg = [v for v in all_in if v != bg]
+        if not non_bg:
+            return None
+        fg_counts = Counter(non_bg)
+        # fg is the color that forms 2x2 blocks
+        fg = None
+        for ex in train:
+            blocks = None
+            for candidate in fg_counts:
+                b = _find_2x2_blocks(ex["input"], candidate)
+                if b:
+                    if fg is None:
+                        fg = candidate
+                    elif fg != candidate:
+                        return None
+                    blocks = b
+                    break
+            if blocks is None:
+                return None
+
+        if fg is None:
+            return None
+
+        # Learn marker positions from training: which corner → which color
+        # Try to determine the mapping of positions to marker colors
+        # Look at the first training example to determine the ordering
+        marker_map = None
+        for ex in train:
+            blocks = _find_2x2_blocks(ex["input"], fg)
+            if not blocks:
+                continue
+            rows, cols = len(ex["input"]), len(ex["input"][0])
+            # For each block, find what colors appear at corner positions in output
+            for r, c in blocks:
+                positions = [(r-1, c-1), (r-1, c+2), (r+2, c-1), (r+2, c+2)]
+                in_grid = [v for pr, pc in positions
+                           if 0 <= pr < rows and 0 <= pc < cols
+                           for v in [ex["input"][pr][pc]]]
+                out_vals = []
+                for pr, pc in positions:
+                    if 0 <= pr < rows and 0 <= pc < cols:
+                        v = ex["output"][pr][pc]
+                        if v != ex["input"][pr][pc]:
+                            out_vals.append(v)
+                        else:
+                            out_vals.append(None)
+                if any(v is not None for v in out_vals):
+                    m = [v if v is not None else -1 for v in out_vals]
+                    assigned = [v for v in m if v != -1]
+                    if len(assigned) == 4 and len(set(assigned)) == 4:
+                        if marker_map is None:
+                            marker_map = m
+                        elif marker_map != m:
+                            return None
+                        break
+
+        if marker_map is None or any(v == -1 for v in marker_map):
+            # Fall back to sorted new colors in position order
+            marker_map = new_colors
+
+        for ex in train:
+            result = _apply(ex["input"], fg, marker_map)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, fg, marker_map)
