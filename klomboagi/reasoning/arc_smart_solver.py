@@ -317,6 +317,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_square_rect_interiors,
             self._try_reflect_diagonal_segment,
             self._try_fill_innermost_row_gap,
+            self._try_explode_center_to_corners,
+            self._try_color_holes_by_column_rank,
         ]
         for s in v2:
             try:
@@ -2176,3 +2178,150 @@ class SmartARCSolverV2(SmartARCSolver):
             if _apply(ex["input"]) != [list(map(int, row)) for row in ex["output"]]:
                 return None
         return _apply(test_input)
+
+    def _try_explode_center_to_corners(self, train, test_input):
+        """2x2 block at the center of a grid explodes to the 4 corners; center is cleared.
+
+        Solves 66e6c45b: a 4x4 grid has a 2x2 non-zero block at rows 1-2 cols 1-2.
+        Each cell maps to the corresponding corner of the grid.
+        """
+        from collections import Counter
+
+        def _background(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = _background(grid)
+            out = [list(map(int, row)) for row in grid]
+            # Find the 2x2 non-bg block
+            for r1 in range(rows - 1):
+                for c1 in range(cols - 1):
+                    block = [[int(grid[r1 + dr][c1 + dc]) for dc in range(2)] for dr in range(2)]
+                    if all(block[dr][dc] != bg for dr in range(2) for dc in range(2)):
+                        # Check the rest of the grid is all bg
+                        non_bg_outside = sum(
+                            1 for r in range(rows) for c in range(cols)
+                            if int(grid[r][c]) != bg
+                            and not (r1 <= r <= r1 + 1 and c1 <= c <= c1 + 1)
+                        )
+                        if non_bg_outside > 0:
+                            continue
+                        # Map to corners: top-left, top-right, bottom-left, bottom-right
+                        corners = [(0, 0), (0, cols - 1), (rows - 1, 0), (rows - 1, cols - 1)]
+                        block_corners = [(r1, c1), (r1, c1 + 1), (r1 + 1, c1), (r1 + 1, c1 + 1)]
+                        for (gr, gc), (br, bc) in zip(corners, block_corners):
+                            out[gr][gc] = block[br - r1][bc - c1]
+                        # Clear the 2x2 block
+                        for dr in range(2):
+                            for dc in range(2):
+                                out[r1 + dr][c1 + dc] = bg
+                        return out
+            return None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        return _apply(test_input)
+
+    def _try_color_holes_by_column_rank(self, train, test_input):
+        """Holes (0s) in a grid of 5s get colored by the sorted rank of their column.
+
+        Solves 575b1a71: find all unique columns containing holes, sort them left-to-right,
+        assign color 1 to leftmost column's holes, 2 to next, 3 to next, 4 to rightmost.
+        """
+        from collections import Counter
+
+        def _find_hole_color(grid):
+            """Return the hole value (most common non-dominant value), or None."""
+            vals = [v for row in grid for v in row]
+            c = Counter(vals)
+            bg = c.most_common(1)[0][0]
+            holes = [v for v in vals if v != bg]
+            if holes:
+                return None  # Already colored
+            return None
+
+        def _apply(grid, col_color_map=None):
+            rows, cols = len(grid), len(grid[0])
+            vals = [v for row in grid for v in row]
+            c = Counter(vals)
+            if len(c) > 2:
+                return None  # Only 2 distinct values (bg + hole)
+            bg = c.most_common(1)[0][0]
+            hole = c.most_common(2)[1][0] if len(c) == 2 else None
+
+            # Find hole positions
+            holes = [(r, col, int(grid[r][col]))
+                     for r in range(rows) for col in range(cols)
+                     if int(grid[r][col]) != bg]
+            if not holes:
+                return None
+
+            # The "hole" value must be consistent (all same non-bg value)
+            hole_val = holes[0][2]
+            if not all(v == hole_val for _, _, v in holes):
+                return None
+
+            if col_color_map is None:
+                # Build map from this grid's holes
+                unique_cols = sorted(set(col for _, col, _ in holes))
+                if len(unique_cols) < 2 or len(unique_cols) > 9:
+                    return None
+                col_color_map = {col: i + 1 for i, col in enumerate(unique_cols)}
+
+            out = [list(map(int, row)) for row in grid]
+            for r, col, _ in holes:
+                if col not in col_color_map:
+                    return None
+                out[r][col] = col_color_map[col]
+            return out
+
+        # Verify each training example and extract consistent column→color mapping
+        col_color_map = None
+        for ex in train:
+            inp = ex["input"]
+            exp = [list(map(int, row)) for row in ex["output"]]
+            # Determine expected map from output
+            vals = [v for row in inp for v in row]
+            c = Counter(vals)
+            if len(c) != 2:
+                return None
+            bg = c.most_common(1)[0][0]
+            hole_val = c.most_common(2)[1][0]
+            holes = [(r, col) for r in range(len(inp)) for col in range(len(inp[0]))
+                     if int(inp[r][col]) == hole_val]
+            unique_cols = sorted(set(col for _, col in holes))
+            if len(unique_cols) < 2:
+                return None
+            expected_map = {}
+            for r, col in holes:
+                expected_map[col] = exp[r][col]
+            # Check ranks are 1..N in column order
+            for i, col in enumerate(unique_cols):
+                if expected_map.get(col) != i + 1:
+                    return None
+            if col_color_map is None:
+                col_color_map = {col: i + 1 for i, col in enumerate(unique_cols)}
+
+        # Apply to test
+        vals = [v for row in test_input for v in row]
+        c = Counter(vals)
+        if len(c) != 2:
+            return None
+        bg = c.most_common(1)[0][0]
+        hole_val = c.most_common(2)[1][0]
+        holes = [(r, col) for r in range(len(test_input)) for col in range(len(test_input[0]))
+                 if int(test_input[r][col]) == hole_val]
+        unique_cols = sorted(set(col for _, col in holes))
+        if len(unique_cols) < 2:
+            return None
+        test_map = {col: i + 1 for i, col in enumerate(unique_cols)}
+        out = [list(map(int, row)) for row in test_input]
+        for r, col in holes:
+            out[r][col] = test_map[col]
+        if out == [list(map(int, row)) for row in test_input]:
+            return None
+        return out
