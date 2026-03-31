@@ -342,6 +342,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_rect_corner_edge_interior,
             self._try_convert_isolated_cells,
             self._try_row_permutation,
+            self._try_broadcast_direction,
+            self._try_fill_interior_through_gap,
         ]
         for s in v2:
             try:
@@ -3393,5 +3395,166 @@ class SmartARCSolverV2(SmartARCSolver):
         gin = [list(map(int, r)) for r in test_input]
         result = [gin[perm[r]] for r in range(rows)]
         if result == gin:
+            return None
+        return result
+
+    def _try_broadcast_direction(self, train, test_input):
+        """Non-zero values broadcast in a direction (down/up/right/left), filling bg cells.
+        Unlike gravity, values stay in place and fill the cells beyond them."""
+        from collections import Counter
+
+        def _apply(grid, direction, bg):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            out = [row[:] for row in g]
+            if direction == 'down':
+                for c in range(cols):
+                    cur = bg
+                    for r in range(rows):
+                        if g[r][c] != bg:
+                            cur = g[r][c]
+                        elif cur != bg:
+                            out[r][c] = cur
+            elif direction == 'up':
+                for c in range(cols):
+                    cur = bg
+                    for r in range(rows - 1, -1, -1):
+                        if g[r][c] != bg:
+                            cur = g[r][c]
+                        elif cur != bg:
+                            out[r][c] = cur
+            elif direction == 'right':
+                for r in range(rows):
+                    cur = bg
+                    for c in range(cols):
+                        if g[r][c] != bg:
+                            cur = g[r][c]
+                        elif cur != bg:
+                            out[r][c] = cur
+            elif direction == 'left':
+                for r in range(rows):
+                    cur = bg
+                    for c in range(cols - 1, -1, -1):
+                        if g[r][c] != bg:
+                            cur = g[r][c]
+                        elif cur != bg:
+                            out[r][c] = cur
+            return out
+
+        # Only same-size
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or \
+               len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+
+        all_in = [v for ex in train for row in ex["input"] for v in row]
+        bg = Counter(all_in).most_common(1)[0][0]
+
+        for direction in ['down', 'up', 'right', 'left']:
+            valid = True
+            for ex in train:
+                r = _apply(ex["input"], direction, bg)
+                if r != [list(map(int, row)) for row in ex["output"]]:
+                    valid = False
+                    break
+            if valid:
+                result = _apply(test_input, direction, bg)
+                if result != [list(map(int, r)) for r in test_input]:
+                    return result
+        return None
+
+    def _try_fill_interior_through_gap(self, train, test_input):
+        """A bordered rectangle (single color) has one gap in its wall.
+        Fill interior with 8, then project 8 from the gap outward to the grid edge."""
+        from collections import Counter
+
+        def _analyze(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            # Find border color: non-bg color that forms a near-complete rectangle border
+            all_vals = Counter(g[r][c] for r in range(rows) for c in range(cols))
+            bg = all_vals.most_common(1)[0][0]
+            # Try each non-bg color as the border color
+            for border_color, _ in all_vals.most_common():
+                if border_color == bg:
+                    continue
+                cells = {(r, c) for r in range(rows) for c in range(cols) if g[r][c] == border_color}
+                if not cells:
+                    continue
+                r0 = min(r for r, c in cells)
+                r1 = max(r for r, c in cells)
+                c0 = min(c for r, c in cells)
+                c1 = max(c for r, c in cells)
+                if r1 - r0 < 2 or c1 - c0 < 2:
+                    continue
+                # Expected border cells (perimeter of bounding box)
+                expected = set()
+                for c in range(c0, c1 + 1):
+                    expected.add((r0, c)); expected.add((r1, c))
+                for r in range(r0, r1 + 1):
+                    expected.add((r, c0)); expected.add((r, c1))
+                # Find gap: cells in expected but not in cells
+                gap_cells = expected - cells
+                # Must have exactly 1 gap cell, and it must be on one wall
+                if len(gap_cells) != 1:
+                    continue
+                gr, gc = next(iter(gap_cells))
+                # Determine which wall and outward direction
+                if gr == r0:
+                    direction = 'up'; gap_r, gap_c = gr, gc
+                elif gr == r1:
+                    direction = 'down'; gap_r, gap_c = gr, gc
+                elif gc == c0:
+                    direction = 'left'; gap_r, gap_c = gr, gc
+                elif gc == c1:
+                    direction = 'right'; gap_r, gap_c = gr, gc
+                else:
+                    continue
+                # Interior cells
+                interior = [(r, c) for r in range(r0 + 1, r1) for c in range(c0 + 1, c1)]
+                return border_color, r0, c0, r1, c1, direction, gap_r, gap_c, interior
+            return None
+
+        def _apply(grid, analysis, fill_color=8):
+            if analysis is None:
+                return None
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            border_color, r0, c0, r1, c1, direction, gap_r, gap_c, interior = analysis
+            out = [row[:] for row in g]
+            # Fill interior
+            for r, c in interior:
+                out[r][c] = fill_color
+            # Fill gap cell
+            out[gap_r][gap_c] = fill_color
+            # Project outward from gap
+            if direction == 'up':
+                for r in range(gap_r - 1, -1, -1):
+                    out[r][gap_c] = fill_color
+            elif direction == 'down':
+                for r in range(gap_r + 1, rows):
+                    out[r][gap_c] = fill_color
+            elif direction == 'left':
+                for c in range(gap_c - 1, -1, -1):
+                    out[gap_r][c] = fill_color
+            elif direction == 'right':
+                for c in range(gap_c + 1, cols):
+                    out[gap_r][c] = fill_color
+            return out
+
+        # Validate on training examples
+        for ex in train:
+            analysis = _analyze(ex["input"])
+            if analysis is None:
+                return None
+            result = _apply(ex["input"], analysis)
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+
+        test_analysis = _analyze(test_input)
+        if test_analysis is None:
+            return None
+        result = _apply(test_input, test_analysis)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
             return None
         return result
