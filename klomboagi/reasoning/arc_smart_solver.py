@@ -349,6 +349,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_dot_to_filled_ring,
             self._try_dot_to_corner_edge_ring,
             self._try_shift_cluster_color,
+            self._try_two_row_checkerboard,
+            self._try_keep_majority_replace_rest,
         ]
         for s in v2:
             try:
@@ -3858,3 +3860,53 @@ class SmartARCSolverV2(SmartARCSolver):
             if result != ex["output"]:
                 return None
         return _apply(test_input, bg, S, D, offset)
+
+    def _try_two_row_checkerboard(self, train, test_input):
+        """2-row grid where each row is a solid color A/B. Output: checkerboard
+        interleaving: output[r][c] = A if (r+c)%2==0 else B."""
+        from collections import Counter
+
+        def _check(grid):
+            if len(grid) != 2:
+                return None
+            r0 = set(grid[0])
+            r1 = set(grid[1])
+            if len(r0) != 1 or len(r1) != 1:
+                return None
+            A, B = grid[0][0], grid[1][0]
+            if A == B:
+                return None
+            cols = len(grid[0])
+            return [[A if (r+c)%2==0 else B for c in range(cols)] for r in range(2)]
+
+        for ex in train:
+            result = _check(ex["input"])
+            if result is None or result != ex["output"]:
+                return None
+        return _check(test_input)
+
+    def _try_keep_majority_replace_rest(self, train, test_input):
+        """Keep the most-common color; replace all other colors with a learned target color."""
+        from collections import Counter
+
+        def _find_target(train_examples):
+            all_in = set(v for ex in train_examples for row in ex["input"] for v in row)
+            all_out = set(v for ex in train_examples for row in ex["output"] for v in row)
+            new_colors = all_out - all_in
+            if len(new_colors) != 1:
+                return None
+            return next(iter(new_colors))
+
+        def _apply(grid, target):
+            all_v = [v for row in grid for v in row]
+            majority = Counter(all_v).most_common(1)[0][0]
+            return [[v if v == majority else target for v in row] for row in grid]
+
+        target = _find_target(train)
+        if target is None:
+            return None
+        for ex in train:
+            result = _apply(ex["input"], target)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, target)
