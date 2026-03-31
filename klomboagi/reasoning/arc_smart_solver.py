@@ -312,6 +312,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_chebyshev_equidistant_center,
             self._try_connect_aligned_diamonds,
             self._try_connect_diagonal_crosses,
+            self._try_uniform_rows_to_five,
         ]
         for s in v2:
             try:
@@ -1895,6 +1896,32 @@ class SmartARCSolverV2(SmartARCSolver):
                             result[pr][pc] = 2
                             changed = True
             return result if changed else None
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_uniform_rows_to_five(self, train, test_input):
+        """In a 3x3 grid: rows where all cells are the same color become [5,5,5];
+        rows with mixed colors become [0,0,0].
+        """
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows != 3 or cols != 3:
+                return None
+            result = []
+            for row in grid:
+                vals = [int(v) for v in row]
+                if len(set(vals)) == 1:
+                    result.append([5, 5, 5])
+                else:
+                    result.append([0, 0, 0])
+            return result
 
         for ex in train:
             predicted = _apply(ex["input"])
