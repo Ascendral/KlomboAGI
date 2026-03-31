@@ -313,6 +313,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_connect_aligned_diamonds,
             self._try_connect_diagonal_crosses,
             self._try_uniform_rows_to_five,
+            self._try_erase_outside_cross_quadrant,
         ]
         for s in v2:
             try:
@@ -1921,6 +1922,48 @@ class SmartARCSolverV2(SmartARCSolver):
                     result.append([5, 5, 5])
                 else:
                     result.append([0, 0, 0])
+            return result
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_erase_outside_cross_quadrant(self, train, test_input):
+        """A full row and full column of 5s form a cross, creating a top-left quadrant.
+        Colors that appear inside the quadrant have all their occurrences outside
+        the quadrant erased (set to bg=0).
+        """
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = 0
+            # Find cross row (full row of 5s) and cross col (full col of 5s)
+            cross_row = next((r for r in range(rows)
+                              if all(int(grid[r][c]) == 5 for c in range(cols))), None)
+            cross_col = next((c for c in range(cols)
+                              if all(int(grid[r][c]) == 5 for r in range(rows))), None)
+            if cross_row is None or cross_col is None:
+                return None
+            # Find colors inside the top-left quadrant
+            inside_colors = set()
+            for r in range(cross_row):
+                for c in range(cross_col):
+                    v = int(grid[r][c])
+                    if v != bg and v != 5:
+                        inside_colors.add(v)
+            if not inside_colors:
+                return None
+            # Remove outside occurrences of inside colors
+            result = [list(map(int, row)) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    v = result[r][c]
+                    if v in inside_colors and (r >= cross_row or c >= cross_col):
+                        result[r][c] = bg
             return result
 
         for ex in train:
