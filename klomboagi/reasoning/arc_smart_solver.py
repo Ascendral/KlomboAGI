@@ -346,6 +346,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_interior_through_gap,
             self._try_cross_quadrant_fill,
             self._try_crossing_bars_interrupted,
+            self._try_dot_to_filled_ring,
+            self._try_dot_to_corner_edge_ring,
+            self._try_shift_cluster_color,
         ]
         for s in v2:
             try:
@@ -3678,3 +3681,180 @@ class SmartARCSolverV2(SmartARCSolver):
         if result is None or result == test_input:
             return None
         return result
+
+    def _try_dot_to_filled_ring(self, train, test_input):
+        """Each non-bg dot at (r,c) with color v stays, all 8 neighbors set to a learned
+        ring color (mapped per dot color). Handles edge dots by clamping."""
+        from collections import Counter
+
+        def _learn(train_examples):
+            all_v = [v for ex in train_examples for row in ex["input"] for v in row]
+            bg = Counter(all_v).most_common(1)[0][0]
+            color_map = {}
+            for ex in train_examples:
+                rows, cols = len(ex["input"]), len(ex["input"][0])
+                for r in range(rows):
+                    for c in range(cols):
+                        v = ex["input"][r][c]
+                        if v == bg:
+                            continue
+                        # Collect 8-neighbor colors in output
+                        nb_colors = set()
+                        for dr, dc in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                ov = ex["output"][nr][nc]
+                                if ov != bg and ov != v:
+                                    nb_colors.add(ov)
+                        if not nb_colors:
+                            return None, None
+                        if len(nb_colors) != 1:
+                            return None, None
+                        ring_c = next(iter(nb_colors))
+                        if v in color_map and color_map[v] != ring_c:
+                            return None, None
+                        color_map[v] = ring_c
+            return bg, color_map
+
+        def _apply(grid, bg, color_map):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v == bg or v not in color_map:
+                        continue
+                    ring_c = color_map[v]
+                    for dr, dc in [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]:
+                        nr, nc = r+dr, c+dc
+                        if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == bg:
+                            out[nr][nc] = ring_c
+            return out
+
+        bg, color_map = _learn(train)
+        if bg is None or not color_map:
+            return None
+        for ex in train:
+            result = _apply(ex["input"], bg, color_map)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, bg, color_map)
+
+    def _try_dot_to_corner_edge_ring(self, train, test_input):
+        """Each non-bg dot at (r,c): center becomes bg, 4 diagonal neighbors = dot_color,
+        4 orthogonal neighbors = a learned edge_color."""
+        from collections import Counter
+
+        def _learn_edge_color(train_examples):
+            all_v = [v for ex in train_examples for row in ex["input"] for v in row]
+            bg = Counter(all_v).most_common(1)[0][0]
+            edge_color = None
+            for ex in train_examples:
+                rows, cols = len(ex["input"]), len(ex["input"][0])
+                for r in range(rows):
+                    for c in range(cols):
+                        dot_v = ex["input"][r][c]
+                        if dot_v == bg:
+                            continue
+                        # Center should become bg in output
+                        if ex["output"][r][c] != bg:
+                            return None, None
+                        # Orthogonal neighbors should be edge_color
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                ov = ex["output"][nr][nc]
+                                if ov == bg or ov == dot_v:
+                                    return None, None
+                                if edge_color is None:
+                                    edge_color = ov
+                                elif edge_color != ov:
+                                    return None, None
+                        # Diagonal neighbors should be dot_v
+                        for dr, dc in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                if ex["output"][nr][nc] != dot_v:
+                                    return None, None
+            return bg, edge_color
+
+        def _apply(grid, bg, edge_color):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            dots = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != bg]
+            for r, c, dot_v in dots:
+                out[r][c] = bg
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        out[nr][nc] = edge_color
+                for dr, dc in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        out[nr][nc] = dot_v
+            return out
+
+        bg, edge_color = _learn_edge_color(train)
+        if bg is None or edge_color is None:
+            return None
+        for ex in train:
+            result = _apply(ex["input"], bg, edge_color)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, bg, edge_color)
+
+    def _try_shift_cluster_color(self, train, test_input):
+        """A cluster of cells with color S shifts by a fixed offset (dr, dc) and becomes
+        color D. Learn S, D, and (dr, dc) from training examples."""
+        from collections import Counter
+
+        def _learn(train_examples):
+            all_in = [v for ex in train_examples for row in ex["input"] for v in row]
+            all_out = [v for ex in train_examples for row in ex["output"] for v in row]
+            bg = Counter(all_in).most_common(1)[0][0]
+            in_colors = set(all_in) - {bg}
+            out_colors = set(all_out) - {bg}
+            src_colors = in_colors - out_colors  # colors only in input
+            dst_colors = out_colors - in_colors  # colors only in output
+            if len(src_colors) != 1 or len(dst_colors) != 1:
+                return None, None, None, None
+            S = next(iter(src_colors))
+            D = next(iter(dst_colors))
+            # Find shift from first training example
+            ex = train_examples[0]
+            src_cells = [(r, c) for r in range(len(ex["input"])) for c in range(len(ex["input"][0])) if ex["input"][r][c] == S]
+            dst_cells = [(r, c) for r in range(len(ex["output"])) for c in range(len(ex["output"][0])) if ex["output"][r][c] == D]
+            if len(src_cells) != len(dst_cells) or not src_cells:
+                return None, None, None, None
+            dr = dst_cells[0][0] - src_cells[0][0]
+            dc = dst_cells[0][1] - src_cells[0][1]
+            # Verify consistent shift
+            for (sr, sc), (dr2, dc2) in zip(src_cells, [(r,c) for r,c in dst_cells]):
+                if dr2 - sr != dr or dc2 - sc != dc:
+                    return None, None, None, None
+            return bg, S, D, (dr, dc)
+
+        def _apply(grid, bg, S, D, offset):
+            dr, dc = offset
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == S:
+                        out[r][c] = bg  # erase source
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == S:
+                        nr, nc = r + dr, c + dc
+                        if 0 <= nr < rows and 0 <= nc < cols:
+                            out[nr][nc] = D
+            return out
+
+        bg, S, D, offset = _learn(train)
+        if bg is None:
+            return None
+        for ex in train:
+            result = _apply(ex["input"], bg, S, D, offset)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, bg, S, D, offset)
