@@ -326,6 +326,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_perpendicular_8_blocks,
             self._try_grid_complement_separator,
             self._try_ones_in_8_bbox_to_3,
+            self._try_swap_colors_in_components,
+            self._try_remove_isolated_cells,
+            self._try_quadrant_color_map,
+            self._try_shift_parallelogram_top,
         ]
         for s in v2:
             try:
@@ -2783,6 +2787,248 @@ class SmartARCSolverV2(SmartARCSolver):
         if not any_change:
             return None
 
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_swap_colors_in_components(self, train, test_input):
+        """Swap the two non-background colors within each connected component."""
+        from collections import Counter
+
+        def _find_bg(grid):
+            rows, cols = len(grid), len(grid[0])
+            return Counter(grid[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+
+        def _components(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False] * cols for _ in range(rows)]
+            comps = []
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != bg and not visited[sr][sc]:
+                        comp = []
+                        queue = [(sr, sc)]
+                        visited[sr][sc] = True
+                        while queue:
+                            r, c = queue.pop(0)
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] != bg:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                        comps.append(comp)
+            return comps
+
+        def _apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            bg = _find_bg(g)
+            comps = _components(g, bg)
+            if not comps:
+                return None
+            out = [row[:] for row in g]
+            any_swap = False
+            for comp in comps:
+                colors = list(set(g[r][c] for r, c in comp))
+                if len(colors) == 2:
+                    a, b = colors[0], colors[1]
+                    for r, c in comp:
+                        out[r][c] = b if g[r][c] == a else a
+                    any_swap = True
+            return out if any_swap else None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_remove_isolated_cells(self, train, test_input):
+        """Remove cells that have no 8-connected neighbor of the same color."""
+        from collections import Counter
+
+        def _apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            bg = Counter(g[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            out = [row[:] for row in g]
+            changed = False
+            for r in range(rows):
+                for c in range(cols):
+                    if g[r][c] == bg:
+                        continue
+                    v = g[r][c]
+                    has_neighbor = any(
+                        0 <= r+dr < rows and 0 <= c+dc < cols and g[r+dr][c+dc] == v
+                        for dr in [-1,0,1] for dc in [-1,0,1] if (dr,dc) != (0,0)
+                    )
+                    if not has_neighbor:
+                        out[r][c] = bg
+                        changed = True
+            return out if changed else None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_quadrant_color_map(self, train, test_input):
+        """2x2 key in 8-bordered corner maps scattered single-color cells by quadrant."""
+        def _find_key(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            for r in range(rows - 1):
+                for c in range(cols - 1):
+                    block = [g[r][c], g[r][c+1], g[r+1][c], g[r+1][c+1]]
+                    if all(v not in (0, 8) for v in block):
+                        return (r, c, block[0], block[1], block[2], block[3])
+            return None
+
+        def _apply(grid):
+            key = _find_key(grid)
+            if key is None:
+                return None
+            key_r, key_c, tl, tr, bl, br = key
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            # Collect main cells: non-0, non-8, outside key region
+            main_cells = []
+            for r in range(rows):
+                for c in range(cols):
+                    if g[r][c] not in (0, 8):
+                        if key_r <= r <= key_r+1 and key_c <= c <= key_c+1:
+                            continue
+                        main_cells.append((r, c, g[r][c]))
+            if not main_cells:
+                return None
+            colors_in_main = set(v for r, c, v in main_cells)
+            if len(colors_in_main) != 1:
+                return None
+            # Main area bounds: rows/cols that are fully non-8 (not key rows/cols)
+            main_rows = [r for r in range(rows)
+                         if not (key_r <= r <= key_r+1) and any(g[r][c] != 8 for c in range(cols))]
+            main_cols = [c for c in range(cols)
+                         if not (key_c <= c <= key_c+1) and any(g[r][c] != 8 for r in range(rows))]
+            if not main_rows or not main_cols:
+                return None
+            r_mid = (min(main_rows) + max(main_rows)) / 2.0
+            c_mid = (min(main_cols) + max(main_cols)) / 2.0
+            out = [row[:] for row in g]
+            for r, c, v in main_cells:
+                qr = 0 if r < r_mid else 1
+                qc = 0 if c < c_mid else 1
+                out[r][c] = [[tl, tr], [bl, br]][qr][qc]
+            return out
+
+        # Verify key consistent across training examples
+        key0 = _find_key(train[0]["input"])
+        if key0 is None:
+            return None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_shift_parallelogram_top(self, train, test_input):
+        """Non-bottom-bar cells of parallelogram outlines shift right by 1 (clipped at bottom-bar-right)."""
+        from collections import Counter
+
+        def _bfs_component(g, sr, sc, bg, rows, cols):
+            # 8-connected: parallelogram sides are diagonally adjacent
+            visited = [[False]*cols for _ in range(rows)]
+            comp = []
+            queue = [(sr, sc)]
+            visited[sr][sc] = True
+            while queue:
+                r, c = queue.pop(0)
+                comp.append((r, c))
+                for dr in [-1,0,1]:
+                    for dc in [-1,0,1]:
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = r+dr, c+dc
+                        if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and g[nr][nc] != bg:
+                            visited[nr][nc] = True
+                            queue.append((nr, nc))
+            return comp
+
+        def _apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            bg = Counter(g[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            out = [row[:] for row in g]
+            visited_global = set()
+            changed = False
+            for sr in range(rows):
+                for sc in range(cols):
+                    if g[sr][sc] == bg or (sr, sc) in visited_global:
+                        continue
+                    comp = _bfs_component(g, sr, sc, bg, rows, cols)
+                    for r, c in comp:
+                        visited_global.add((r, c))
+                    # Find bottom bar row (max row index)
+                    row_max = max(r for r, c in comp)
+                    row_min = min(r for r, c in comp)
+                    if row_max == row_min:
+                        continue  # Single row, skip
+                    # Bottom bar: all cells in row_max
+                    bottom_bar = sorted(c for r, c in comp if r == row_max)
+                    if len(bottom_bar) < 2:
+                        continue  # Bottom bar must have at least 2 cells
+                    bottom_bar_right = bottom_bar[-1]
+                    # Verify top bar also has >= 2 cells
+                    top_bar = sorted(c for r, c in comp if r == row_min)
+                    if len(top_bar) < 2:
+                        continue
+                    # Check this is a parallelogram-like outline (each middle row has exactly 2 cells)
+                    mid_rows_ok = True
+                    for row in range(row_min + 1, row_max):
+                        cells_in_row = [c for r, c in comp if r == row]
+                        if len(cells_in_row) != 2:
+                            mid_rows_ok = False
+                            break
+                    if not mid_rows_ok:
+                        continue
+                    # Shift all non-bottom-bar cells right by 1, clip rightmost to bottom_bar_right
+                    v = g[sr][sc]
+                    # Compute new positions first, then apply
+                    new_positions = {}
+                    for r, c in comp:
+                        if r == row_max:
+                            new_positions[(r, c)] = (r, c)
+                        else:
+                            cells_in_row = sorted(cc for rr, cc in comp if rr == r)
+                            if c == cells_in_row[-1]:
+                                new_c = min(c + 1, bottom_bar_right)
+                            else:
+                                new_c = c + 1
+                            new_positions[(r, c)] = (r, new_c)
+                    # Clear old positions, then place new ones
+                    for r, c in comp:
+                        out[r][c] = bg
+                    for (r, c), (nr, nc) in new_positions.items():
+                        if 0 <= nr < rows and 0 <= nc < cols:
+                            out[nr][nc] = v
+                    changed = True
+            return out if changed else None
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
         result = _apply(test_input)
         if result is None or result == [list(map(int, r)) for r in test_input]:
             return None
