@@ -169,6 +169,13 @@ class SmartARCSolverV2(SmartARCSolver):
             return None
 
     def solve(self, train, test_input):
+        # ── Pre-phase: high-precision v2 strategies that beat Phase 1 mismatches ──
+        for pre_fn in [self._try_bordered_rect_center, self._try_rect_corner_edge_interior,
+                       self._try_convert_isolated_cells]:
+            result = pre_fn(train, test_input)
+            if result is not None:
+                return result
+
         # ── Phase 0: High-confidence specific learners (before hand-coded) ─────
         from klomboagi.reasoning.arc_cell_rules import (
             learn_span_fill_rule, learn_color_key_swap, learn_template_row_stamp,
@@ -330,6 +337,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_remove_isolated_cells,
             self._try_quadrant_color_map,
             self._try_shift_parallelogram_top,
+            self._try_ring_rotate_3x3,
+            self._try_bordered_rect_center,
+            self._try_rect_corner_edge_interior,
+            self._try_convert_isolated_cells,
         ]
         for s in v2:
             try:
@@ -3030,6 +3041,306 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is None or result != [list(map(int, r)) for r in ex["output"]]:
                 return None
         result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_ring_rotate_3x3(self, train, test_input):
+        """3x3 blocks: corners rotate CCW by 1, edge midpoints rotate CW by 1, center fixed."""
+        from collections import Counter
+        # Ring positions clockwise: even = corners, odd = edge midpoints
+        RING = [(0,0),(0,1),(0,2),(1,2),(2,2),(2,1),(2,0),(1,0)]
+
+        def _find_and_apply(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            bg = Counter(g[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            out = [row[:] for row in g]
+            changed = False
+            for sr in range(rows - 2):
+                for sc in range(cols - 2):
+                    if g[sr+1][sc+1] != bg:
+                        continue
+                    border = [g[sr+dr][sc+dc] for dr, dc in RING]
+                    if any(v == bg for v in border):
+                        continue
+                    new_border = [None] * 8
+                    for i in range(8):
+                        if i % 2 == 0:  # corner: CCW 1 step in corner ring = -2 in full ring
+                            new_border[(i + 6) % 8] = border[i]
+                        else:           # edge: CW 1 step in edge ring = +2 in full ring
+                            new_border[(i + 2) % 8] = border[i]
+                    for i, (dr, dc) in enumerate(RING):
+                        out[sr+dr][sc+dc] = new_border[i]
+                    changed = True
+            return out if changed else None
+
+        for ex in train:
+            result = _find_and_apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+        result = _find_and_apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_bordered_rect_center(self, train, test_input):
+        """Find the unique NxM rectangle whose entire border is one color and center differs.
+        Output is a 1x1 grid with the center color.
+        Handles any rectangle size >=3x3 where border is uniform and center is a single different value."""
+        from collections import Counter
+
+        def _find_center(grid):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            bg = Counter(g[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            # Try all possible rectangles >=3x3
+            centers = []
+            for r0 in range(rows - 2):
+                for c0 in range(cols - 2):
+                    for r1 in range(r0 + 2, rows):
+                        for c1 in range(c0 + 2, cols):
+                            # Collect border cells
+                            border = set()
+                            for c in range(c0, c1 + 1):
+                                border.add((r0, c))
+                                border.add((r1, c))
+                            for r in range(r0, r1 + 1):
+                                border.add((r, c0))
+                                border.add((r, c1))
+                            # All border cells same color?
+                            border_colors = {g[r][c] for r, c in border}
+                            if len(border_colors) != 1:
+                                continue
+                            border_color = next(iter(border_colors))
+                            if border_color == bg:
+                                continue
+                            # Interior cells
+                            interior = [(r, c) for r in range(r0 + 1, r1)
+                                        for c in range(c0 + 1, c1)]
+                            if not interior:
+                                continue
+                            # All interior same color, different from border?
+                            int_colors = {g[r][c] for r, c in interior}
+                            if len(int_colors) != 1:
+                                continue
+                            int_color = next(iter(int_colors))
+                            if int_color == border_color:
+                                continue
+                            centers.append(int_color)
+            return centers
+
+        # All train examples must have exactly one bordered rect with consistent rule
+        train_centers = []
+        for ex in train:
+            centers = _find_center(ex["input"])
+            if len(centers) != 1:
+                return None
+            if centers[0] != ex["output"][0][0]:
+                return None
+            train_centers.append(centers[0])
+
+        test_centers = _find_center(test_input)
+        if len(test_centers) != 1:
+            return None
+        return [[test_centers[0]]]
+
+    def _try_rect_corner_edge_interior(self, train, test_input):
+        """Solid color rectangles: corners → color_c, perimeter edges → color_e, interior → color_i.
+        All three colors are learned from training. Handles multiple rectangles per grid."""
+        from collections import Counter
+
+        def _find_rects(grid, sep_color):
+            """Return list of (color, r0, c0, r1, c1) for all solid-color rectangles
+            that are not sep_color."""
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            visited = [[False] * cols for _ in range(rows)]
+            rects = []
+            for r in range(rows):
+                for c in range(cols):
+                    if visited[r][c] or g[r][c] == sep_color:
+                        continue
+                    color = g[r][c]
+                    # BFS to get component
+                    comp = set()
+                    q = [(r, c)]
+                    while q:
+                        cr, cc = q.pop()
+                        if (cr, cc) in comp or not (0 <= cr < rows and 0 <= cc < cols):
+                            continue
+                        if g[cr][cc] != color:
+                            continue
+                        comp.add((cr, cc))
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            q.append((cr+dr, cc+dc))
+                    for pr, pc in comp:
+                        visited[pr][pc] = True
+                    r0 = min(rr for rr, _ in comp)
+                    r1 = max(rr for rr, _ in comp)
+                    c0 = min(cc for _, cc in comp)
+                    c1 = max(cc for _, cc in comp)
+                    # Verify all cells in bounding box are this color
+                    expected_count = (r1 - r0 + 1) * (c1 - c0 + 1)
+                    if len(comp) != expected_count:
+                        return None  # not a solid rectangle
+                    if r0 == r1 or c0 == c1:
+                        continue  # too thin
+                    rects.append((color, r0, c0, r1, c1))
+            return rects
+
+        # Detect separator color: the color that separates rectangles (usually 0)
+        # Try 0 first, then most common color
+        all_in = [v for ex in train for row in ex["input"] for v in row]
+        sep_candidates = [0]
+        mc = Counter(all_in).most_common()
+        # Also try the least common color as separator if 0 isn't present
+        if 0 not in [v for v, _ in mc]:
+            sep_candidates = [mc[-1][0]]
+        else:
+            sep_candidates = [0]
+
+        def _classify_cell(r, c, r0, c0, r1, c1):
+            on_top = r == r0
+            on_bot = r == r1
+            on_lft = c == c0
+            on_rgt = c == c1
+            is_corner = (on_top or on_bot) and (on_lft or on_rgt)
+            is_edge = (on_top or on_bot or on_lft or on_rgt) and not is_corner
+            return 'corner' if is_corner else ('edge' if is_edge else 'interior')
+
+        def _apply(grid, color_map, sep_color):
+            g = [list(map(int, row)) for row in grid]
+            rects = _find_rects(grid, sep_color)
+            if not rects:
+                return None
+            out = [row[:] for row in g]
+            for src_color, r0, c0, r1, c1 in rects:
+                for r in range(r0, r1 + 1):
+                    for c in range(c0, c1 + 1):
+                        kind = _classify_cell(r, c, r0, c0, r1, c1)
+                        out[r][c] = color_map[kind]
+            return out
+
+        for sep_color in sep_candidates:
+            # Only applies when output is same size as input
+            if len(train[0]["input"]) != len(train[0]["output"]) or \
+               len(train[0]["input"][0]) != len(train[0]["output"][0]):
+                continue
+
+            # Learn color_map from first training example
+            ex0 = train[0]
+            rects0 = _find_rects(ex0["input"], sep_color)
+            if not rects0:
+                continue
+            out0 = [list(map(int, row)) for row in ex0["output"]]
+            color_map = {}
+            ok = True
+            for src_color, r0, c0, r1, c1 in rects0:
+                for r in range(r0, r1 + 1):
+                    for c in range(c0, c1 + 1):
+                        kind = _classify_cell(r, c, r0, c0, r1, c1)
+                        mapped = out0[r][c]
+                        if kind in color_map and color_map[kind] != mapped:
+                            ok = False
+                            break
+                        color_map[kind] = mapped
+                    if not ok:
+                        break
+                if not ok:
+                    break
+            if not ok:
+                continue
+            if set(color_map.keys()) != {'corner', 'edge', 'interior'}:
+                continue
+            if len(set(color_map.values())) < 2:
+                continue  # all same — not a meaningful transform
+
+            # Cross-validate
+            valid = True
+            for ex in train:
+                result = _apply(ex["input"], color_map, sep_color)
+                if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                    valid = False
+                    break
+            if not valid:
+                continue
+            result = _apply(test_input, color_map, sep_color)
+            if result is None or result == [list(map(int, r)) for r in test_input]:
+                continue
+            return result
+        return None
+
+    def _try_convert_isolated_cells(self, train, test_input):
+        """Cells of color A with no 4-connected neighbor of same color → color B.
+        A and B are learned from training. Only same-size transforms."""
+        from collections import Counter
+
+        def _isolated_cells(grid, color):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            result = []
+            for r in range(rows):
+                for c in range(cols):
+                    if g[r][c] != color:
+                        continue
+                    has_neighbor = any(
+                        0 <= r+dr < rows and 0 <= c+dc < cols and g[r+dr][c+dc] == color
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
+                    )
+                    if not has_neighbor:
+                        result.append((r, c))
+            return result
+
+        def _apply(grid, src_color, dst_color):
+            g = [list(map(int, row)) for row in grid]
+            rows, cols = len(g), len(g[0])
+            out = [row[:] for row in g]
+            changed = False
+            for r, c in _isolated_cells(grid, src_color):
+                out[r][c] = dst_color
+                changed = True
+            return out if changed else None
+
+        # Only same-size transforms
+        if len(train[0]["input"]) != len(train[0]["output"]) or \
+           len(train[0]["input"][0]) != len(train[0]["output"][0]):
+            return None
+
+        # Learn (src_color, dst_color) from training: find cells that change
+        src_color = dst_color = None
+        for ex in train:
+            gin = [list(map(int, r)) for r in ex["input"]]
+            gout = [list(map(int, r)) for r in ex["output"]]
+            rows, cols = len(gin), len(gin[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if gin[r][c] != gout[r][c]:
+                        sc, dc = gin[r][c], gout[r][c]
+                        if src_color is None:
+                            src_color, dst_color = sc, dc
+                        elif src_color != sc or dst_color != dc:
+                            return None  # multiple different change types
+        if src_color is None:
+            return None
+
+        # Cross-validate: all isolated src_color cells must become dst_color
+        for ex in train:
+            expected_out = [list(map(int, r)) for r in ex["output"]]
+            isolated = _isolated_cells(ex["input"], src_color)
+            gin = [list(map(int, r)) for r in ex["input"]]
+            for r, c in isolated:
+                if expected_out[r][c] != dst_color:
+                    return None
+            # Non-isolated src cells must stay src
+            rows, cols = len(gin), len(gin[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if gin[r][c] == src_color and (r, c) not in set(isolated):
+                        if expected_out[r][c] != src_color:
+                            return None
+
+        result = _apply(test_input, src_color, dst_color)
         if result is None or result == [list(map(int, r)) for r in test_input]:
             return None
         return result
