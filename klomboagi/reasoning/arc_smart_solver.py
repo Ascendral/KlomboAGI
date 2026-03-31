@@ -175,7 +175,7 @@ class SmartARCSolverV2(SmartARCSolver):
             learn_grid_gap_fill, learn_single_cell_paint, learn_connect_dot_pairs,
             learn_cross_from_dots, learn_diamond_expand, learn_arrow_ray,
             learn_lshape_concavity, learn_conditional_span_fill,
-            learn_ushape_gap_drop
+            learn_ushape_gap_drop, learn_template_stamp_at_marker
         )
         for p0_fn in [learn_span_fill_rule, learn_conditional_span_fill,
                        learn_color_key_swap,
@@ -183,7 +183,7 @@ class SmartARCSolverV2(SmartARCSolver):
                        learn_single_cell_paint, learn_connect_dot_pairs,
                        learn_cross_from_dots, learn_diamond_expand,
                        learn_arrow_ray, learn_lshape_concavity,
-                       learn_ushape_gap_drop]:
+                       learn_ushape_gap_drop, learn_template_stamp_at_marker]:
             result = SmartARCSolverV2._try_learner(p0_fn, train, test_input, loo=False)
             if result is not None:
                 return result

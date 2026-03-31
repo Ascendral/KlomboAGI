@@ -1133,3 +1133,117 @@ def learn_ushape_gap_drop(train: list[dict]) -> callable | None:
     if all(apply_drop(ex["input"]) == ex["output"] for ex in train):
         return apply_drop
     return None
+
+
+# ─── Template Stamp at Marker ────────────────────────────────────────────────
+
+def learn_template_stamp_at_marker(train: list[dict]) -> callable | None:
+    """
+    A template shape (multi-colored) contains a special marker color cell.
+    Isolated marker cells elsewhere indicate where to stamp copies of the
+    template (anchored at the marker position within the template).
+    The marker cell in the copy becomes bg.
+
+    Handles task 2c737e39.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+    from collections import Counter
+
+    def _find_template_and_markers(grid, bg_val):
+        rows, cols = len(grid), len(grid[0])
+
+        # Find connected components
+        visited = [[False] * cols for _ in range(rows)]
+        components = []
+        for sr in range(rows):
+            for sc in range(cols):
+                if visited[sr][sc] or grid[sr][sc] == bg_val:
+                    continue
+                cells = []
+                queue = [(sr, sc)]
+                while queue:
+                    r, c = queue.pop(0)
+                    if visited[r][c]:
+                        continue
+                    visited[r][c] = True
+                    cells.append((r, c, grid[r][c]))
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if (0 <= nr < rows and 0 <= nc < cols and
+                                not visited[nr][nc] and grid[nr][nc] != bg_val):
+                            queue.append((nr, nc))
+                components.append(cells)
+
+        if len(components) < 2:
+            return None, None, None
+
+        # Template = largest multi-color component
+        # Markers = single-cell components
+        template = None
+        markers = []
+        for comp in components:
+            colors = set(v for _, _, v in comp)
+            if len(comp) == 1:
+                markers.append(comp[0])
+            elif template is None or len(comp) > len(template):
+                template = comp
+
+        if template is None or not markers:
+            return None, None, None
+
+        # Find marker color (appears in both template and as isolated cells)
+        template_colors = set(v for _, _, v in template)
+        marker_colors = set(v for _, _, v in markers)
+        shared = template_colors & marker_colors
+        if len(shared) != 1:
+            return None, None, None
+
+        marker_color = shared.pop()
+        return template, markers, marker_color
+
+    def apply_stamp(grid, bg_val=bg):
+        rows, cols = len(grid), len(grid[0])
+        info = _find_template_and_markers(grid, bg_val)
+        if info[0] is None:
+            return grid
+
+        template, markers, marker_color = info
+        result = [row[:] for row in grid]
+
+        # Find marker position within template
+        marker_in_template = None
+        for r, c, v in template:
+            if v == marker_color:
+                marker_in_template = (r, c)
+                break
+        if marker_in_template is None:
+            return grid
+
+        tmr, tmc = marker_in_template
+
+        # For each isolated marker, stamp the template
+        for mr, mc, mv in markers:
+            # Offset: align template's marker cell with the isolated marker
+            dr = mr - tmr
+            dc = mc - tmc
+
+            for tr, tc, tv in template:
+                nr, nc = tr + dr, tc + dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    if tv == marker_color:
+                        result[nr][nc] = bg_val  # marker becomes bg in copy
+                    else:
+                        result[nr][nc] = tv
+
+        return result
+
+    if all(apply_stamp(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_stamp(ex["input"]) == ex["output"] for ex in train):
+        return apply_stamp
+    return None
