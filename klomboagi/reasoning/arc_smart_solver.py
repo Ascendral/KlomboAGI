@@ -311,8 +311,10 @@ class SmartARCSolverV2(SmartARCSolver):
         if llm_result is not None:
             return llm_result
 
-        # ── Phase 5: Unvalidated fallback (last resort) ───────────────────────
-        return self.solve_unvalidated_fallback(train, test_input)
+        # ── Phase 5: Disabled — unvalidated fallback produces too many wrong
+        # results (pattern_rule alone fires 176 times incorrectly without LOO).
+        # Return None to avoid polluting results.
+        return None
 
     def _try_paint_shape_with_color(self, train, test_input):
         """A shape outline exists, fill interior with a specific color found elsewhere."""
