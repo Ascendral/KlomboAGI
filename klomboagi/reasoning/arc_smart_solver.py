@@ -308,6 +308,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_ring_at_crosshair_intersection,
             self._try_fill_to_nearest_corner,
             self._try_tile_from_marked_rows,
+            self._try_nine_ball_toward_six,
+            self._try_chebyshev_equidistant_center,
         ]
         for s in v2:
             try:
@@ -1627,6 +1629,123 @@ class SmartARCSolverV2(SmartARCSolver):
             if predicted is None or predicted != [list(map(int, row)) for row in out]:
                 return None
 
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_nine_ball_toward_six(self, train, test_input):
+        """Grid divided by 0-rows/cols. A 3x3 block of 5s contains a 9 at center.
+        A lone 6 appears in another cell. Move 9 to the edge of the 5s facing the 6's cell,
+        and replace the 6 with 9.
+        """
+        def _get_dividers(grid):
+            rows, cols = len(grid), len(grid[0])
+            div_rows = [r for r in range(rows) if all(int(grid[r][c]) == 0 for c in range(cols))]
+            div_cols = [c for c in range(cols) if all(int(grid[r][c]) == 0 for r in range(rows))]
+            return div_rows, div_cols
+
+        def _cell_idx(pos, dividers, size):
+            """Return which cell (0-indexed) pos belongs to."""
+            idx = 0
+            for d in dividers:
+                if pos > d:
+                    idx += 1
+                else:
+                    break
+            return idx
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            div_rows, div_cols = _get_dividers(grid)
+            if not div_rows or not div_cols:
+                return None
+            # Find center of 5s block (which contains a 9)
+            center_r = center_c = None
+            for r in range(1, rows - 1):
+                for c in range(1, cols - 1):
+                    if int(grid[r][c]) == 9:
+                        # Check if surrounded by 5s
+                        neighbors = [(r+dr, c+dc) for dr in (-1,0,1) for dc in (-1,0,1) if (dr,dc) != (0,0)]
+                        if all(0 <= nr < rows and 0 <= nc < cols and int(grid[nr][nc]) == 5
+                               for nr, nc in neighbors):
+                            center_r, center_c = r, c
+            if center_r is None:
+                return None
+            # Find the 6
+            six_r = six_c = None
+            for r in range(rows):
+                for c in range(cols):
+                    if int(grid[r][c]) == 6:
+                        six_r, six_c = r, c
+            if six_r is None:
+                return None
+            # Determine cell indices
+            cell_5s_r = _cell_idx(center_r, div_rows, rows)
+            cell_5s_c = _cell_idx(center_c, div_cols, cols)
+            cell_6_r = _cell_idx(six_r, div_rows, rows)
+            cell_6_c = _cell_idx(six_c, div_cols, cols)
+            dr = 0 if cell_5s_r == cell_6_r else (1 if cell_6_r > cell_5s_r else -1)
+            dc = 0 if cell_5s_c == cell_6_c else (1 if cell_6_c > cell_5s_c else -1)
+            if dr == 0 and dc == 0:
+                return None
+            exit_r, exit_c = center_r + dr, center_c + dc
+            result = [list(map(int, row)) for row in grid]
+            result[center_r][center_c] = 5
+            result[exit_r][exit_c] = 9
+            result[six_r][six_c] = 9
+            return result
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_chebyshev_equidistant_center(self, train, test_input):
+        """Exactly 3 colored (non-bg) cells. Find the point equidistant (Chebyshev)
+        from all 3, place 5 there. Place each color one step toward its source cell.
+        """
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = 0
+            cells = [(r, c, int(grid[r][c])) for r in range(rows) for c in range(cols)
+                     if int(grid[r][c]) != bg]
+            if len(cells) != 3:
+                return None
+            (r1,c1,v1), (r2,c2,v2), (r3,c3,v3) = cells
+            # Find equidistant point
+            center = None
+            for r in range(rows):
+                for c in range(cols):
+                    if int(grid[r][c]) != bg:
+                        continue
+                    d1 = max(abs(r-r1), abs(c-c1))
+                    d2 = max(abs(r-r2), abs(c-c2))
+                    d3 = max(abs(r-r3), abs(c-c3))
+                    if d1 == d2 == d3 and d1 > 0:
+                        center = (r, c)
+                        break
+                if center:
+                    break
+            if center is None:
+                return None
+            cr, cc = center
+            result = [list(map(int, row)) for row in grid]
+            result[cr][cc] = 5
+            for (rs, cs, vs) in cells:
+                dr = 0 if rs == cr else (1 if rs > cr else -1)
+                dc = 0 if cs == cc else (1 if cs > cc else -1)
+                result[cr + dr][cc + dc] = vs
+            return result
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
         result = _apply(test_input)
         if result is None or result == [list(map(int, row)) for row in test_input]:
             return None
