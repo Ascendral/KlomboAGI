@@ -369,6 +369,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_top2_freq_stay,
             self._try_5block_nearest_noise_color,
             self._try_complete_rect_outline_to_3,
+            self._try_marker_recolor_blob,
+            self._try_small_components_to_3,
         ]
         for s in v2:
             try:
@@ -5213,6 +5215,87 @@ class SmartARCSolverV2(SmartARCSolver):
             out = [row[:] for row in grid]
             for comp in comps:
                 if is_complete_hollow_rect(comp):
+                    for r, c in comp:
+                        out[r][c] = 3
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_marker_recolor_blob(self, train, test_input):
+        """One isolated singleton cell acts as a color marker. The main blob (connected
+        component of a different color) gets recolored to the marker color, marker disappears.
+        Handles: aabf363d"""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            non_zero = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            colors = set(v for _, _, v in non_zero)
+            if len(colors) != 2:
+                return None
+            c1, c2 = list(colors)
+            c1_cells = [(r, c) for r, c, v in non_zero if v == c1]
+            c2_cells = [(r, c) for r, c, v in non_zero if v == c2]
+            # One must be the singleton marker, other is the blob
+            if len(c1_cells) == 1:
+                marker_color, marker_cell = c1, c1_cells[0]
+                blob_color = c2
+            elif len(c2_cells) == 1:
+                marker_color, marker_cell = c2, c2_cells[0]
+                blob_color = c1
+            else:
+                return None
+            out = [row[:] for row in grid]
+            mr, mc = marker_cell
+            out[mr][mc] = 0
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == blob_color:
+                        out[r][c] = marker_color
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_small_components_to_3(self, train, test_input):
+        """Same-value connected components with size <= 2 get recolored to 3.
+        Components with size >= 3 stay unchanged.
+        Handles: 12eac192"""
+        def get_same_value_components(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            components = []
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        v = grid[sr][sc]
+                        comp = []
+                        stack = [(sr, sc)]
+                        visited[sr][sc] = True
+                        while stack:
+                            r, c = stack.pop()
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc]==v:
+                                    visited[nr][nc] = True
+                                    stack.append((nr, nc))
+                        components.append((v, comp))
+            return components
+
+        def apply_rule(grid):
+            comps = get_same_value_components(grid)
+            out = [row[:] for row in grid]
+            for v, comp in comps:
+                if len(comp) <= 2:
                     for r, c in comp:
                         out[r][c] = 3
             return out
