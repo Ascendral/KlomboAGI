@@ -310,6 +310,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_tile_from_marked_rows,
             self._try_nine_ball_toward_six,
             self._try_chebyshev_equidistant_center,
+            self._try_connect_aligned_diamonds,
         ]
         for s in v2:
             try:
@@ -1792,6 +1793,57 @@ class SmartARCSolverV2(SmartARCSolver):
             if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
                 return None
 
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_connect_aligned_diamonds(self, train, test_input):
+        """Full diamond shapes (center with N/S/E/W arms of color 2) that share
+        the same row or column get connected with 1s filling the gap between arms.
+        """
+        def _find_diamonds(grid):
+            rows, cols = len(grid), len(grid[0])
+            centers = []
+            for r in range(1, rows - 1):
+                for c in range(1, cols - 1):
+                    if (int(grid[r][c]) == 0 and
+                            int(grid[r-1][c]) == 2 and int(grid[r+1][c]) == 2 and
+                            int(grid[r][c-1]) == 2 and int(grid[r][c+1]) == 2):
+                        centers.append((r, c))
+            return centers
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            centers = _find_diamonds(grid)
+            if len(centers) < 2:
+                return None
+            result = [list(map(int, row)) for row in grid]
+            changed = False
+            for i in range(len(centers)):
+                for j in range(i + 1, len(centers)):
+                    r1, c1 = centers[i]
+                    r2, c2 = centers[j]
+                    if r1 == r2:
+                        cl, cr = (c1, c2) if c1 < c2 else (c2, c1)
+                        gap = [result[r1][c] for c in range(cl + 2, cr - 1)]
+                        if all(v == 0 for v in gap):
+                            for c in range(cl + 2, cr - 1):
+                                result[r1][c] = 1
+                                changed = True
+                    elif c1 == c2:
+                        rt, rb = (r1, r2) if r1 < r2 else (r2, r1)
+                        gap = [result[r][c1] for r in range(rt + 2, rb - 1)]
+                        if all(v == 0 for v in gap):
+                            for r in range(rt + 2, rb - 1):
+                                result[r][c1] = 1
+                                changed = True
+            return result if changed else None
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
         result = _apply(test_input)
         if result is None or result == [list(map(int, row)) for row in test_input]:
             return None
