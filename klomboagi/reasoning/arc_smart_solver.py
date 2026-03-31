@@ -344,6 +344,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_row_permutation,
             self._try_broadcast_direction,
             self._try_fill_interior_through_gap,
+            self._try_cross_quadrant_fill,
+            self._try_crossing_bars_interrupted,
         ]
         for s in v2:
             try:
@@ -3556,5 +3558,123 @@ class SmartARCSolverV2(SmartARCSolver):
             return None
         result = _apply(test_input, test_analysis)
         if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_cross_quadrant_fill(self, train, test_input):
+        """5x5-like grid with cross (middle row+col all same color), each quadrant has one
+        cross-colored cell. Fill each quadrant's cross cell with the color missing so all
+        quadrants have the same multiset of colors."""
+        from collections import Counter
+
+        def _solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows < 3 or cols < 3:
+                return None
+            # Find single uniform row and col (the cross)
+            def is_uniform_row(r):
+                return len(set(grid[r])) == 1
+            def is_uniform_col(c):
+                return len(set(grid[r][c] for r in range(rows))) == 1
+            cross_rows = [r for r in range(rows) if is_uniform_row(r)]
+            cross_cols = [c for c in range(cols) if is_uniform_col(c)]
+            if len(cross_rows) != 1 or len(cross_cols) != 1:
+                return None
+            mr, mc = cross_rows[0], cross_cols[0]
+            cross_val = grid[mr][mc]
+            top_rows = list(range(0, mr))
+            bot_rows = list(range(mr + 1, rows))
+            left_cols = list(range(0, mc))
+            right_cols = list(range(mc + 1, cols))
+            if not top_rows or not bot_rows or not left_cols or not right_cols:
+                return None
+            quadrants = [
+                (top_rows, left_cols),
+                (top_rows, right_cols),
+                (bot_rows, left_cols),
+                (bot_rows, right_cols),
+            ]
+            q_vals = []
+            q_cross_pos = []
+            for qr, qc in quadrants:
+                vals = [grid[r][c] for r in qr for c in qc]
+                cross_cells = [(r, c) for r in qr for c in qc if grid[r][c] == cross_val]
+                if len(cross_cells) != 1:
+                    return None
+                q_vals.append([v for v in vals if v != cross_val])
+                q_cross_pos.append(cross_cells[0])
+            all_non_cross = [v for q in q_vals for v in q]
+            if not all_non_cross:
+                return None
+            color_counts = Counter(all_non_cross)
+            target = {v: -(-cnt // 4) for v, cnt in color_counts.items()}  # ceil div
+            out = [list(row) for row in grid]
+            for qi in range(4):
+                nc_count = Counter(q_vals[qi])
+                missing = []
+                for v, needed in target.items():
+                    for _ in range(needed - nc_count.get(v, 0)):
+                        missing.append(v)
+                if len(missing) != 1:
+                    return None
+                r, c = q_cross_pos[qi]
+                out[r][c] = missing[0]
+            return out
+
+        for ex in train:
+            result = _solve(ex["input"])
+            if result is None or result != ex["output"]:
+                return None
+        return _solve(test_input)
+
+    def _try_crossing_bars_interrupted(self, train, test_input):
+        """Grid has vertical stripe(s) and horizontal stripe(s). In input, one bar
+        interrupts the other at the crossing. Output restores the interrupted bar."""
+        from collections import Counter
+
+        def _solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            all_vals = [v for row in grid for v in row]
+            bg = Counter(all_vals).most_common(1)[0][0]
+            # Find horizontal stripes: rows where a non-bg color dominates
+            h_rows = []
+            for r in range(rows):
+                non_bg = [v for v in grid[r] if v != bg]
+                if len(non_bg) >= cols // 2:
+                    h_color = Counter(non_bg).most_common(1)[0][0]
+                    h_rows.append((r, h_color))
+            # Find vertical stripes: cols where a non-bg color dominates
+            v_cols = []
+            for c in range(cols):
+                col = [grid[r][c] for r in range(rows)]
+                non_bg = [v for v in col if v != bg]
+                if len(non_bg) >= rows // 2:
+                    v_color = Counter(non_bg).most_common(1)[0][0]
+                    v_cols.append((c, v_color))
+            if not h_rows or not v_cols:
+                return None
+            out = [list(row) for row in grid]
+            for r, h_color in h_rows:
+                for c, v_color in v_cols:
+                    if h_color == v_color:
+                        continue
+                    cell = grid[r][c]
+                    # Check which bar is interrupted at this crossing
+                    v_col_vals = [grid[rr][c] for rr in range(rows) if rr != r]
+                    h_row_vals = [grid[r][cc] for cc in range(cols) if cc != c]
+                    v_dominant = Counter(v_col_vals).most_common(1)[0][0]
+                    h_dominant = Counter(h_row_vals).most_common(1)[0][0]
+                    if v_dominant == v_color and cell != v_color:
+                        out[r][c] = v_color  # v bar interrupted → restore
+                    elif h_dominant == h_color and cell != h_color:
+                        out[r][c] = h_color  # h bar interrupted → restore
+            return out
+
+        for ex in train:
+            result = _solve(ex["input"])
+            if result is None or result != ex["output"]:
+                return None
+        result = _solve(test_input)
+        if result is None or result == test_input:
             return None
         return result
