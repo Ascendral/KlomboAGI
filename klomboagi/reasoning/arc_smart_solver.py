@@ -4543,19 +4543,24 @@ class SmartARCSolverV2(SmartARCSolver):
                 if mc is None:
                     continue
                 # Verify: all inner cells should be mc in output
-                valid = True
-                for r in inner_rows:
-                    for c in inner_cols:
-                        if ex["output"][r][c] != mc:
-                            valid = False
-                            break
-                # And no other cells changed
-                for r in range(len(ex["output"])):
-                    for c in range(len(ex["output"][r])):
-                        in_inner = r in inner_rows and c in inner_cols
-                        if ex["output"][r][c] != ex["input"][r][c] and not in_inner:
-                            valid = False
-                            break
+                out_rows = len(ex["output"])
+                out_cols = len(ex["output"][0]) if out_rows else 0
+                if out_rows != len(ex["input"]) or out_cols != len(ex["input"][0]):
+                    valid = False
+                else:
+                    valid = True
+                    for r in inner_rows:
+                        for c in inner_cols:
+                            if r >= out_rows or c >= out_cols or ex["output"][r][c] != mc:
+                                valid = False
+                                break
+                    # And no other cells changed
+                    for r in range(out_rows):
+                        for c in range(out_cols):
+                            in_inner = r in inner_rows and c in inner_cols
+                            if ex["output"][r][c] != ex["input"][r][c] and not in_inner:
+                                valid = False
+                                break
                 if valid:
                     if marker_color is None:
                         marker_color = mc
