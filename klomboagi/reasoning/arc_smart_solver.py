@@ -321,6 +321,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_color_holes_by_column_rank,
             self._try_fill_shape_bounding_box,
             self._try_fill_max_zero_rect,
+            self._try_attract_color_pairs,
+            self._try_column_height_balance,
+            self._try_perpendicular_8_blocks,
         ]
         for s in v2:
             try:
@@ -2465,5 +2468,247 @@ class SmartARCSolverV2(SmartARCSolver):
 
         result = _apply(test_input)
         if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_attract_color_pairs(self, train, test_input):
+        """Rows with attracting color pairs: right color moves adjacent to left.
+
+        Attracting pairs are learned from training examples (rows that change).
+        Solves 494ef9d7.
+        """
+        def _find_attracting_pairs(examples):
+            pairs = set()
+            for ex in examples:
+                inp = [list(map(int, r)) for r in ex["input"]]
+                out = [list(map(int, r)) for r in ex["output"]]
+                for r in range(len(inp)):
+                    if inp[r] != out[r]:
+                        nz = [(c, inp[r][c]) for c in range(len(inp[r])) if inp[r][c] != 0]
+                        if len(nz) == 2:
+                            pairs.add(frozenset([nz[0][1], nz[1][1]]))
+            return pairs
+
+        def _apply(grid, attracting_pairs):
+            rows, cols = len(grid), len(grid[0])
+            g = [list(map(int, row)) for row in grid]
+            out = [row[:] for row in g]
+            for r in range(rows):
+                nz = [(c, g[r][c]) for c in range(cols) if g[r][c] != 0]
+                if len(nz) == 2:
+                    c1, v1 = nz[0]
+                    c2, v2 = nz[1]
+                    if frozenset([v1, v2]) in attracting_pairs and c2 > c1 + 1:
+                        out[r][c2] = 0
+                        out[r][c1 + 1] = v2
+            return out
+
+        attracting_pairs = _find_attracting_pairs(train)
+        if not attracting_pairs:
+            return None
+
+        for ex in train:
+            result = _apply(ex["input"], attracting_pairs)
+            if result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+
+        result = _apply(test_input, attracting_pairs)
+        if result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_column_height_balance(self, train, test_input):
+        """Bar chart balance: 5-bar height = sum(8-heights) - sum(2-heights).
+
+        Bars are vertical runs of a single color (8 or 2) aligned to the bottom.
+        5-bar placed at next evenly-spaced column, same bottom alignment.
+        Solves 37ce87bb.
+        """
+        def _parse_bars(grid):
+            rows, cols = len(grid), len(grid[0])
+            bars = {}
+            for c in range(cols):
+                col_cells = [(r, int(grid[r][c])) for r in range(rows) if int(grid[r][c]) != 7]
+                if not col_cells:
+                    continue
+                colors = set(v for _, v in col_cells)
+                if len(colors) != 1:
+                    return None
+                color = next(iter(colors))
+                if color not in (8, 2):
+                    return None
+                height = len(col_cells)
+                expected_rows = list(range(rows - height, rows))
+                actual_rows = sorted(r for r, _ in col_cells)
+                if actual_rows != expected_rows:
+                    return None
+                bars[c] = (color, height)
+            return bars
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bars = _parse_bars(grid)
+            if bars is None or len(bars) == 0:
+                return None
+            bar_cols = sorted(bars.keys())
+            if len(bar_cols) >= 2:
+                step = bar_cols[1] - bar_cols[0]
+                for i in range(1, len(bar_cols)):
+                    if bar_cols[i] - bar_cols[i - 1] != step:
+                        return None
+            else:
+                step = 2
+            sum_8 = sum(h for c, (color, h) in bars.items() if color == 8)
+            sum_2 = sum(h for c, (color, h) in bars.items() if color == 2)
+            H = sum_8 - sum_2
+            if H <= 0:
+                return None
+            new_col = max(bar_cols) + step
+            if new_col >= cols or H > rows:
+                return None
+            out = [list(map(int, row)) for row in grid]
+            for r in range(rows - H, rows):
+                out[r][new_col] = 5
+            return out
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_perpendicular_8_blocks(self, train, test_input):
+        """Two groups of 3-cells get 8-blocks placed perpendicularly.
+
+        Rule: Given two connected components A and B of 3-cells with centers A, B:
+        - Midpoint M = (A+B)/2
+        - CD_vector = 3 * rotate_CCW(AB) where AB = B - A
+        - 8-blocks placed at C = M - CD/2 and D = M + CD/2
+        - Each 8-block has same shape as component A (cell offsets from center)
+        Solves 22233c11.
+        """
+        def _split_mst(cells):
+            """Split cells into exactly 2 groups by removing the longest MST edge."""
+            n = len(cells)
+            if n < 2:
+                return None
+            if n == 2:
+                return [cells[:1], cells[1:]]
+            edges = sorted(
+                [((cells[i][0] - cells[j][0]) ** 2 + (cells[i][1] - cells[j][1]) ** 2, i, j)
+                 for i in range(n) for j in range(i + 1, n)]
+            )
+            parent = list(range(n))
+
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            def union(x, y):
+                parent[find(x)] = find(y)
+
+            mst_edges = []
+            for dist, i, j in edges:
+                if find(i) != find(j):
+                    mst_edges.append((dist, i, j))
+                    union(i, j)
+            if not mst_edges:
+                return None
+            max_edge = max(mst_edges)
+            adj = [[] for _ in range(n)]
+            for dist, i, j in mst_edges:
+                if (dist, i, j) != max_edge:
+                    adj[i].append(j)
+                    adj[j].append(i)
+            visited = [False] * n
+            groups = []
+            for start in range(n):
+                if not visited[start]:
+                    comp = []
+                    q = [start]
+                    visited[start] = True
+                    while q:
+                        node = q.pop(0)
+                        comp.append(cells[node])
+                        for nb in adj[node]:
+                            if not visited[nb]:
+                                visited[nb] = True
+                                q.append(nb)
+                    groups.append(comp)
+            return groups if len(groups) == 2 else None
+
+        def _center(comp):
+            return (sum(r for r, c in comp) / len(comp),
+                    sum(c for r, c in comp) / len(comp))
+
+        def _place_8_pair(out, A_center, B_center, offsets, rows, cols):
+            """Place 8-shaped blocks perpendicular to A→B at C and D."""
+            ab_r = B_center[0] - A_center[0]
+            ab_c = B_center[1] - A_center[1]
+            M = ((A_center[0] + B_center[0]) / 2,
+                 (A_center[1] + B_center[1]) / 2)
+            cd_r = 3 * (-ab_c)
+            cd_c = 3 * ab_r
+            center_C = (M[0] - cd_r / 2, M[1] - cd_c / 2)
+            center_D = (M[0] + cd_r / 2, M[1] + cd_c / 2)
+            for cx, cy in [center_C, center_D]:
+                for dr, dc in offsets:
+                    nr_f = cx + dr
+                    nc_f = cy + dc
+                    nr = round(nr_f)
+                    nc = round(nc_f)
+                    if abs(nr_f - nr) > 1e-6 or abs(nc_f - nc) > 1e-6:
+                        continue
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        out[nr][nc] = 8
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            g = [list(map(int, row)) for row in grid]
+            if any(g[r][c] != 0 and g[r][c] != 3
+                   for r in range(rows) for c in range(cols)):
+                return None
+            all_3s = [(r, c) for r in range(rows) for c in range(cols) if g[r][c] == 3]
+            if len(all_3s) < 2:
+                return None
+            out = [row[:] for row in g]
+            if len(all_3s) == 2:
+                # Single segment: A and B are the 2 cells, offsets = [(-0.5,-0.5),(0.5,0.5)]
+                A_center = (float(all_3s[0][0]), float(all_3s[0][1]))
+                B_center = (float(all_3s[1][0]), float(all_3s[1][1]))
+                offsets = [(r - _center(all_3s)[0], c - _center(all_3s)[1])
+                           for r, c in all_3s]
+                _place_8_pair(out, A_center, B_center, [(0.0, 0.0)], rows, cols)
+            else:
+                comps = _split_mst(all_3s)
+                if comps is None:
+                    return None
+                if all(len(c) == 2 for c in comps):
+                    # Per-segment: each 2-cell group independently generates 2 8-cells
+                    for comp in comps:
+                        A_c = (float(comp[0][0]), float(comp[0][1]))
+                        B_c = (float(comp[1][0]), float(comp[1][1]))
+                        _place_8_pair(out, A_c, B_c, [(0.0, 0.0)], rows, cols)
+                else:
+                    # Center-to-center: group centers define the line, shape = group offsets
+                    A_center = _center(comps[0])
+                    B_center = _center(comps[1])
+                    offsets = [(r - A_center[0], c - A_center[1]) for r, c in comps[0]]
+                    _place_8_pair(out, A_center, B_center, offsets, rows, cols)
+            return out
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, r)) for r in ex["output"]]:
+                return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
             return None
         return result
