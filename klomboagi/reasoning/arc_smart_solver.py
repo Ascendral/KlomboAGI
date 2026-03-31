@@ -171,7 +171,8 @@ class SmartARCSolverV2(SmartARCSolver):
     def solve(self, train, test_input):
         # ── Pre-phase: high-precision v2 strategies that beat Phase 1 mismatches ──
         for pre_fn in [self._try_bordered_rect_center, self._try_rect_corner_edge_interior,
-                       self._try_convert_isolated_cells, self._try_fill_zero_rect_interior]:
+                       self._try_convert_isolated_cells, self._try_fill_zero_rect_interior,
+                       self._try_connect_pairs_with_8]:
             result = pre_fn(train, test_input)
             if result is not None:
                 return result
@@ -372,6 +373,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_marker_recolor_blob,
             self._try_small_components_to_3,
             self._try_path_value_reversal,
+            self._try_connect_pairs_with_8,
         ]
         for s in v2:
             try:
@@ -5374,3 +5376,35 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input, bg)
+
+    def _try_connect_pairs_with_8(self, train, test_input):
+        """For each row, consecutive 1s get connected with 8s between them.
+        For each column, consecutive 1s get connected with 8s between them.
+        Handles: dbc1a6ce"""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            # Connect same-row pairs
+            for r in range(rows):
+                ones = sorted(c for c in range(cols) if grid[r][c] == 1)
+                for i in range(len(ones) - 1):
+                    c1, c2 = ones[i], ones[i+1]
+                    for c in range(c1+1, c2):
+                        if out[r][c] == 0:
+                            out[r][c] = 8
+            # Connect same-column pairs
+            for c in range(cols):
+                ones = sorted(r for r in range(rows) if grid[r][c] == 1)
+                for i in range(len(ones) - 1):
+                    r1, r2 = ones[i], ones[i+1]
+                    for r in range(r1+1, r2):
+                        if out[r][c] == 0:
+                            out[r][c] = 8
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
