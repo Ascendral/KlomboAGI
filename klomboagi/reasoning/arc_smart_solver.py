@@ -319,6 +319,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_innermost_row_gap,
             self._try_explode_center_to_corners,
             self._try_color_holes_by_column_rank,
+            self._try_fill_shape_bounding_box,
+            self._try_fill_max_zero_rect,
         ]
         for s in v2:
             try:
@@ -2325,3 +2327,143 @@ class SmartARCSolverV2(SmartARCSolver):
         if out == [list(map(int, row)) for row in test_input]:
             return None
         return out
+
+    def _try_fill_shape_bounding_box(self, train, test_input):
+        """Fill the bounding box of each non-background shape with a fill color where background.
+
+        Solves 60b61512: each connected component of 4s gets its bounding box
+        filled with 7s wherever the cell is background (0).
+        """
+        from collections import Counter
+
+        def _background(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        def _connected_components(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False] * cols for _ in range(rows)]
+            components = []
+            for r0 in range(rows):
+                for c0 in range(cols):
+                    if int(grid[r0][c0]) != bg and not visited[r0][c0]:
+                        # BFS
+                        comp = []
+                        stack = [(r0, c0)]
+                        while stack:
+                            r, c = stack.pop()
+                            if visited[r][c]:
+                                continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(0,1),(0,-1),(1,0),(-1,0),(1,1),(1,-1),(-1,1),(-1,-1)]:
+                                nr, nc = r + dr, c + dc
+                                if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and int(grid[nr][nc]) != bg:
+                                    stack.append((nr, nc))
+                        components.append(comp)
+            return components
+
+        def _apply(grid, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            bg = _background(grid)
+            out = [list(map(int, row)) for row in grid]
+            components = _connected_components(grid, bg)
+            for comp in components:
+                r1 = min(r for r, c in comp)
+                r2 = max(r for r, c in comp)
+                c1 = min(c for r, c in comp)
+                c2 = max(c for r, c in comp)
+                for r in range(r1, r2 + 1):
+                    for c in range(c1, c2 + 1):
+                        if int(grid[r][c]) == bg:
+                            out[r][c] = fill_color
+            return out
+
+        # Infer fill color from training
+        fill_color = None
+        for ex in train:
+            bg = _background(ex["input"])
+            inp = [list(map(int, row)) for row in ex["input"]]
+            exp = [list(map(int, row)) for row in ex["output"]]
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and exp[r][c] != bg:
+                        candidate = exp[r][c]
+                        if fill_color is None:
+                            fill_color = candidate
+                        elif fill_color != candidate:
+                            return None
+            if fill_color is None:
+                return None
+
+        if fill_color is None:
+            return None
+
+        for ex in train:
+            if _apply(ex["input"], fill_color) != [list(map(int, row)) for row in ex["output"]]:
+                return None
+
+        result = _apply(test_input, fill_color)
+        if result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_fill_max_zero_rect(self, train, test_input):
+        """Fill the largest all-zero rectangle with 6.
+
+        Solves 3eda0437: in a grid of 0s and 1s, find the maximum rectangle
+        containing only 0s and fill it with 6.
+        """
+        from collections import Counter
+
+        def _max_zero_rect(grid):
+            """Return (r1,c1,r2,c2) of the max all-zero rectangle."""
+            rows, cols = len(grid), len(grid[0])
+            # Heights: number of consecutive 0s above (including current) for each cell
+            heights = [0] * cols
+            best = (0, 0, 0, 0, 0)  # area, r1, c1, r2, c2
+
+            for r in range(rows):
+                for c in range(cols):
+                    heights[c] = heights[c] + 1 if int(grid[r][c]) == 0 else 0
+
+                # Max rectangle in histogram using stack
+                stack = []  # (col, height)
+                for c in range(cols + 1):
+                    h = heights[c] if c < cols else 0
+                    start = c
+                    while stack and stack[-1][1] > h:
+                        sc, sh = stack.pop()
+                        w = c - sc
+                        area = sh * w
+                        if area > best[0] and sh >= 2 and w >= 2:
+                            best = (area, r - sh + 1, sc, r, sc + w - 1)
+                        start = sc
+                    stack.append((start, h))
+
+            return best[1:]  # r1, c1, r2, c2
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(map(int, row)) for row in grid]
+            r1, c1, r2, c2 = _max_zero_rect(grid)
+            if r1 > r2 or c1 > c2:
+                return None
+            # Verify entire rectangle is 0
+            if not all(int(grid[r][c]) == 0 for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)):
+                return None
+            for r in range(r1, r2 + 1):
+                for c in range(c1, c2 + 1):
+                    out[r][c] = 6
+            return out
+
+        for ex in train:
+            result = _apply(ex["input"])
+            if result is None or result != [list(map(int, row)) for row in ex["output"]]:
+                return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
