@@ -314,6 +314,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_connect_diagonal_crosses,
             self._try_uniform_rows_to_five,
             self._try_erase_outside_cross_quadrant,
+            self._try_fill_square_rect_interiors,
+            self._try_reflect_diagonal_segment,
+            self._try_fill_innermost_row_gap,
         ]
         for s in v2:
             try:
@@ -1980,3 +1983,196 @@ class SmartARCSolverV2(SmartARCSolver):
         if result is None or result == [list(map(int, row)) for row in test_input]:
             return None
         return result
+
+    def _try_fill_square_rect_interiors(self, train, test_input):
+        """Fill with 2 the interior of closed rectangles whose interior is square (rows==cols).
+
+        Solves 44d8ac46: grids have multiple closed 5-bordered rectangles;
+        only those with a square interior get filled with 2.
+        """
+        from collections import Counter
+
+        def _background(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = _background(grid)
+            out = [list(map(int, row)) for row in grid]
+
+            # Find border color: most common non-bg color
+            non_bg = [int(grid[r][c]) for r in range(rows) for c in range(cols)
+                      if int(grid[r][c]) != bg]
+            if not non_bg:
+                return out
+            border_color = Counter(non_bg).most_common(1)[0][0]
+            fill_color = 2
+
+            for r1 in range(rows):
+                for c1 in range(cols):
+                    if int(grid[r1][c1]) != border_color:
+                        continue
+                    for r2 in range(r1 + 2, rows):
+                        for c2 in range(c1 + 2, cols):
+                            if int(grid[r2][c2]) != border_color:
+                                continue
+                            if not all(int(grid[r1][c]) == border_color for c in range(c1, c2 + 1)):
+                                continue
+                            if not all(int(grid[r2][c]) == border_color for c in range(c1, c2 + 1)):
+                                continue
+                            if not all(int(grid[r][c1]) == border_color for r in range(r1, r2 + 1)):
+                                continue
+                            if not all(int(grid[r][c2]) == border_color for r in range(r1, r2 + 1)):
+                                continue
+                            int_rows = r2 - r1 - 1
+                            int_cols = c2 - c1 - 1
+                            if int_rows <= 0 or int_cols <= 0:
+                                continue
+                            if not all(int(grid[r][c]) == bg
+                                       for r in range(r1 + 1, r2)
+                                       for c in range(c1 + 1, c2)):
+                                continue
+                            if int_rows == int_cols:
+                                for r in range(r1 + 1, r2):
+                                    for c in range(c1 + 1, c2):
+                                        out[r][c] = fill_color
+            return out
+
+        for ex in train:
+            if _apply(ex["input"]) != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        return _apply(test_input)
+
+    def _try_reflect_diagonal_segment(self, train, test_input):
+        """Extend a diagonal segment by 1, reflected in the opposite direction.
+
+        Solves 50c07299: segment of N cells gets replaced by N+1 cells going
+        in the opposite direction from the anchor end.
+        """
+        from collections import Counter
+
+        def _background(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        def _find_diagonal_segment(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            non_bg = [(r, c, int(grid[r][c])) for r in range(rows)
+                      for c in range(cols) if int(grid[r][c]) != bg]
+            if not non_bg:
+                return None
+            colors = set(v for _, _, v in non_bg)
+            if len(colors) != 1:
+                return None
+            color = list(colors)[0]
+            cells = sorted((r, c) for r, c, _ in non_bg)
+            n = len(cells)
+            if n == 1:
+                return (cells, None, color)
+            dr = cells[1][0] - cells[0][0]
+            dc = cells[1][1] - cells[0][1]
+            if abs(dr) != 1 or abs(dc) != 1:
+                return None
+            r0, c0 = cells[0]
+            for i, (r, c) in enumerate(cells):
+                if r != r0 + i * dr or c != c0 + i * dc:
+                    return None
+            return (cells, (dr, dc), color)
+
+        def _apply(grid, seg):
+            rows, cols = len(grid), len(grid[0])
+            bg = _background(grid)
+            cells, direction, color = seg
+            n = len(cells)
+            out = [list(map(int, row)) for row in grid]
+
+            if direction is None:
+                r, c = cells[0]
+                for step_dr, step_dc in [(1, 1), (1, -1), (-1, 1), (-1, -1)]:
+                    opp_dr, opp_dc = -step_dr, -step_dc
+                    new_cells = [(r + i * opp_dr, c + i * opp_dc) for i in range(1, n + 2)]
+                    if all(0 <= nr < rows and 0 <= nc < cols for nr, nc in new_cells):
+                        out[r][c] = bg
+                        for nr, nc in new_cells:
+                            out[nr][nc] = color
+                        return out
+                return None
+
+            step_dr, step_dc = direction
+            opp_dr, opp_dc = -step_dr, -step_dc
+            anchor = cells[0]
+            new_cells = [(anchor[0] + i * opp_dr, anchor[1] + i * opp_dc) for i in range(1, n + 2)]
+            if not all(0 <= nr < rows and 0 <= nc < cols for nr, nc in new_cells):
+                return None
+            for r, c in cells:
+                out[r][c] = bg
+            for nr, nc in new_cells:
+                out[nr][nc] = color
+            return out
+
+        for ex in train:
+            bg = _background(ex["input"])
+            seg = _find_diagonal_segment(ex["input"], bg)
+            if seg is None:
+                return None
+            if _apply(ex["input"], seg) != [list(map(int, row)) for row in ex["output"]]:
+                return None
+
+        bg = _background(test_input)
+        seg = _find_diagonal_segment(test_input, bg)
+        if seg is None:
+            return None
+        result = _apply(test_input, seg)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_fill_innermost_row_gap(self, train, test_input):
+        """Fill the gap in innermost rows (rows with the most-interior non-bg pair endpoints).
+
+        Solves 5ad8a7c0: rows whose 2s are at the most interior column positions
+        get their gap filled. 'Innermost' = highest c1 (or equivalently lowest c2).
+        """
+        from collections import Counter
+
+        def _background(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        def _get_row_endpoints(row, bg):
+            """Return (c1, c2, color) for a row with exactly 2 non-bg values, or None."""
+            non_bg = [(c, int(v)) for c, v in enumerate(row) if int(v) != bg]
+            if len(non_bg) != 2:
+                return None
+            colors = set(v for _, v in non_bg)
+            if len(colors) != 1:
+                return None
+            c1, c2 = non_bg[0][0], non_bg[1][0]
+            return (c1, c2, non_bg[0][1])
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = _background(grid)
+            out = [list(map(int, row)) for row in grid]
+            # Get endpoints for all rows with exactly 2 non-bg cells
+            endpoints = {}
+            for r in range(rows):
+                ep = _get_row_endpoints(grid[r], bg)
+                if ep is not None:
+                    endpoints[r] = ep
+            if not endpoints:
+                return out
+            # Innermost = highest c1 (most interior left position)
+            max_c1 = max(ep[0] for ep in endpoints.values())
+            # Fill only innermost rows that actually have a gap
+            for r, (c1, c2, color) in endpoints.items():
+                if c1 == max_c1 and c2 > c1 + 1:
+                    for c in range(c1 + 1, c2):
+                        out[r][c] = color
+            return out
+
+        for ex in train:
+            if _apply(ex["input"]) != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        return _apply(test_input)
