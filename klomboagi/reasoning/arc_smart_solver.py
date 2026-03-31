@@ -290,6 +290,9 @@ class SmartARCSolverV2(SmartARCSolver):
 
         # ── Phase 3: V2 hand-coded strategies (cross-validated) ───────────────
         v2 = [
+            self._try_slide_object_to_anchor,
+            self._try_tile_complement,
+            self._try_fractal_mark_tile,
             self._try_paint_shape_with_color,
             self._try_separate_and_combine,
             self._try_count_unique_colors,
@@ -298,6 +301,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_draw_crosshairs,
             self._try_denoise_repeating_block,
             self._try_flood_fill_interior,
+            self._try_hollow_rectangles,
+            self._try_connect_same_rowcol_pairs,
         ]
         for s in v2:
             try:
@@ -901,3 +906,404 @@ class SmartARCSolverV2(SmartARCSolver):
         if all(fill_shapes(ex["input"], bg, wall) == ex["output"] for ex in train):
             return fill_shapes(test_input, bg, wall)
         return None
+
+    def _try_slide_object_to_anchor(self, train, test_input):
+        """One object slides toward a fixed 'anchor' object until adjacent."""
+        from collections import Counter
+
+        def get_objects(grid, bg):
+            """Return dict: color -> set of (r,c) cells."""
+            rows, cols = len(grid), len(grid[0])
+            objs = {}
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        if v not in objs:
+                            objs[v] = []
+                        objs[v].append((r, c))
+            return objs
+
+        def bbox(cells):
+            rs = [r for r,_ in cells]
+            cs = [c for _,c in cells]
+            return min(rs), min(cs), max(rs), max(cs)
+
+        def slide_to_adjacent(grid, mover_color, anchor_color, bg):
+            """Slide mover_color cells toward anchor_color until touching."""
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+
+            mover = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == mover_color]
+            anchor = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == anchor_color]
+            if not mover or not anchor:
+                return None
+
+            mr0, mc0, mr1, mc1 = bbox(mover)
+            ar0, ac0, ar1, ac1 = bbox(anchor)
+
+            # Gap in each dimension (positive = mover before anchor, negative = after, 0 = overlap)
+            v_dist = (ar0 - mr1) if ar0 > mr1 else (-(mr0 - ar1) if mr0 > ar1 else 0)
+            h_dist = (ac0 - mc1) if ac0 > mc1 else (-(mc0 - ac1) if mc0 > ac1 else 0)
+
+            # Determine direction: slide along the axis with larger gap
+            if abs(v_dist) >= abs(h_dist) and v_dist != 0:
+                if v_dist > 0:
+                    # Anchor is below mover — slide down
+                    shift_r, shift_c = ar0 - mr1 - 1, 0
+                else:
+                    # Anchor is above mover — slide up
+                    shift_r, shift_c = ar1 + 1 - mr0, 0
+            elif h_dist != 0:
+                if h_dist > 0:
+                    # Anchor is right of mover — slide right
+                    shift_r, shift_c = 0, ac0 - mc1 - 1
+                else:
+                    # Anchor is left of mover — slide left
+                    shift_r, shift_c = 0, ac1 + 1 - mc0
+            else:
+                return None  # Already adjacent or overlapping
+
+            if shift_r == 0 and shift_c == 0:
+                return None
+
+            # Move mover cells
+            for r, c in mover:
+                result[r][c] = bg
+            for r, c in mover:
+                nr, nc = r + shift_r, c + shift_c
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = mover_color
+                else:
+                    return None
+            return result
+
+        # Find consistent anchor (doesn't move) and mover (slides) colors
+        if not train:
+            return None
+        all_v = []
+        for ex in train:
+            for row in ex["input"]: all_v.extend(row)
+        bg = Counter(all_v).most_common(1)[0][0]
+
+        # Find colors that move vs stay
+        colors = sorted(set(all_v) - {bg})
+        if len(colors) != 2:
+            return None  # Only handle 2-object case
+
+        c1, c2 = colors[0], colors[1]
+
+        # Check which stays (anchor) and which moves
+        for anchor_c, mover_c in [(c1, c2), (c2, c1)]:
+            def apply_slide(inp):
+                return slide_to_adjacent(inp, mover_c, anchor_c, bg)
+
+            valid = True
+            for ex in train:
+                result = apply_slide(ex["input"])
+                if result != ex["output"]:
+                    valid = False
+                    break
+            if valid:
+                return apply_slide(test_input)
+
+        return None
+
+    def _try_tile_complement(self, train, test_input):
+        """Output is the complement (bg<->fg) of the input, tiled k×k times."""
+        from collections import Counter
+
+        def find_bg(grid):
+            vals = [v for row in grid for v in row]
+            return Counter(vals).most_common(1)[0][0]
+
+        factors = set()
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if or_ % ir != 0 or oc % ic != 0:
+                return None
+            fr, fc = or_ // ir, oc // ic
+            if fr != fc:
+                return None
+            factors.add(fr)
+
+        if len(factors) != 1:
+            return None
+        k = list(factors)[0]
+        if k <= 1:
+            return None
+
+        for ex in train:
+            inp = ex["input"]
+            out = ex["output"]
+            ir, ic = len(inp), len(inp[0])
+            bg = find_bg(inp)
+            # Find the only other color
+            non_bg = sorted(set(v for row in inp for v in row) - {bg})
+            if len(non_bg) != 1:
+                return None
+            fg = non_bg[0]
+            # Build complement
+            comp = [[fg if inp[r][c] == bg else bg for c in range(ic)] for r in range(ir)]
+            # Check all tiles in output are comp
+            for ti in range(k):
+                for tj in range(k):
+                    tile = [out[ti*ir+r][tj*ic:tj*ic+ic] for r in range(ir)]
+                    if tile != comp:
+                        return None
+
+        # Apply to test
+        ir, ic = len(test_input), len(test_input[0])
+        bg = find_bg(test_input)
+        non_bg = sorted(set(v for row in test_input for v in row) - {bg})
+        if len(non_bg) != 1:
+            return None
+        fg = non_bg[0]
+        comp = [[fg if test_input[r][c] == bg else bg for c in range(ic)] for r in range(ir)]
+        result = []
+        for ti in range(k):
+            for r in range(ir):
+                result.append(comp[r] * k)
+        return result
+
+    def _try_fractal_mark_tile(self, train, test_input):
+        """Output tiles input at positions where input == mark_color; 0 elsewhere.
+
+        mark_color is the most common non-background color in the input.
+        """
+        from collections import Counter
+
+        def find_bg(grid):
+            vals = [v for row in grid for v in row]
+            c = Counter(vals)
+            return c.most_common(1)[0][0]
+
+        factors = set()
+        for ex in train:
+            ir, ic = len(ex["input"]), len(ex["input"][0])
+            or_, oc = len(ex["output"]), len(ex["output"][0])
+            if ir != ic:
+                return None  # Only square inputs
+            if or_ != ir * ir or oc != ic * ic:
+                return None
+            factors.add(ir)
+
+        if len(factors) != 1:
+            return None
+        N = list(factors)[0]
+
+        for ex in train:
+            inp = ex["input"]
+            out = ex["output"]
+            bg = 0
+
+            # Find mark color: most common non-bg value
+            vals = [v for row in inp for v in row if v != bg]
+            if not vals:
+                return None
+            mark = Counter(vals).most_common(1)[0][0]
+
+            # Verify: tile at (i,j) is inp if inp[i,j]==mark, else all bg
+            valid = True
+            for i in range(N):
+                for j in range(N):
+                    tile = [out[i*N+r][j*N:j*N+N] for r in range(N)]
+                    if inp[i][j] == mark:
+                        if tile != inp:
+                            valid = False; break
+                    else:
+                        if any(tile[r][c] != bg for r in range(N) for c in range(N)):
+                            valid = False; break
+                if not valid:
+                    break
+            if not valid:
+                return None
+
+        # Apply to test
+        N = len(test_input)
+        if N != len(test_input[0]):
+            return None
+        bg = 0
+        vals = [v for row in test_input for v in row if v != bg]
+        if not vals:
+            return None
+        mark = Counter(vals).most_common(1)[0][0]
+
+        result = [[bg] * (N * N) for _ in range(N * N)]
+        for i in range(N):
+            for j in range(N):
+                if test_input[i][j] == mark:
+                    for r in range(N):
+                        for c in range(N):
+                            result[i*N+r][j*N+c] = test_input[r][c]
+        return result
+
+    def _try_remove_isolated_pixels(self, train, test_input):
+        """Remove non-background cells that have no 4-connected same-color neighbor."""
+        def _remove_isolated(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = 0
+            result = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v == bg:
+                        continue
+                    neighbors = [
+                        grid[r-1][c] if r > 0 else bg,
+                        grid[r+1][c] if r < rows-1 else bg,
+                        grid[r][c-1] if c > 0 else bg,
+                        grid[r][c+1] if c < cols-1 else bg,
+                    ]
+                    if v not in neighbors:
+                        result[r][c] = bg
+            return result
+
+        # Validate on training examples
+        for ex in train:
+            expected = ex["output"]
+            predicted = _remove_isolated(ex["input"])
+            if predicted != expected:
+                return None
+            # Must actually change something (avoid no-op pass-through)
+            if predicted == list(list(row) for row in ex["input"]):
+                return None
+
+        return _remove_isolated(test_input)
+
+    def _try_hollow_rectangles(self, train, test_input):
+        """Hollow out solid-color rectangles: keep outer border, set interior to bg."""
+        from collections import deque
+
+        def _hollow(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            visited = [[False] * cols for _ in range(rows)]
+            bg = 0
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] == bg or visited[sr][sc]:
+                        continue
+                    color = grid[sr][sc]
+                    comp = []
+                    q = deque([(sr, sc)])
+                    visited[sr][sc] = True
+                    while q:
+                        r, c = q.popleft()
+                        comp.append((r, c))
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                visited[nr][nc] = True
+                                q.append((nr, nc))
+                    r0 = min(p[0] for p in comp)
+                    r1 = max(p[0] for p in comp)
+                    c0 = min(p[1] for p in comp)
+                    c1 = max(p[1] for p in comp)
+                    if len(comp) != (r1 - r0 + 1) * (c1 - c0 + 1):
+                        continue  # not a solid rectangle
+                    for r in range(r0 + 1, r1):
+                        for c in range(c0 + 1, c1):
+                            result[r][c] = bg
+            return result
+
+        for ex in train:
+            predicted = _hollow(ex["input"])
+            if predicted != ex["output"]:
+                return None
+            if predicted == [list(row) for row in ex["input"]]:
+                return None
+
+        return _hollow(test_input)
+
+    def _try_connect_same_rowcol_pairs(self, train, test_input):
+        """Connect pairs of same-color marker cells that share a row or column with a fill color."""
+        from collections import Counter
+
+        def _find_fill_color(grid_in, grid_out, bg):
+            rows, cols = len(grid_in), len(grid_out[0])
+            fills = set()
+            for r in range(rows):
+                for c in range(cols):
+                    if grid_in[r][c] == bg and grid_out[r][c] != bg:
+                        fills.add(grid_out[r][c])
+            return list(fills)
+
+        def _apply(grid, marker_color, fill_color, bg):
+            rows, cols = len(grid), len(grid[0])
+            result = [row[:] for row in grid]
+            # Group marker cells by row and column
+            by_row = {}
+            by_col = {}
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == marker_color:
+                        by_row.setdefault(r, []).append(c)
+                        by_col.setdefault(c, []).append(r)
+            # Connect pairs in same row
+            for r, cols_list in by_row.items():
+                if len(cols_list) == 2:
+                    c1, c2 = sorted(cols_list)
+                    for c in range(c1 + 1, c2):
+                        if result[r][c] == bg:
+                            result[r][c] = fill_color
+            # Connect pairs in same column
+            for c, rows_list in by_col.items():
+                if len(rows_list) == 2:
+                    r1, r2 = sorted(rows_list)
+                    for r in range(r1 + 1, r2):
+                        if result[r][c] == bg:
+                            result[r][c] = fill_color
+            return result
+
+        # Determine bg, marker color, fill color from training examples
+        bg = 0
+        marker_color = None
+        fill_color = None
+
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+            # Find bg as most common color in input
+            all_in = [inp[r][c] for r in range(rows) for c in range(cols)]
+            bg_candidate = Counter(all_in).most_common(1)[0][0]
+            if marker_color is None:
+                bg = bg_candidate
+                # Marker = non-bg color in input
+                m_colors = set(v for v in all_in if v != bg)
+                if len(m_colors) != 1:
+                    return None
+                marker_color = list(m_colors)[0]
+            elif bg_candidate != bg:
+                return None
+
+            fills = _find_fill_color(inp, out, bg)
+            if not fills:
+                # No fills in this example — OK if there are no pairs
+                # Verify the output equals the input
+                if inp != out:
+                    return None
+                continue
+            if len(fills) > 1:
+                return None
+            f = fills[0]
+            if f == marker_color or f == bg:
+                return None
+            if fill_color is None:
+                fill_color = f
+            elif fill_color != f:
+                return None
+
+        if marker_color is None or fill_color is None:
+            return None
+
+        # Validate on all training examples
+        for ex in train:
+            predicted = _apply(ex["input"], marker_color, fill_color, bg)
+            if predicted != ex["output"]:
+                return None
+
+        return _apply(test_input, marker_color, fill_color, bg)
