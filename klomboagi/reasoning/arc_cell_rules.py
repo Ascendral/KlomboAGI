@@ -947,3 +947,125 @@ def learn_arrow_ray(train: list[dict]) -> callable | None:
     if all(apply_arrow_ray(ex["input"]) == ex["output"] for ex in train):
         return apply_arrow_ray
     return None
+
+
+# ─── L-Shape Concavity Fill ──────────────────────────────────────────────────
+
+def learn_lshape_concavity(train: list[dict]) -> callable | None:
+    """
+    Each 3-cell L-shaped connected component gets a marker at the cell
+    that would complete it into a 2×2 square (the concavity).
+
+    Handles task 3aa6fb7a.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+    from collections import Counter
+
+    # Learn shape color and fill color
+    shape_colors = set()
+    fill_colors = set()
+    for ex in train:
+        inp, out = ex["input"], ex["output"]
+        for r in range(len(inp)):
+            for c in range(len(inp[0])):
+                if inp[r][c] != bg:
+                    shape_colors.add(inp[r][c])
+                if out[r][c] != bg and out[r][c] != inp[r][c]:
+                    fill_colors.add(out[r][c])
+
+    if len(shape_colors) != 1 or len(fill_colors) != 1:
+        return None
+    shape_color = shape_colors.pop()
+    fill_color = fill_colors.pop()
+
+    def apply_concavity(grid, bg_val=bg, sc=shape_color, fc=fill_color):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+
+        # Find all 2×2 windows with exactly 3 shape-color cells
+        for r in range(rows - 1):
+            for c in range(cols - 1):
+                block = [grid[r][c], grid[r][c+1], grid[r+1][c], grid[r+1][c+1]]
+                if block.count(sc) == 3 and block.count(bg_val) == 1:
+                    # Find the empty cell and fill it
+                    for dr, dc in [(0,0), (0,1), (1,0), (1,1)]:
+                        if grid[r+dr][c+dc] == bg_val:
+                            result[r+dr][c+dc] = fc
+                            break
+
+        return result
+
+    if all(apply_concavity(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_concavity(ex["input"]) == ex["output"] for ex in train):
+        return apply_concavity
+    return None
+
+
+# ─── Conditional Span Fill ───────────────────────────────────────────────────
+
+def learn_conditional_span_fill(train: list[dict]) -> callable | None:
+    """
+    Like span_fill but only fills between two same-color cells if ALL
+    cells in the gap are background. Won't fill if there are other
+    non-bg cells in between.
+
+    Handles task 5ad8a7c0.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+    from collections import defaultdict
+
+    def fill_row_conditional(grid):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for r in range(rows):
+            color_cols = defaultdict(list)
+            for c in range(cols):
+                if grid[r][c] != bg:
+                    color_cols[grid[r][c]].append(c)
+            for color, col_list in color_cols.items():
+                if len(col_list) >= 2:
+                    lo, hi = min(col_list), max(col_list)
+                    # Only fill if all cells between are bg
+                    if all(grid[r][c] == bg for c in range(lo + 1, hi)):
+                        for c in range(lo, hi + 1):
+                            result[r][c] = color
+        return result
+
+    if all(fill_row_conditional(ex["input"]) == ex["input"] for ex in train):
+        pass  # Try col version
+    elif all(fill_row_conditional(ex["input"]) == ex["output"] for ex in train):
+        return fill_row_conditional
+
+    def fill_col_conditional(grid):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        for c in range(cols):
+            color_rows = defaultdict(list)
+            for r in range(rows):
+                if grid[r][c] != bg:
+                    color_rows[grid[r][c]].append(r)
+            for color, row_list in color_rows.items():
+                if len(row_list) >= 2:
+                    lo, hi = min(row_list), max(row_list)
+                    if all(grid[r][c] == bg for r in range(lo + 1, hi)):
+                        for r in range(lo, hi + 1):
+                            result[r][c] = color
+        return result
+
+    if all(fill_col_conditional(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(fill_col_conditional(ex["input"]) == ex["output"] for ex in train):
+        return fill_col_conditional
+
+    return None
