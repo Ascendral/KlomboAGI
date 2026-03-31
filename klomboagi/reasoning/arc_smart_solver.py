@@ -1721,8 +1721,9 @@ class SmartARCSolverV2(SmartARCSolver):
             if len(cells) != 3:
                 return None
             (r1,c1,v1), (r2,c2,v2), (r3,c3,v3) = cells
-            # Find equidistant point
+            # Find equidistant point with minimum Chebyshev distance
             center = None
+            best_d = float('inf')
             for r in range(rows):
                 for c in range(cols):
                     if int(grid[r][c]) != bg:
@@ -1730,11 +1731,9 @@ class SmartARCSolverV2(SmartARCSolver):
                     d1 = max(abs(r-r1), abs(c-c1))
                     d2 = max(abs(r-r2), abs(c-c2))
                     d3 = max(abs(r-r3), abs(c-c3))
-                    if d1 == d2 == d3 and d1 > 0:
+                    if d1 == d2 == d3 and d1 > 0 and d1 < best_d:
+                        best_d = d1
                         center = (r, c)
-                        break
-                if center:
-                    break
             if center is None:
                 return None
             cr, cc = center
@@ -1941,12 +1940,19 @@ class SmartARCSolverV2(SmartARCSolver):
         def _apply(grid):
             rows, cols = len(grid), len(grid[0])
             bg = 0
-            # Find cross row (full row of 5s) and cross col (full col of 5s)
-            cross_row = next((r for r in range(rows)
-                              if all(int(grid[r][c]) == 5 for c in range(cols))), None)
-            cross_col = next((c for c in range(cols)
-                              if all(int(grid[r][c]) == 5 for r in range(rows))), None)
-            if cross_row is None or cross_col is None:
+            # Find cross: a row where 5s span cols 0..k and a col where 5s span rows 0..k
+            # (corner L-shape cross, not necessarily full-width/height)
+            cross_row = cross_col = None
+            for r in range(1, rows):
+                five_cols = [c for c in range(cols) if int(grid[r][c]) == 5]
+                if five_cols and five_cols == list(range(len(five_cols))):
+                    cross_row = r
+                    cross_col = len(five_cols) - 1
+                    break
+            if cross_row is None:
+                return None
+            # Verify cross_col: all cells in col cross_col from row 0 to cross_row are 5
+            if not all(int(grid[r][cross_col]) == 5 for r in range(cross_row + 1)):
                 return None
             # Find colors inside the top-left quadrant
             inside_colors = set()
