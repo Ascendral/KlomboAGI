@@ -353,6 +353,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_keep_majority_replace_rest,
             self._try_ring_to_cross,
             self._try_tallest_shortest_column,
+            self._try_alternating_row_shift,
+            self._try_diamond_center_mark,
         ]
         for s in v2:
             try:
@@ -4044,3 +4046,140 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is None or result != ex["output"]:
                 return None
         return _apply(test_input, bg, dot_color, tallest_color, shortest_color)
+
+    def _try_alternating_row_shift(self, train, test_input):
+        """Alternating pattern rows: rows where non-bg values are in descending order at
+        their positions shift those values right by 1 (vacating position fills with bg).
+        Ascending-order rows and all-bg rows stay unchanged."""
+        from collections import Counter
+
+        def _find_bg(train_examples):
+            all_v = [v for ex in train_examples for row in ex["input"] for v in row]
+            return Counter(all_v).most_common(1)[0][0]
+
+        def _row_type(row, bg):
+            """Returns (positions, values, 'asc'|'desc'|'bg') for a row."""
+            non_bg = [(c, v) for c, v in enumerate(row) if v != bg]
+            if not non_bg:
+                return None, None, 'bg'
+            if len(non_bg) != 2:
+                return None, None, None
+            (c1, v1), (c2, v2) = non_bg
+            if v1 < v2:
+                return (c1, c2), (v1, v2), 'asc'
+            elif v1 > v2:
+                return (c1, c2), (v1, v2), 'desc'
+            return None, None, None
+
+        def _transform(row, bg):
+            _, _, rtype = _row_type(row, bg)
+            if rtype != 'desc':
+                return list(row)
+            out = list(row)
+            non_bg = [(c, v) for c, v in enumerate(row) if v != bg]
+            # Erase first, then write shifted positions (avoid collision)
+            for c, v in non_bg:
+                out[c] = bg
+            for c, v in non_bg:
+                if c + 1 < len(row):
+                    out[c + 1] = v
+            return out
+
+        bg = _find_bg(train)
+        # Validate on training
+        for ex in train:
+            result = [_transform(row, bg) for row in ex["input"]]
+            if result != ex["output"]:
+                return None
+            # Ensure at least one desc row was shifted (not identity)
+            if result == ex["input"]:
+                return None
+        result = [_transform(row, bg) for row in test_input]
+        if result == test_input:
+            return None
+        return result
+
+    def _try_diamond_center_mark(self, train, test_input):
+        """Find 'diamond' structures: two horizontal dominos + two vertical dominos forming
+        a symmetric cross (equal distance k from center). Place a mark color at center."""
+        from collections import Counter
+
+        def _find_h_dominos(grid, fg, bg):
+            rows, cols = len(grid), len(grid[0])
+            result = []
+            for r in range(rows):
+                for c in range(cols - 1):
+                    if grid[r][c] == fg and grid[r][c+1] == fg:
+                        # Check not part of a triple
+                        left_ok = c == 0 or grid[r][c-1] != fg
+                        right_ok = c+2 >= cols or grid[r][c+2] != fg
+                        if left_ok and right_ok:
+                            result.append((r, c, c+1))  # row, left_col, right_col
+            return result
+
+        def _find_v_dominos(grid, fg, bg):
+            rows, cols = len(grid), len(grid[0])
+            result = []
+            for c in range(cols):
+                for r in range(rows - 1):
+                    if grid[r][c] == fg and grid[r+1][c] == fg:
+                        top_ok = r == 0 or grid[r-1][c] != fg
+                        bot_ok = r+2 >= rows or grid[r+2][c] != fg
+                        if top_ok and bot_ok:
+                            result.append((r, r+1, c))  # top_row, bot_row, col
+            return result
+
+        def _apply(grid, fg, bg, mark_color):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            h_doms = _find_h_dominos(grid, fg, bg)
+            v_doms = _find_v_dominos(grid, fg, bg)
+            # Index vertical dominos by column
+            v_by_col = {}
+            for tr, br, c in v_doms:
+                v_by_col.setdefault(c, []).append((tr, br))
+            # For each pair of horizontal dominos in same row
+            h_by_row = {}
+            for r, lc, rc in h_doms:
+                h_by_row.setdefault(r, []).append((lc, rc))
+            for hr, h_list in h_by_row.items():
+                for i in range(len(h_list)):
+                    for j in range(i+1, len(h_list)):
+                        lc1, rc1 = h_list[i]  # left domino
+                        lc2, rc2 = h_list[j]  # right domino
+                        if rc1 >= lc2:
+                            continue  # overlapping
+                        # Midpoint col must be integer
+                        if (rc1 + lc2) % 2 != 0:
+                            continue
+                        mid_c = (rc1 + lc2) // 2
+                        k = mid_c - rc1  # = lc2 - mid_c
+                        if k <= 0:
+                            continue
+                        # Check vertical dominos at mid_c with symmetric distance k
+                        for tr, br in v_by_col.get(mid_c, []):
+                            if (hr - br) == k:  # above: inner edge (br) is k above hr
+                                # Look for below domino
+                                for tr2, br2 in v_by_col.get(mid_c, []):
+                                    if (tr2 - hr) == k:  # below: inner edge (tr2) is k below hr
+                                        out[hr][mid_c] = mark_color
+            return out
+
+        all_in = [v for ex in train for row in ex["input"] for v in row]
+        all_out = [v for ex in train for row in ex["output"] for v in row]
+        bg = Counter(all_in).most_common(1)[0][0]
+        fg_colors = set(all_in) - {bg}
+        new_colors = set(all_out) - set(all_in)
+        if len(fg_colors) != 1 or len(new_colors) != 1:
+            return None
+        fg = next(iter(fg_colors))
+        mark_color = next(iter(new_colors))
+
+        for ex in train:
+            result = _apply(ex["input"], fg, bg, mark_color)
+            if result != ex["output"]:
+                return None
+        result = _apply(test_input, fg, bg, mark_color)
+        if result == test_input:
+            return None
+        return result
