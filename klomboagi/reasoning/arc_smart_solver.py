@@ -371,6 +371,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_complete_rect_outline_to_3,
             self._try_marker_recolor_blob,
             self._try_small_components_to_3,
+            self._try_path_value_reversal,
         ]
         for s in v2:
             try:
@@ -5306,3 +5307,70 @@ class SmartARCSolverV2(SmartARCSolver):
             if apply_rule(ex['input']) != ex['output']:
                 return None
         return apply_rule(test_input)
+
+    def _try_path_value_reversal(self, train, test_input):
+        """Non-background cells form a connected path (snake). Reverse the values along the path.
+        Background is the most frequent color.
+        Handles: 5792cb4d"""
+        from collections import Counter
+
+        def find_bg(grid):
+            flat = [v for row in grid for v in row]
+            return Counter(flat).most_common(1)[0][0]
+
+        def get_path_cells(grid, bg):
+            """Return path cells in order from one end to other. Returns None if not a valid path."""
+            rows, cols = len(grid), len(grid[0])
+            non_bg = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] != bg]
+            if not non_bg:
+                return None
+            # Build adjacency
+            cell_set = set(non_bg)
+            def neighbors(r, c):
+                return [(r+dr, c+dc) for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
+                        if (r+dr, c+dc) in cell_set]
+            # Check all cells have <= 2 neighbors (path property)
+            for r, c in non_bg:
+                if len(neighbors(r, c)) > 2:
+                    return None
+            # Find endpoints (cells with exactly 1 neighbor)
+            endpoints = [(r, c) for r, c in non_bg if len(neighbors(r, c)) == 1]
+            if len(endpoints) != 2:
+                return None
+            # Traverse from one endpoint
+            path = []
+            visited = set()
+            curr = endpoints[0]
+            while curr is not None:
+                path.append(curr)
+                visited.add(curr)
+                nxt = None
+                for n in neighbors(*curr):
+                    if n not in visited:
+                        nxt = n
+                        break
+                curr = nxt
+            if len(path) != len(non_bg):
+                return None  # disconnected
+            return path
+
+        def apply_rule(grid, bg):
+            path = get_path_cells(grid, bg)
+            if path is None:
+                return None
+            values = [grid[r][c] for r, c in path]
+            reversed_values = values[::-1]
+            out = [row[:] for row in grid]
+            for (r, c), v in zip(path, reversed_values):
+                out[r][c] = v
+            return out
+
+        # Determine background from first training example
+        bg = find_bg(train[0]['input'])
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'], bg)
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input, bg)
