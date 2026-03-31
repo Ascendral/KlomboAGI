@@ -171,7 +171,7 @@ class SmartARCSolverV2(SmartARCSolver):
     def solve(self, train, test_input):
         # ── Pre-phase: high-precision v2 strategies that beat Phase 1 mismatches ──
         for pre_fn in [self._try_bordered_rect_center, self._try_rect_corner_edge_interior,
-                       self._try_convert_isolated_cells]:
+                       self._try_convert_isolated_cells, self._try_fill_zero_rect_interior]:
             result = pre_fn(train, test_input)
             if result is not None:
                 return result
@@ -4468,3 +4468,124 @@ class SmartARCSolverV2(SmartARCSolver):
             if result != ex["output"]:
                 return None
         return _apply(test_input, fg, marker_map)
+
+    def _try_fill_zero_rect_interior(self, train, test_input):
+        """Find a rectangular region of all-zeros embedded in the grid (bordered by
+        non-zero cells). Fill the inner cells (excluding 1-cell border) with a
+        marker color learned from training."""
+        from collections import Counter
+
+        def _find_embedded_zero_rect(grid):
+            """Find all rectangles that are all-zeros and have non-zero neighbors on all 4 sides."""
+            rows, cols = len(grid), len(grid[0])
+            all_vals = [grid[r][c] for r in range(rows) for c in range(cols)]
+            bg = Counter(all_vals).most_common(1)[0][0]
+            zero_val = 0  # the "hole" color
+
+            # Build prefix sums for zero cells
+            is_zero = [[1 if grid[r][c] == zero_val else 0 for c in range(cols)] for r in range(rows)]
+            psum = [[0]*(cols+1) for _ in range(rows+1)]
+            for r in range(rows):
+                for c in range(cols):
+                    psum[r+1][c+1] = psum[r][c+1] + psum[r+1][c] - psum[r][c] + is_zero[r][c]
+
+            def rect_all_zero(r1, c1, r2, c2):
+                # r1,c1 inclusive top-left; r2,c2 inclusive bottom-right
+                total = psum[r2+1][c2+1] - psum[r1][c2+1] - psum[r2+1][c1] + psum[r1][c1]
+                expected = (r2 - r1 + 1) * (c2 - c1 + 1)
+                return total == expected
+
+            candidates = []
+            # Try all rectangles (efficient: iterate over all possible row pairs, use column sweep)
+            # For each pair of rows, find all-zero columns using the prefix sum
+            # This is O(rows^2 * cols^2) in worst case but grids are small
+            for r1 in range(rows):
+                for r2 in range(r1+2, rows):  # min height = 3 (to have inner rows)
+                    for c1 in range(cols):
+                        for c2 in range(c1+2, cols):  # min width = 3
+                            if not rect_all_zero(r1, c1, r2, c2):
+                                continue
+                            # Check bordered: cells just outside should not ALL be zero
+                            # (at least some non-zero in adjacent row/col)
+                            has_border_above = r1 > 0 and any(grid[r1-1][c] != zero_val for c in range(c1, c2+1))
+                            has_border_below = r2 < rows-1 and any(grid[r2+1][c] != zero_val for c in range(c1, c2+1))
+                            has_border_left = c1 > 0 and any(grid[r][c1-1] != zero_val for r in range(r1, r2+1))
+                            has_border_right = c2 < cols-1 and any(grid[r][c2+1] != zero_val for r in range(r1, r2+1))
+                            if has_border_above or has_border_below or has_border_left or has_border_right:
+                                candidates.append((r1, c1, r2, c2))
+            return candidates
+
+        def _get_marker_color(ex, rect):
+            r1, c1, r2, c2 = rect
+            changed = set()
+            for r in range(len(ex["output"])):
+                for c in range(len(ex["output"][r])):
+                    if ex["output"][r][c] != ex["input"][r][c]:
+                        changed.add(ex["output"][r][c])
+            if len(changed) == 1:
+                return next(iter(changed))
+            return None
+
+        # Learn from training: find the unique all-zero rectangle and marker color
+        marker_color = None
+        for ex in train:
+            candidates = _find_embedded_zero_rect(ex["input"])
+            if not candidates:
+                return None
+            # Find which candidate matches the output
+            matched = None
+            for r1, c1, r2, c2 in candidates:
+                inner_rows = range(r1+1, r2)
+                inner_cols = range(c1+1, c2)
+                if not inner_rows or not inner_cols:
+                    continue
+                mc = _get_marker_color(ex, (r1, c1, r2, c2))
+                if mc is None:
+                    continue
+                # Verify: all inner cells should be mc in output
+                valid = True
+                for r in inner_rows:
+                    for c in inner_cols:
+                        if ex["output"][r][c] != mc:
+                            valid = False
+                            break
+                # And no other cells changed
+                for r in range(len(ex["output"])):
+                    for c in range(len(ex["output"][r])):
+                        in_inner = r in inner_rows and c in inner_cols
+                        if ex["output"][r][c] != ex["input"][r][c] and not in_inner:
+                            valid = False
+                            break
+                if valid:
+                    if marker_color is None:
+                        marker_color = mc
+                    elif marker_color != mc:
+                        return None
+                    matched = (r1, c1, r2, c2)
+                    break
+            if matched is None:
+                return None
+
+        if marker_color is None:
+            return None
+
+        # Apply to test input
+        candidates = _find_embedded_zero_rect(test_input)
+        if not candidates:
+            return None
+
+        # Pick the candidate that looks most like an embedded zero rect
+        # Prefer largest area
+        candidates.sort(key=lambda x: (x[2]-x[0]+1)*(x[3]-x[1]+1), reverse=True)
+        # But only if it has a proper inner region
+        for r1, c1, r2, c2 in candidates:
+            inner_rows = range(r1+1, r2)
+            inner_cols = range(c1+1, c2)
+            if not inner_rows or not inner_cols:
+                continue
+            out = [list(row) for row in test_input]
+            for r in inner_rows:
+                for c in inner_cols:
+                    out[r][c] = marker_color
+            return out
+        return None
