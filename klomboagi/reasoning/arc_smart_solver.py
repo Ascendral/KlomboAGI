@@ -366,6 +366,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_remove_row_col_sandwiched_cells,
             self._try_diagonal_alternating_color,
             self._try_8conn_equal_size_coloring,
+            self._try_top2_freq_stay,
+            self._try_5block_nearest_noise_color,
         ]
         for s in v2:
             try:
@@ -5079,3 +5081,84 @@ class SmartARCSolverV2(SmartARCSolver):
             if apply_rule(ex['input']) != ex['output']:
                 return None
         return apply_rule(test_input)
+
+    def _try_top2_freq_stay(self, train, test_input):
+        """Top 2 most frequent colors stay, all others become 7.
+        Handles: 9caf5b84"""
+        from collections import Counter
+
+        def apply_rule(grid):
+            flat = [v for row in grid for v in row]
+            if not flat:
+                return grid
+            counts = Counter(flat)
+            sorted_colors = sorted(counts.keys(), key=lambda c: -counts[c])
+            if len(sorted_colors) < 2:
+                return None
+            # Check for tie at the 2nd position
+            top1_count = counts[sorted_colors[0]]
+            top2_count = counts[sorted_colors[1]]
+            # If there's a 3-way tie at top, can't determine top 2
+            if len(sorted_colors) > 2 and counts[sorted_colors[2]] == top2_count:
+                return None
+            keep = {sorted_colors[0], sorted_colors[1]}
+            rows, cols = len(grid), len(grid[0])
+            out = []
+            for r in range(rows):
+                row_out = []
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v in keep:
+                        row_out.append(v)
+                    else:
+                        row_out.append(7)
+                out.append(row_out)
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_5block_nearest_noise_color(self, train, test_input):
+        """5-block (cells of value 5) + scattered noise. Find noise cell nearest to 5-block
+        by Chebyshev distance. Among nearest, pick most frequent color. Replace 5s, zero rest.
+        Handles: 6df30ad6"""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            block5 = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 5]
+            noise = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols)
+                     if grid[r][c] != 0 and grid[r][c] != 5]
+            if not block5 or not noise:
+                return None
+            # Chebyshev distance from noise cell to nearest 5-cell
+            def min_cheb(nr, nc):
+                return min(max(abs(nr - br), abs(nc - bc)) for br, bc in block5)
+            dists = [(min_cheb(r, c), r, c, color) for r, c, color in noise]
+            min_d = min(d for d, _, _, _ in dists)
+            nearest_colors = [color for d, _, _, color in dists if d == min_d]
+            # Most frequent among nearest
+            color_counts = Counter(nearest_colors)
+            # If tie in nearest AND multiple colors, pick most frequent
+            winner = color_counts.most_common(1)[0][0]
+            # Check if tie exists (ambiguous)
+            top_count = color_counts.most_common(1)[0][1]
+            if sum(1 for _, cnt in color_counts.items() if cnt == top_count) > 1:
+                return None  # ambiguous
+            out = [[0]*cols for _ in range(rows)]
+            for br, bc in block5:
+                out[br][bc] = winner
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = solve(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return solve(test_input)
