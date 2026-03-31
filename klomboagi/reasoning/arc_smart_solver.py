@@ -311,6 +311,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_nine_ball_toward_six,
             self._try_chebyshev_equidistant_center,
             self._try_connect_aligned_diamonds,
+            self._try_connect_diagonal_crosses,
         ]
         for s in v2:
             try:
@@ -1838,6 +1839,61 @@ class SmartARCSolverV2(SmartARCSolver):
                             for r in range(rt + 2, rb - 1):
                                 result[r][c1] = 1
                                 changed = True
+            return result if changed else None
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
+                return None
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_connect_diagonal_crosses(self, train, test_input):
+        """Plus/cross shapes (center + N/S/E/W arms of same color) that are
+        diagonally aligned (|dr|==|dc|) get connected with 2s along the diagonal.
+        """
+        def _find_crosses(grid):
+            rows, cols = len(grid), len(grid[0])
+            centers = []
+            for r in range(1, rows - 1):
+                for c in range(1, cols - 1):
+                    v = int(grid[r][c])
+                    if (v != 0 and
+                            int(grid[r-1][c]) == v and int(grid[r+1][c]) == v and
+                            int(grid[r][c-1]) == v and int(grid[r][c+1]) == v):
+                        centers.append((r, c, v))
+            return centers
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            crosses = _find_crosses(grid)
+            if len(crosses) < 2:
+                return None
+            result = [list(map(int, row)) for row in grid]
+            changed = False
+            for i in range(len(crosses)):
+                for j in range(i + 1, len(crosses)):
+                    r1, c1, v1 = crosses[i]
+                    r2, c2, v2 = crosses[j]
+                    dr = r2 - r1
+                    dc = c2 - c1
+                    if abs(dr) != abs(dc) or dr == 0:
+                        continue
+                    # Diagonal connection — fill path excluding endpoints
+                    sr = 1 if dr > 0 else -1
+                    sc = 1 if dc > 0 else -1
+                    path = []
+                    r, c = r1 + sr, c1 + sc
+                    while (r, c) != (r2, c2):
+                        path.append((r, c))
+                        r += sr
+                        c += sc
+                    if all(int(result[pr][pc]) == 0 for pr, pc in path):
+                        for pr, pc in path:
+                            result[pr][pc] = 2
+                            changed = True
             return result if changed else None
 
         for ex in train:
