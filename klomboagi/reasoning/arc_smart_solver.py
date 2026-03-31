@@ -351,6 +351,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_shift_cluster_color,
             self._try_two_row_checkerboard,
             self._try_keep_majority_replace_rest,
+            self._try_ring_to_cross,
+            self._try_tallest_shortest_column,
         ]
         for s in v2:
             try:
@@ -3910,3 +3912,135 @@ class SmartARCSolverV2(SmartARCSolver):
             if result != ex["output"]:
                 return None
         return _apply(test_input, target)
+
+    def _try_ring_to_cross(self, train, test_input):
+        """3x3 hollow rings (8-cell border, hollow center) → cross/plus pattern with a
+        learned replacement color. Other shapes unchanged."""
+        from collections import Counter
+
+        def _find_rings(grid, fg, bg):
+            rows, cols = len(grid), len(grid[0])
+            rings = []
+            for r in range(1, rows - 1):
+                for c in range(1, cols - 1):
+                    if grid[r][c] != bg:
+                        continue
+                    corners = [(r-1,c-1),(r-1,c+1),(r+1,c-1),(r+1,c+1)]
+                    ortho = [(r-1,c),(r+1,c),(r,c-1),(r,c+1)]
+                    if all(grid[nr][nc] == fg for nr,nc in corners+ortho):
+                        rings.append((r, c))
+            return rings
+
+        def _apply(grid, fg, bg, ring_color):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            rings = _find_rings(grid, fg, bg)
+            for r, c in rings:
+                # Erase the ring border
+                for dr in [-1, 0, 1]:
+                    for dc in [-1, 0, 1]:
+                        out[r+dr][c+dc] = bg
+                # Draw cross: center + 4 orthogonal = ring_color
+                out[r][c] = ring_color
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    out[r+dr][c+dc] = ring_color
+            return out
+
+        all_in = [v for ex in train for row in ex["input"] for v in row]
+        all_out = [v for ex in train for row in ex["output"] for v in row]
+        bg = Counter(all_in).most_common(1)[0][0]
+        fg_colors = set(all_in) - {bg}
+        new_colors = set(all_out) - set(all_in)
+        if len(fg_colors) != 1 or len(new_colors) != 1:
+            return None
+        fg = next(iter(fg_colors))
+        ring_color = next(iter(new_colors))
+
+        for ex in train:
+            rings = _find_rings(ex["input"], fg, bg)
+            if not rings:
+                return None
+            result = _apply(ex["input"], fg, bg, ring_color)
+            if result != ex["output"]:
+                return None
+        return _apply(test_input, fg, bg, ring_color)
+
+    def _try_tallest_shortest_column(self, train, test_input):
+        """Columns of a single color with varying heights: tallest→color1, shortest→color2,
+        all others→bg. Colors 1 and 2 are learned from training."""
+        from collections import Counter
+
+        def _get_columns(grid, dot_color):
+            rows, cols = len(grid), len(grid[0])
+            result = {}
+            for c in range(cols):
+                col_cells = [(r, c) for r in range(rows) if grid[r][c] == dot_color]
+                if col_cells:
+                    result[c] = col_cells
+            return result
+
+        def _learn(train_examples):
+            all_in = [v for ex in train_examples for row in ex["input"] for v in row]
+            all_out = [v for ex in train_examples for row in ex["output"] for v in row]
+            bg = Counter(all_in).most_common(1)[0][0]
+            dot_colors = set(all_in) - {bg}
+            if len(dot_colors) != 1:
+                return None, None, None, None
+            dot_color = next(iter(dot_colors))
+            out_colors = set(all_out) - {bg}
+            if len(out_colors) != 2:
+                return None, None, None, None
+            # Figure out which out_color = tallest, which = shortest
+            ex = train_examples[0]
+            cols_map = _get_columns(ex["input"], dot_color)
+            if len(cols_map) < 2:
+                return None, None, None, None
+            sorted_cols = sorted(cols_map.items(), key=lambda kv: len(kv[1]))
+            shortest_c = sorted_cols[0][0]
+            tallest_c = sorted_cols[-1][0]
+            short_cells = set(sorted_cols[0][1])
+            tall_cells = set(sorted_cols[-1][1])
+            color_for_shortest = None
+            color_for_tallest = None
+            for r in range(len(ex["output"])):
+                for c in range(len(ex["output"][0])):
+                    v = ex["output"][r][c]
+                    if v == bg:
+                        continue
+                    if (r, c) in short_cells:
+                        color_for_shortest = v
+                    elif (r, c) in tall_cells:
+                        color_for_tallest = v
+            if color_for_shortest is None or color_for_tallest is None:
+                return None, None, None, None
+            return bg, dot_color, color_for_tallest, color_for_shortest
+
+        def _apply(grid, bg, dot_color, tallest_color, shortest_color):
+            rows, cols = len(grid), len(grid[0])
+            cols_map = _get_columns(grid, dot_color)
+            if len(cols_map) < 2:
+                return None
+            sorted_cols = sorted(cols_map.items(), key=lambda kv: len(kv[1]))
+            shortest_cells = set(sorted_cols[0][1])
+            tallest_cells = set(sorted_cols[-1][1])
+            out = [[bg]*cols for _ in range(rows)]
+            for c_idx, cells in cols_map.items():
+                cell_set = set(cells)
+                if cell_set == tallest_cells:
+                    color = tallest_color
+                elif cell_set == shortest_cells:
+                    color = shortest_color
+                else:
+                    continue  # middle columns → bg
+                for r, c in cells:
+                    out[r][c] = color
+            return out
+
+        bg, dot_color, tallest_color, shortest_color = _learn(train)
+        if bg is None:
+            return None
+        for ex in train:
+            result = _apply(ex["input"], bg, dot_color, tallest_color, shortest_color)
+            if result is None or result != ex["output"]:
+                return None
+        return _apply(test_input, bg, dot_color, tallest_color, shortest_color)
