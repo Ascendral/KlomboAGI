@@ -358,6 +358,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extend_bars_to_cross,
             self._try_l_shape_diagonal_ray,
             self._try_2x2_block_corner_markers,
+            self._try_grid_room_diagonal_colors,
         ]
         for s in v2:
             try:
@@ -4602,3 +4603,96 @@ class SmartARCSolverV2(SmartARCSolver):
                     out[r][c] = marker_color
             return out
         return None
+
+    def _try_grid_room_diagonal_colors(self, train, test_input):
+        """Grid divided by full-row/full-col dividers into rooms. Colors the rooms
+        at evenly-spaced diagonal positions (top-left to bottom-right) with colors
+        1, 2, 3 (or learned new colors in order)."""
+        from collections import Counter
+
+        def _get_dividers(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find divider color: forms at least one full row AND one full col
+            all_colors = set(grid[r][c] for r in range(rows) for c in range(cols))
+            div_color = None
+            for color in sorted(all_colors):
+                full_rows = [r for r in range(rows) if all(grid[r][c] == color for c in range(cols))]
+                full_cols = [c for c in range(cols) if all(grid[r][c] == color for r in range(rows))]
+                if full_rows and full_cols:
+                    div_color = color
+                    break
+            if div_color is None:
+                return None, None, None, None, None
+            full_rows = sorted(r for r in range(rows) if all(grid[r][c] == div_color for c in range(cols)))
+            full_cols = sorted(c for c in range(cols) if all(grid[r][c] == div_color for r in range(rows)))
+            return div_color, full_rows, full_cols, rows, cols
+
+        def _get_room_groups(div_rows, div_cols, rows, cols):
+            # Row-groups: runs of non-divider rows
+            row_groups = []
+            start = 0
+            for r in div_rows + [rows]:
+                if r > start:
+                    row_groups.append(list(range(start, r)))
+                start = r + 1
+            # Col-groups: runs of non-divider cols
+            col_groups = []
+            start = 0
+            for c in div_cols + [cols]:
+                if c > start:
+                    col_groups.append(list(range(start, c)))
+                start = c + 1
+            return row_groups, col_groups
+
+        def _apply(grid, row_groups, col_groups, colors):
+            rows_count = len(row_groups)
+            cols_count = len(col_groups)
+            n_colors = len(colors)
+            if n_colors < 2:
+                return None
+            out = [list(row) for row in grid]
+            for k in range(n_colors):
+                rg_idx = round(k * (rows_count - 1) / (n_colors - 1)) if n_colors > 1 else 0
+                cg_idx = round(k * (cols_count - 1) / (n_colors - 1)) if n_colors > 1 else 0
+                if rg_idx >= rows_count or cg_idx >= cols_count:
+                    return None
+                rg = row_groups[rg_idx]
+                cg = col_groups[cg_idx]
+                for r in rg:
+                    for c in cg:
+                        out[r][c] = colors[k]
+            return out
+
+        # Learn from training
+        learned_colors = None
+        for ex in train:
+            dc, full_rows, full_cols, rows, cols = _get_dividers(ex["input"])
+            if dc is None:
+                return None
+            row_groups, col_groups = _get_room_groups(full_rows, full_cols, rows, cols)
+            if len(row_groups) < 2 or len(col_groups) < 2:
+                return None
+            # Find new colors in output (not in input)
+            in_colors = set(v for row in ex["input"] for v in row)
+            out_colors = set(v for row in ex["output"] for v in row)
+            new_cols = sorted(out_colors - in_colors)
+            if len(new_cols) < 2:
+                return None
+            result = _apply(ex["input"], row_groups, col_groups, new_cols)
+            if result is None or result != ex["output"]:
+                return None
+            if learned_colors is None:
+                learned_colors = new_cols
+            elif learned_colors != new_cols:
+                return None
+
+        if learned_colors is None:
+            return None
+
+        dc, full_rows, full_cols, rows, cols = _get_dividers(test_input)
+        if dc is None:
+            return None
+        row_groups, col_groups = _get_room_groups(full_rows, full_cols, rows, cols)
+        if len(row_groups) < 2 or len(col_groups) < 2:
+            return None
+        return _apply(test_input, row_groups, col_groups, learned_colors)
