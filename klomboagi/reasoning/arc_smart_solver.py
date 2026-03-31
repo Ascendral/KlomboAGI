@@ -4517,11 +4517,19 @@ class SmartARCSolverV2(SmartARCSolver):
 
         def _get_marker_color(ex, rect):
             r1, c1, r2, c2 = rect
+            in_rows = len(ex["input"])
+            out_rows = len(ex["output"])
+            if in_rows != out_rows:
+                return None
             changed = set()
-            for r in range(len(ex["output"])):
-                for c in range(len(ex["output"][r])):
-                    if ex["output"][r][c] != ex["input"][r][c]:
-                        changed.add(ex["output"][r][c])
+            for r in range(min(in_rows, out_rows)):
+                in_row = ex["input"][r]
+                out_row = ex["output"][r]
+                if len(in_row) != len(out_row):
+                    return None
+                for c in range(len(out_row)):
+                    if out_row[c] != in_row[c]:
+                        changed.add(out_row[c])
             if len(changed) == 1:
                 return next(iter(changed))
             return None
