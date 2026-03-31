@@ -368,6 +368,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_8conn_equal_size_coloring,
             self._try_top2_freq_stay,
             self._try_5block_nearest_noise_color,
+            self._try_complete_rect_outline_to_3,
         ]
         for s in v2:
             try:
@@ -5162,3 +5163,63 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is None or result != ex['output']:
                 return None
         return solve(test_input)
+
+    def _try_complete_rect_outline_to_3(self, train, test_input):
+        """Connected components of 1s that form a complete hollow rectangle
+        (all perimeter cells of bounding box present, interior empty, R>=3 and C>=3) -> 3.
+        Incomplete shapes stay 1.
+        Handles: 810b9b61"""
+        def get_4conn_components(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            components = []
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] == 1 and not visited[sr][sc]:
+                        comp = []
+                        stack = [(sr, sc)]
+                        visited[sr][sc] = True
+                        while stack:
+                            r, c = stack.pop()
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc]==1:
+                                    visited[nr][nc] = True
+                                    stack.append((nr, nc))
+                        components.append(comp)
+            return components
+
+        def is_complete_hollow_rect(comp):
+            cells = set(comp)
+            min_r = min(r for r, c in cells)
+            max_r = max(r for r, c in cells)
+            min_c = min(c for r, c in cells)
+            max_c = max(c for r, c in cells)
+            R = max_r - min_r + 1
+            C = max_c - min_c + 1
+            if R < 3 or C < 3:
+                return False
+            perimeter = set()
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 1):
+                    if r == min_r or r == max_r or c == min_c or c == max_c:
+                        perimeter.add((r, c))
+            return cells == perimeter
+
+        def apply_rule(grid):
+            comps = get_4conn_components(grid)
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            for comp in comps:
+                if is_complete_hollow_rect(comp):
+                    for r, c in comp:
+                        out[r][c] = 3
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
