@@ -364,6 +364,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_component_size_coloring,
             self._try_remove_low_neighbor_cells,
             self._try_remove_row_col_sandwiched_cells,
+            self._try_diagonal_alternating_color,
+            self._try_8conn_equal_size_coloring,
         ]
         for s in v2:
             try:
@@ -4994,6 +4996,81 @@ class SmartARCSolverV2(SmartARCSolver):
                         if sandwich_count[(C, cell)] > sandwich_count[(cell, C)]:
                             out[r][c] = 0
                             break
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_diagonal_alternating_color(self, train, test_input):
+        """All non-zero cells lie on diagonals (r-c = constant).
+        For each diagonal, alternate: original_color, 4, original_color, 4, ...
+        starting from lowest-row cell."""
+        from collections import defaultdict
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            diag_groups = defaultdict(list)
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        diag_groups[r - c].append((r, c, grid[r][c]))
+            out = [row[:] for row in grid]
+            for cells in diag_groups.values():
+                cells.sort()
+                for idx, (r, c, color) in enumerate(cells):
+                    out[r][c] = color if idx % 2 == 0 else 4
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_8conn_equal_size_coloring(self, train, test_input):
+        """Find all 8-connected components. Components whose size appears more than
+        once (the 'common' size) get color 1; unique-size component gets color 2."""
+        from collections import Counter
+
+        def get_components(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            components = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and not visited[r][c]:
+                        comp = []
+                        stack = [(r, c)]
+                        while stack:
+                            cr, cc = stack.pop()
+                            if cr < 0 or cr >= rows or cc < 0 or cc >= cols:
+                                continue
+                            if visited[cr][cc] or grid[cr][cc] == 0:
+                                continue
+                            visited[cr][cc] = True
+                            comp.append((cr, cc))
+                            for dr in [-1, 0, 1]:
+                                for dc in [-1, 0, 1]:
+                                    if dr == 0 and dc == 0:
+                                        continue
+                                    stack.append((cr+dr, cc+dc))
+                        components.append(comp)
+            return components
+
+        def apply_rule(grid):
+            comps = get_components(grid)
+            size_counts = Counter(len(c) for c in comps)
+            rows, cols = len(grid), len(grid[0])
+            out = [[0]*cols for _ in range(rows)]
+            for comp in comps:
+                color = 1 if size_counts[len(comp)] > 1 else 2
+                for r, c in comp:
+                    out[r][c] = color
             return out
 
         for ex in train:
