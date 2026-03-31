@@ -303,6 +303,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_flood_fill_interior,
             self._try_hollow_rectangles,
             self._try_connect_same_rowcol_pairs,
+            self._try_outer_corners_of_rectangle,
+            self._try_most_frequent_at_center_bottom,
+            self._try_ring_at_crosshair_intersection,
+            self._try_fill_to_nearest_corner,
         ]
         for s in v2:
             try:
@@ -1307,3 +1311,322 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
 
         return _apply(test_input, marker_color, fill_color, bg)
+
+    def _try_outer_corners_of_rectangle(self, train, test_input):
+        """Mark the 8 outer-corner positions of each hollow rectangular border with a new color.
+
+        A hollow rectangular border: cells form only the perimeter of a bounding box
+        (top row, bottom row, left col, right col fully filled, interior is background).
+
+        For a frame with bounding box (r0,c0)-(r1,c1):
+          outer corners = (r0-1,c0),(r0,c0-1),(r0-1,c1),(r0,c1+1),
+                          (r1+1,c0),(r1,c0-1),(r1+1,c1),(r1,c1+1)
+        """
+        from collections import Counter, deque
+
+        def _find_rect_shapes(grid):
+            """Return list of (color, r0, c0, r1, c1) for hollow frames or solid rectangles."""
+            rows, cols = len(grid), len(grid[0])
+            bg = Counter(grid[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            visited = [[False] * cols for _ in range(rows)]
+            rects = []
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] == bg or visited[sr][sc]:
+                        continue
+                    color = grid[sr][sc]
+                    comp = []
+                    q = deque([(sr, sc)])
+                    visited[sr][sc] = True
+                    while q:
+                        r, c = q.popleft()
+                        comp.append((r, c))
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                visited[nr][nc] = True
+                                q.append((nr, nc))
+                    r0 = min(p[0] for p in comp)
+                    r1 = max(p[0] for p in comp)
+                    c0 = min(p[1] for p in comp)
+                    c1 = max(p[1] for p in comp)
+                    if r1 == r0 and c1 == c0:
+                        continue  # single cell
+                    # Only square shapes get outer corners
+                    if (r1 - r0) != (c1 - c0):
+                        continue
+                    # Check if solid rectangle
+                    solid_size = (r1-r0+1) * (c1-c0+1)
+                    if len(comp) == solid_size and r1 > r0 and c1 > c0:
+                        rects.append((color, r0, c0, r1, c1))
+                        continue
+                    # Check if hollow frame (perimeter-only, ≥3×3 bounding box)
+                    if r1 - r0 < 2 or c1 - c0 < 2:
+                        continue
+                    perimeter = set()
+                    for c in range(c0, c1+1):
+                        perimeter.add((r0, c)); perimeter.add((r1, c))
+                    for r in range(r0+1, r1):
+                        perimeter.add((r, c0)); perimeter.add((r, c1))
+                    if set(comp) == perimeter:
+                        rects.append((color, r0, c0, r1, c1))
+            return rects, bg
+
+        def _outer_corner_cells(r0, c0, r1, c1):
+            return [
+                (r0-1, c0), (r0, c0-1),   # top-left outer corner
+                (r0-1, c1), (r0, c1+1),   # top-right outer corner
+                (r1+1, c0), (r1, c0-1),   # bottom-left outer corner
+                (r1+1, c1), (r1, c1+1),   # bottom-right outer corner
+            ]
+
+        def _apply(grid, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            rects, bg = _find_rect_shapes(grid)
+            if not rects:
+                return None
+            result = [row[:] for row in grid]
+            for _, r0, c0, r1, c1 in rects:
+                for r, c in _outer_corner_cells(r0, c0, r1, c1):
+                    if 0 <= r < rows and 0 <= c < cols and result[r][c] == bg:
+                        result[r][c] = fill_color
+            return result
+
+        # Determine fill_color from training examples
+        fill_color = None
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            rects, bg = _find_rect_shapes(inp)
+            if not rects:
+                return None
+            # Find what color was added in the output
+            added = {}
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        added[out[r][c]] = added.get(out[r][c], 0) + 1
+            if not added:
+                return None
+            if len(added) != 1:
+                return None
+            fc = list(added.keys())[0]
+            if fill_color is None:
+                fill_color = fc
+            elif fill_color != fc:
+                return None
+            # Verify all added cells match outer corner positions
+            expected_cells = set()
+            for _, r0, c0, r1, c1 in rects:
+                for r, c in _outer_corner_cells(r0, c0, r1, c1):
+                    if 0 <= r < rows and 0 <= c < cols and inp[r][c] == bg:
+                        expected_cells.add((r, c))
+            actual_cells = {(r, c) for r in range(rows) for c in range(cols)
+                            if inp[r][c] == bg and out[r][c] != bg}
+            if actual_cells != expected_cells:
+                return None
+
+        if fill_color is None:
+            return None
+
+        result = _apply(test_input, fill_color)
+        if result is None:
+            return None
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+    def _try_most_frequent_at_center_bottom(self, train, test_input):
+        """Grid divided by a row of 5s: top has colored cells, bottom is zeros.
+        Output: place most-frequent color from top section at (last_row, center_col).
+        """
+        from collections import Counter
+
+        def _find_divider(grid):
+            rows, cols = len(grid), len(grid[0])
+            for r in range(rows):
+                if all(int(grid[r][c]) == 5 for c in range(cols)):
+                    return r
+            return None
+
+        def _apply(grid, color):
+            rows, cols = len(grid), len(grid[0])
+            div = _find_divider(grid)
+            if div is None:
+                return None
+            # Bottom section must be all zeros (below divider)
+            for r in range(div + 1, rows):
+                for c in range(cols):
+                    if int(grid[r][c]) != 0:
+                        return None
+            result = [list(map(int, row)) for row in grid]
+            last_row = rows - 1
+            center_col = (cols - 1) // 2
+            if result[last_row][center_col] != 0:
+                return None
+            result[last_row][center_col] = color
+            return result
+
+        # Validate on all training examples (color varies per example — computed from top section)
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            div = _find_divider(inp)
+            if div is None or div == 0:
+                return None
+            # Bottom must be zeros
+            bottom_ok = all(int(inp[r][c]) == 0 for r in range(div+1, rows) for c in range(cols))
+            if not bottom_ok:
+                return None
+            # Find the single change
+            changes = [(r, c, int(out[r][c])) for r in range(rows) for c in range(cols)
+                       if int(inp[r][c]) != int(out[r][c])]
+            if len(changes) != 1:
+                return None
+            cr, cc, cv = changes[0]
+            if cr != rows - 1 or cc != (cols - 1) // 2:
+                return None
+            # Verify color matches most frequent in top section
+            top_cells = [int(inp[r][c]) for r in range(div) for c in range(cols) if int(inp[r][c]) != 5]
+            if not top_cells:
+                return None
+            most_common = Counter(top_cells).most_common(1)[0][0]
+            if cv != most_common:
+                return None
+
+        # For test, compute most frequent color from top section
+        test_grid = [list(map(int, row)) for row in test_input]
+        div = _find_divider(test_grid)
+        if div is None:
+            return None
+        top_cells = [test_grid[r][c] for r in range(div) for c in range(len(test_grid[0])) if test_grid[r][c] != 5]
+        if not top_cells:
+            return None
+        test_color = Counter(top_cells).most_common(1)[0][0]
+        return _apply(test_grid, test_color)
+
+    def _try_ring_at_crosshair_intersection(self, train, test_input):
+        """Find two perpendicular lines (one row, one col of same/different color).
+        Draw a 3x3 ring of color 4 around their intersection (center unchanged).
+        """
+        def _find_lines(grid):
+            """Return (row_idx, col_idx) for the pair of perpendicular full lines."""
+            rows, cols = len(grid), len(grid[0])
+            from collections import Counter
+            bg = Counter(grid[r][c] for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            # Find rows and cols that are fully non-bg (a complete line)
+            full_rows = [r for r in range(rows) if all(int(grid[r][c]) != bg for c in range(cols))]
+            full_cols = [c for c in range(cols) if all(int(grid[r][c]) != bg for r in range(rows))]
+            if len(full_rows) == 1 and len(full_cols) == 1:
+                return full_rows[0], full_cols[0], bg
+            return None, None, bg
+
+        def _apply(grid, ring_color):
+            rows, cols = len(grid), len(grid[0])
+            row_idx, col_idx, bg = _find_lines(grid)
+            if row_idx is None:
+                return None
+            result = [list(map(int, r)) for r in grid]
+            ir, ic = row_idx, col_idx
+            # Draw 3x3 ring (8 cells) around intersection (ir, ic)
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue  # leave center unchanged
+                    nr, nc = ir + dr, ic + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        result[nr][nc] = ring_color
+            return result
+
+        # Validate on training examples
+        ring_color = None
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            rows, cols = len(inp), len(inp[0])
+            row_idx, col_idx, bg = _find_lines(inp)
+            if row_idx is None:
+                return None
+            # Find what color was added (ring color)
+            added = set()
+            for r in range(rows):
+                for c in range(cols):
+                    if int(inp[r][c]) != int(out[r][c]):
+                        added.add(int(out[r][c]))
+            if len(added) != 1:
+                return None
+            rc = list(added)[0]
+            if ring_color is None:
+                ring_color = rc
+            elif ring_color != rc:
+                return None
+            # Verify: expected ring cells match actual changes
+            expected = set()
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    if dr == 0 and dc == 0:
+                        continue
+                    nr, nc = row_idx + dr, col_idx + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        expected.add((nr, nc))
+            actual = {(r, c) for r in range(rows) for c in range(cols)
+                      if int(inp[r][c]) != int(out[r][c])}
+            if actual != expected:
+                return None
+
+        if ring_color is None:
+            return None
+
+        result = _apply(test_input, ring_color)
+        if result is None or result == [list(map(int, r)) for r in test_input]:
+            return None
+        return result
+
+    def _try_fill_to_nearest_corner(self, train, test_input):
+        """Single non-bg pixel in a uniform grid: fill rectangle from pixel to nearest corner."""
+        from collections import Counter
+
+        def _get_pixel(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = Counter(int(grid[r][c]) for r in range(rows) for c in range(cols)).most_common(1)[0][0]
+            pixels = [(r, c, int(grid[r][c])) for r in range(rows) for c in range(cols) if int(grid[r][c]) != bg]
+            if len(pixels) != 1:
+                return None, None, None, bg
+            r0, c0, color = pixels[0]
+            return r0, c0, color, bg
+
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            r0, c0, color, bg = _get_pixel(grid)
+            if r0 is None:
+                return None
+            # Find nearest corner by Chebyshev distance
+            corners = [(0, 0), (0, cols-1), (rows-1, 0), (rows-1, cols-1)]
+            nearest = min(corners, key=lambda p: max(abs(p[0]-r0), abs(p[1]-c0)))
+            cr, cc = nearest
+            rmin, rmax = min(r0, cr), max(r0, cr)
+            cmin, cmax = min(c0, cc), max(c0, cc)
+            result = [list(map(int, row)) for row in grid]
+            for r in range(rmin, rmax+1):
+                for c in range(cmin, cmax+1):
+                    result[r][c] = color
+            return result
+
+        # Validate on training examples
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            r0, c0, color, bg = _get_pixel(inp)
+            if r0 is None:
+                return None
+            # All cells in input must be bg except the one pixel
+            rows, cols = len(inp), len(inp[0])
+            if any(int(inp[r][c]) != bg and not (r == r0 and c == c0)
+                   for r in range(rows) for c in range(cols)):
+                return None
+            predicted = _apply(inp)
+            if predicted is None or predicted != [list(map(int, row)) for row in out]:
+                return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
