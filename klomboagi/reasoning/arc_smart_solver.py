@@ -359,6 +359,11 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_l_shape_diagonal_ray,
             self._try_2x2_block_corner_markers,
             self._try_grid_room_diagonal_colors,
+            self._try_fg_color_swap_lookup,
+            self._try_signal_to_quadrant_block,
+            self._try_component_size_coloring,
+            self._try_remove_low_neighbor_cells,
+            self._try_remove_row_col_sandwiched_cells,
         ]
         for s in v2:
             try:
@@ -4696,3 +4701,304 @@ class SmartARCSolverV2(SmartARCSolver):
         if len(row_groups) < 2 or len(col_groups) < 2:
             return None
         return _apply(test_input, row_groups, col_groups, learned_colors)
+
+    def _try_fg_color_swap_lookup(self, train, test_input):
+        """Each training example has exactly 2 colors (bg=0 and one fg color).
+        Mapping: fg→0, 0→new_color. Training examples collectively define a lookup
+        table fg→new_color. Test applies the matching rule."""
+        from collections import Counter
+
+        bg = 0  # Always 0 for this pattern
+
+        # Build lookup table from training
+        lookup = {}
+        for ex in train:
+            in_colors = set(v for row in ex["input"] for v in row)
+            out_colors = set(v for row in ex["output"] for v in row)
+            fg_colors = in_colors - {bg}
+            if len(fg_colors) != 1:
+                return None
+            fg = next(iter(fg_colors))
+            new_colors = out_colors - {bg, fg}
+            if len(new_colors) > 1:
+                return None
+            if len(new_colors) == 1:
+                new_col = next(iter(new_colors))
+            else:
+                # new_col might already be in in_colors or output is just 0s
+                # Check the cell mapping
+                mapping = {}
+                valid = True
+                for r in range(len(ex["input"])):
+                    for c in range(len(ex["input"][r])):
+                        iv, ov = ex["input"][r][c], ex["output"][r][c]
+                        if iv in mapping and mapping[iv] != ov:
+                            valid = False
+                            break
+                        mapping[iv] = ov
+                if not valid:
+                    return None
+                if fg not in mapping or mapping[fg] != bg:
+                    return None
+                new_col = mapping.get(bg, bg)
+            # Verify the mapping fg→0, 0→new_col
+            expected_out = [[new_col if v == bg else (bg if v == fg else v) for v in row] for row in ex["input"]]
+            if expected_out != ex["output"]:
+                return None
+            if fg in lookup and lookup[fg] != new_col:
+                return None
+            lookup[fg] = new_col
+
+        if not lookup:
+            return None
+
+        # Apply to test input
+        test_in_colors = set(v for row in test_input for v in row)
+        test_fg = test_in_colors - {bg}
+        if len(test_fg) != 1:
+            return None
+        fg = next(iter(test_fg))
+        if fg not in lookup:
+            return None
+        new_col = lookup[fg]
+        return [[new_col if v == bg else (bg if v == fg else v) for v in row] for row in test_input]
+
+    def _try_signal_to_quadrant_block(self, train, test_input):
+        """Background color and one signal color. One or more 'noise' colors.
+        Output: find signal cell, place signal as an NxN block at the NxN-grid
+        quadrant containing the signal, remove all noise (replace with bg).
+        Block size = grid_size / 2 for square grids."""
+        from collections import Counter
+
+        def _find_bg_signal(ex_list):
+            # Find consistent bg and signal colors
+            all_in = [v for ex in ex_list for row in ex["input"] for v in row]
+            all_out = [v for ex in ex_list for row in ex["output"] for v in row]
+            # bg appears in output (not changed much)
+            out_cols = set(all_out)
+            in_cols = set(all_in)
+            # Signal = color in output that's not bg and consistent
+            # bg = most common output color
+            out_counts = Counter(all_out)
+            bg = out_counts.most_common(1)[0][0]
+            signal_cols = out_cols - {bg}
+            if len(signal_cols) != 1:
+                return None, None
+            signal = next(iter(signal_cols))
+            return bg, signal
+
+        bg, signal = _find_bg_signal(train)
+        if bg is None:
+            return None
+
+        def _solve(grid, rows, cols, block_r, block_c, bg, signal):
+            out = [[bg]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    # Place signal block at target quadrant
+                    in_block_r = (r // block_r) == (signal_row // block_r)
+                    in_block_c = (c // block_c) == (signal_col // block_c)
+                    if in_block_r and in_block_c:
+                        out[r][c] = signal
+            return out
+
+        # Learn block size from training
+        block_r = block_c = None
+        signal_positions = []
+        for ex in train:
+            rows = len(ex["input"])
+            cols = len(ex["input"][0]) if rows else 0
+            if rows != len(ex["output"]) or cols != len(ex["output"][0]):
+                return None
+            # Find signal in input
+            sig_cells = [(r, c) for r in range(rows) for c in range(cols)
+                         if ex["input"][r][c] == signal]
+            if not sig_cells:
+                return None
+            # Block size: rows/2 x cols/2 (requires even dimensions)
+            if rows % 2 != 0 or cols % 2 != 0:
+                return None
+            br, bc = rows // 2, cols // 2
+            if block_r is None:
+                block_r, block_c = br, bc
+            elif (block_r, block_c) != (br, bc):
+                return None
+            # The signal should map to a specific block
+            # signal quadrant = (sig_r // br, sig_c // bc) → block fills (qr*br..., qc*bc...)
+            for signal_row, signal_col in sig_cells:
+                pass  # just need any sig cell
+            # Verify output
+            expected = [[bg]*cols for _ in range(rows)]
+            for sr, sc in sig_cells:
+                qr = sr // br
+                qc = sc // bc
+                for r in range(qr*br, (qr+1)*br):
+                    for c in range(qc*bc, (qc+1)*bc):
+                        expected[r][c] = signal
+            if expected != ex["output"]:
+                return None
+
+        if block_r is None:
+            return None
+
+        # Apply to test
+        rows = len(test_input)
+        cols = len(test_input[0]) if rows else 0
+        if rows != block_r * 2 or cols != block_c * 2:
+            return None
+        sig_cells = [(r, c) for r in range(rows) for c in range(cols)
+                     if test_input[r][c] == signal]
+        if not sig_cells:
+            return None
+        out = [[bg]*cols for _ in range(rows)]
+        for sr, sc in sig_cells:
+            qr = sr // block_r
+            qc = sc // block_c
+            for r in range(qr*block_r, (qr+1)*block_r):
+                for c in range(qc*block_c, (qc+1)*block_c):
+                    out[r][c] = signal
+        return out
+
+    def _try_component_size_coloring(self, train, test_input):
+        """Each connected component (4-connected, non-zero) gets a color based on its size.
+        Exactly one 'special' size maps to one color, all others map to another color.
+        E.g. size==6 → color 2, all others → color 1."""
+        def connected_components(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            components = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and not visited[r][c]:
+                        comp = []
+                        stack = [(r, c)]
+                        while stack:
+                            cr, cc = stack.pop()
+                            if cr < 0 or cr >= rows or cc < 0 or cc >= cols:
+                                continue
+                            if visited[cr][cc] or grid[cr][cc] == 0:
+                                continue
+                            visited[cr][cc] = True
+                            comp.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                stack.append((cr+dr, cc+dc))
+                        components.append(comp)
+            return components
+
+        size_to_color = {}
+        for ex in train:
+            rows_in, cols_in = len(ex['input']), len(ex['input'][0])
+            rows_out, cols_out = len(ex['output']), len(ex['output'][0])
+            if rows_in != rows_out or cols_in != cols_out:
+                return None
+            comps = connected_components(ex['input'])
+            for comp in comps:
+                color = ex['output'][comp[0][0]][comp[0][1]]
+                sz = len(comp)
+                if sz in size_to_color:
+                    if size_to_color[sz] != color:
+                        return None
+                else:
+                    size_to_color[sz] = color
+
+        if not size_to_color:
+            return None
+
+        colors = set(size_to_color.values())
+        if len(colors) != 2:
+            return None
+
+        color_to_sizes = {}
+        for sz, col in size_to_color.items():
+            color_to_sizes.setdefault(col, []).append(sz)
+
+        special_color = None
+        special_size = None
+        for col, sizes in color_to_sizes.items():
+            if len(sizes) == 1:
+                if special_color is not None:
+                    return None
+                special_color = col
+                special_size = sizes[0]
+        if special_color is None:
+            return None
+        other_color = next(c for c in colors if c != special_color)
+
+        comps = connected_components(test_input)
+        rows = len(test_input)
+        cols = len(test_input[0]) if rows else 0
+        out = [[0]*cols for _ in range(rows)]
+        for comp in comps:
+            color = special_color if len(comp) == special_size else other_color
+            for r, c in comp:
+                out[r][c] = color
+        return out
+
+    def _try_remove_low_neighbor_cells(self, train, test_input):
+        """Remove cells that have fewer than 2 filled (non-zero) 4-connected neighbors.
+        Keeps solid groups, removes isolated cells and thin protrusions."""
+        def neighbor_count(r, c, grid):
+            rows, cols = len(grid), len(grid[0])
+            return sum(1 for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
+                       if 0 <= r+dr < rows and 0 <= c+dc < cols and grid[r+dr][c+dc] != 0)
+
+        def apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[r][c] if grid[r][c] != 0 and neighbor_count(r, c, grid) >= 2 else 0
+                     for c in range(cols)] for r in range(rows)]
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply(ex['input']) != ex['output']:
+                return None
+        return apply(test_input)
+
+    def _try_remove_row_col_sandwiched_cells(self, train, test_input):
+        """Remove cell D at (r,c) if there exists a dominant color C that sandwiches D:
+        C appears above AND below in the same column, OR left AND right in same row.
+        Bilateral dominance: only C->D if sandwich_count(C,D) > sandwich_count(D,C)."""
+        from collections import defaultdict
+
+        def get_sandwichers(grid, r, c):
+            cell = grid[r][c]
+            if cell == 0:
+                return set()
+            rows, cols = len(grid), len(grid[0])
+            col_above = {grid[rr][c] for rr in range(r) if grid[rr][c] not in (0, cell)}
+            col_below = {grid[rr][c] for rr in range(r+1, rows) if grid[rr][c] not in (0, cell)}
+            row_left  = {grid[r][cc] for cc in range(c) if grid[r][cc] not in (0, cell)}
+            row_right = {grid[r][cc] for cc in range(c+1, cols) if grid[r][cc] not in (0, cell)}
+            return (col_above & col_below) | (row_left & row_right)
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sandwich_count = defaultdict(int)
+            sandwiched_by = {}
+            for r in range(rows):
+                for c in range(cols):
+                    cell = grid[r][c]
+                    if cell == 0:
+                        continue
+                    sw = get_sandwichers(grid, r, c)
+                    sandwiched_by[(r, c)] = sw
+                    for C in sw:
+                        sandwich_count[(C, cell)] += 1
+            out = [row[:] for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    cell = grid[r][c]
+                    if cell == 0:
+                        continue
+                    for C in sandwiched_by.get((r, c), set()):
+                        if sandwich_count[(C, cell)] > sandwich_count[(cell, C)]:
+                            out[r][c] = 0
+                            break
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
