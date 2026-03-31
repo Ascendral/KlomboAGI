@@ -355,6 +355,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_tallest_shortest_column,
             self._try_alternating_row_shift,
             self._try_diamond_center_mark,
+            self._try_extend_bars_to_cross,
         ]
         for s in v2:
             try:
@@ -4183,3 +4184,113 @@ class SmartARCSolverV2(SmartARCSolver):
         if result == test_input:
             return None
         return result
+
+    def _try_extend_bars_to_cross(self, train, test_input):
+        """Two partial bars (a vertical run + a horizontal run, different colors) each
+        extend to span the full column/row. A 3rd color (or learned color) is placed at
+        the intersection."""
+        from collections import Counter
+
+        def _find_bars(grid):
+            rows, cols = len(grid), len(grid[0])
+            all_vals = [grid[r][c] for r in range(rows) for c in range(cols)]
+            bg = Counter(all_vals).most_common(1)[0][0]
+            non_bg = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != bg]
+            if not non_bg:
+                return None
+            # Group by color
+            by_color = {}
+            for r, c, v in non_bg:
+                by_color.setdefault(v, []).append((r, c))
+            # Look for exactly 2 colors, one forming a vertical run, one a horizontal run
+            v_bar = None  # (col, color, row_set)
+            h_bar = None  # (row, color, col_set)
+            for color, cells in by_color.items():
+                col_set = set(c for r, c in cells)
+                row_set = set(r for r, c in cells)
+                if len(col_set) == 1:
+                    # All same column → vertical run
+                    col = next(iter(col_set))
+                    if v_bar is None:
+                        v_bar = (col, color, row_set)
+                    else:
+                        return None  # two vertical bars
+                elif len(row_set) == 1:
+                    # All same row → horizontal run
+                    row = next(iter(row_set))
+                    if h_bar is None:
+                        h_bar = (row, color, col_set)
+                    else:
+                        return None  # two horizontal bars
+                else:
+                    return None  # not a clean bar
+            if v_bar is None or h_bar is None:
+                return None
+            v_col, v_color, v_rows = v_bar
+            h_row, h_color, h_cols = h_bar
+            if v_color == h_color:
+                return None
+            return bg, v_col, v_color, h_row, h_color
+
+        # Learn intersection color from training examples
+        inter_color = None
+        for ex in train:
+            parsed = _find_bars(ex["input"])
+            if parsed is None:
+                return None
+            bg, v_col, v_color, h_row, h_color = parsed
+            # Build expected output
+            rows, cols = len(ex["input"]), len(ex["input"][0])
+            out = [list(row) for row in ex["input"]]
+            for r in range(rows):
+                out[r][v_col] = v_color
+            for c in range(cols):
+                out[h_row][c] = h_color
+            # Find the intersection color in actual output
+            actual_inter = ex["output"][h_row][v_col]
+            if actual_inter == v_color or actual_inter == h_color:
+                # intersection is one of the bar colors — use bg or a 3rd color
+                # determine: is there a 3rd color in output not in input?
+                in_colors = set(v for row in ex["input"] for v in row)
+                out_colors = set(v for row in ex["output"] for v in row)
+                new_cols = out_colors - in_colors
+                if new_cols:
+                    # Check if actual output matches out with intersection replaced
+                    cand = next(iter(new_cols))
+                    out[h_row][v_col] = cand
+                    if out != ex["output"]:
+                        return None
+                    if inter_color is None:
+                        inter_color = cand
+                    elif inter_color != cand:
+                        return None
+                else:
+                    out[h_row][v_col] = actual_inter
+                    if out != ex["output"]:
+                        return None
+                    if inter_color is None:
+                        inter_color = actual_inter
+                    elif inter_color != actual_inter:
+                        return None
+            else:
+                out[h_row][v_col] = actual_inter
+                if out != ex["output"]:
+                    return None
+                if inter_color is None:
+                    inter_color = actual_inter
+                elif inter_color != actual_inter:
+                    return None
+
+        # Apply to test input
+        parsed = _find_bars(test_input)
+        if parsed is None:
+            return None
+        bg, v_col, v_color, h_row, h_color = parsed
+        rows, cols = len(test_input), len(test_input[0])
+        out = [list(row) for row in test_input]
+        for r in range(rows):
+            out[r][v_col] = v_color
+        for c in range(cols):
+            out[h_row][c] = h_color
+        out[h_row][v_col] = inter_color
+        return out
