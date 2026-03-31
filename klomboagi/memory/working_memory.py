@@ -5,7 +5,7 @@ from klomboagi.storage.manager import StorageManager
 from klomboagi.utils.time import utc_now
 
 
-class WorkingMemoryManager:
+class MissionMemoryManager:
     def __init__(self, storage: StorageManager) -> None:
         self.storage = storage
 
@@ -87,3 +87,7 @@ class WorkingMemoryManager:
                 hypotheses.append(hypothesis)
             memory["hypotheses"] = hypotheses
         return self.save(memory)
+
+
+# Backwards compatibility alias
+WorkingMemoryManager = MissionMemoryManager

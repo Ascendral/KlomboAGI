@@ -198,9 +198,15 @@ class Genesis:
     - Proactive curiosity (system asks what it wants to know)
     """
 
-    def __init__(self, memory_path: str = "/tmp/klomboagi_genesis.json") -> None:
+    def __init__(self, memory_path: str = "/tmp/klomboagi_genesis.json",
+                 storage=None) -> None:
         # Base conversation system — already handles teaching, questions, commands
         self.base = Baby(memory_path=memory_path)
+
+        # Autonomous mode — initialized when storage is provided
+        self._autonomous = None
+        if storage is not None:
+            self._init_autonomous(storage)
 
         # CognitionLoop — the full 10-phase reasoning engine
         self._init_cognition_loop()
@@ -663,6 +669,20 @@ class Genesis:
         if self.total_turns % 20 == 0 and len(self.base._beliefs) > 50:
             self.deduplicator.deduplicate(self.base._beliefs)
 
+        # 19. Confidence Calibration — are our confidence scores accurate?
+        if self.total_turns % 15 == 0 and len(self.base._beliefs) > 30:
+            # Record recent prediction accuracy for calibration
+            has_answer = len(response) > 20 and "don't know" not in response.lower()
+            raw_conf = 0.6 if has_answer else 0.2
+            self.calibrator.record(raw_conf, has_answer)
+
+        # 19b. Auto-Refresh — re-read stale concepts periodically
+        if self.total_turns % 50 == 0 and self.total_turns > 0:
+            try:
+                self.refresher.refresh(max_concepts=2)
+            except Exception:
+                pass  # Auto-refresh should never crash the pipeline
+
         # 20. Cost tracking — record this cycle
         self.cost_tracker.end("hear_cycle", success=True)
 
@@ -884,6 +904,9 @@ class Genesis:
         else:
             self.inner.record_failure()
 
+        # ANSWER QUALITY — score this answer for self-improvement tracking
+        self.answer_quality.score(query, answer, beliefs_used=0, relations_used=0)
+
         return answer
 
     def _think_deep_inner(self, message: str, intent: dict) -> str:
@@ -1011,6 +1034,10 @@ class Genesis:
 
         # ── BEHAVIORAL DECISION — inner state drives approach ──
 
+        # META-LEARNER — consult what learning strategy works best for this domain
+        meta_domain = self.context.current_topic or "general"
+        meta_suggestion = self.meta_learner.best_method_for(meta_domain)
+
         decision = self.behavior.decide(
             self.inner.state, self.traits,
             self.working_memory, self.self_model)
@@ -1034,13 +1061,45 @@ class Genesis:
         relation_lines = [f"  {r}" for r in focus_result.top_relations()]
         query_words = set(focus_result.focus_concepts)
 
+        # CONTEXTUAL ANSWERER — re-rank beliefs by conversation context
+        if known_facts:
+            context_topics = [self.context.current_topic] if self.context.current_topic else []
+            wm_items = [item.concept for item in self.working_memory.get_active_items()
+                        if hasattr(item, 'concept')]
+            belief_scores = [(f, self.base._beliefs[f].truth.confidence
+                              if f in self.base._beliefs and hasattr(self.base._beliefs[f], 'truth')
+                              else 0.5)
+                             for f in known_facts]
+            reranked = self.contextual.contextualize(belief_scores, context_topics, wm_items)
+            known_facts = [stmt for stmt, _ in reranked]
+
         # Update working memory with focus concepts
         for concept in focus_result.focus_concepts:
             self.working_memory.attend(concept, "focus", "attention")
 
+        # SEMANTIC SIMILARITY — if focus found nothing, try semantic expansion
+        if not known_facts and query_terms:
+            for qt in query_terms[:2]:
+                similar = self.semantic.similar_to(qt, top_n=5)
+                for similar_concept, sim_score in similar:
+                    if sim_score > 0.2:
+                        for stmt, belief in self.base._beliefs.items():
+                            if (hasattr(belief, 'subject') and belief.subject == similar_concept
+                                    and stmt not in known_facts):
+                                known_facts.append(stmt)
+                                if len(known_facts) >= 5:
+                                    break
+                    if len(known_facts) >= 5:
+                        break
+                if known_facts:
+                    break
+
         # SEARCH FIRST → study the topic (don't just search — ABSORB it)
         # Like going to the library, not just Googling and forgetting
-        if decision.mode == BehaviorMode.SEARCH_FIRST and not known_facts:
+        # Meta-learner may suggest study even if behavior didn't pick SEARCH_FIRST
+        should_study = (decision.mode == BehaviorMode.SEARCH_FIRST
+                        or (not known_facts and meta_suggestion == "wiki_read"))
+        if should_study and not known_facts:
             study_topic = " ".join(query_terms[:3]) if query_terms else query
             self.read_and_learn(study_topic)
             # Don't return early — let the compose pipeline retrieve from what was absorbed
@@ -1708,6 +1767,13 @@ class Genesis:
         lines.append("\nPhase 4: Forming concepts from patterns...")
         formed = self.concept_former.scan()
         lines.append(f"Discovered {len(formed)} concepts.")
+
+        # 4b. Abstract Composition — invent new abstractions from patterns
+        lines.append("\nPhase 4b: Composing new abstractions...")
+        invented = self.composer.compose()
+        lines.append(f"Invented {len(invented)} new abstractions.")
+        for ab in invented[:5]:
+            lines.append(f"  '{ab.name}': {ab.definition}")
 
         # 5. Global inference — derive ALL possible chains
         lines.append("\nPhase 5: Running global inference on beliefs...")
@@ -2611,14 +2677,441 @@ class Genesis:
             lines.append(f"Error: {result['error']}")
         return "\n".join(lines)
 
+    # ── Autonomous Mode (unified cognition) ──
+
+    def _init_autonomous(self, storage) -> None:
+        """Initialize autonomous mission execution subsystems."""
+        from klomboagi.core.autonomous import AutonomousMode
+        self._autonomous = AutonomousMode(storage)
+
+    def initialize_autonomous(self) -> dict[str, object]:
+        """Initialize the autonomous world state."""
+        if not self._autonomous:
+            raise RuntimeError("Autonomous mode not initialized. Pass storage to Genesis().")
+        existing = self._autonomous.storage.world_state.load(default={})
+        world_state = self._autonomous.world_model.bootstrap()
+        if not existing:
+            self._autonomous.storage.event_log.append(
+                "runtime.initialized", {"initialized_at": world_state["initialized_at"]})
+        return world_state
+
+    def autonomous_status(self) -> dict[str, object]:
+        """Full autonomous mode status."""
+        if not self._autonomous:
+            return {"status": "autonomous_mode_not_initialized"}
+        from dataclasses import asdict
+        a = self._autonomous
+        snapshot = asdict(a.executive.snapshot())
+        world_state = a.storage.world_state.load(default={})
+        plans = a.storage.plans.load(default={})
+        verifications = a.storage.verifications.load(default={})
+        critiques = a.storage.critiques.load(default={})
+        mission_queue = a.storage.mission_queue.load(default=[])
+        cycle_traces = a.storage.cycle_traces.load(default=[])
+        semantic_memory = a.storage.semantic_memory.load(default=[])
+        procedures = a.storage.procedures.load(default=[])
+        working_memory = a.storage.working_memory.load(default={})
+        reflections = a.storage.reflections.load(default=[])
+        autonomy_runs = a.storage.autonomy_evals.load(default=[])
+        autonomy_report = a.storage.autonomy_reports.load(default={})
+        world_entities = a.storage.world_entities.load(default={})
+        world_relations = a.storage.world_relations.load(default=[])
+        active_mission_id = world_state.get("active_mission_id")
+        return {
+            "snapshot": snapshot,
+            "world_state": world_state,
+            "world_entities": world_entities,
+            "world_relations": world_relations,
+            "mission_queue": mission_queue,
+            "latest_cycle_trace": cycle_traces[-1] if cycle_traces else None,
+            "active_plan": plans.get(active_mission_id) if active_mission_id else None,
+            "latest_verification": verifications.get(active_mission_id) if active_mission_id else None,
+            "latest_critique": critiques.get(active_mission_id) if active_mission_id else None,
+            "semantic_memory": semantic_memory,
+            "procedures": procedures,
+            "working_memory": working_memory.get(active_mission_id) if active_mission_id else None,
+            "latest_reflection": reflections[-1] if reflections else None,
+            "latest_autonomy_eval": autonomy_runs[-1] if autonomy_runs else None,
+            "autonomy_report": autonomy_report,
+            "shared_skills": a.skill_forge.list_shared_skills(),
+            "runtime_root": str(a.storage.paths.runtime_root),
+            "long_term_root": str(a.storage.paths.long_term_root),
+        }
+
+    def run_cycle(self) -> dict[str, object]:
+        """
+        Run one autonomous mission execution cycle.
+
+        This is the unified cognition pipeline's autonomous mode.
+        The brain (Genesis) directly drives mission execution instead
+        of delegating to a separate RuntimeLoop.
+        """
+        if not self._autonomous:
+            raise RuntimeError("Autonomous mode not initialized. Pass storage to Genesis().")
+
+        a = self._autonomous
+        world_state = self.initialize_autonomous()
+        missions = a.missions.list_missions()
+        tasks_by_mission = {m["id"]: a.missions.list_tasks(m["id"]) for m in missions}
+        active_missions = [m for m in missions if m["status"] == "active"]
+        mission_queue = a.scheduler.build_queue(missions, tasks_by_mission)
+
+        if not active_missions:
+            world_state = a.world_model.refresh(
+                missions=[], tasks=[], active_mission_id=None,
+                current_focus=None, last_plan_id=None,
+                last_reflection_id=None,
+                notes=["Runtime is idle; no active missions available."],
+            )
+            idle = {
+                "status": "idle",
+                "reason": "No active missions available.",
+                "world_state": world_state,
+            }
+            a.storage.event_log.append("runtime.cycle.idle", idle)
+            return idle
+
+        mission = a.scheduler.select_next(missions, tasks_by_mission) or active_missions[0]
+
+        # Bridge: cognitive working memory is aware of the mission
+        self.working_memory.add_context(f"Mission: {mission['description']}")
+
+        step_history: list[dict[str, object]] = []
+        final_plan = None
+        final_verification = None
+        final_critique = None
+        final_action = None
+        final_outcome = None
+        final_memory = None
+        final_reflection = None
+        final_procedure = None
+        final_semantic_fact = None
+        final_promoted_skills: list[dict[str, object]] = []
+        stop_reason = "budget_exhausted"
+        replan_count = 0
+        max_replans = 2
+        failure_count = 0
+
+        for step_number in range(1, a.max_cycle_steps + 1):
+            tasks = a.missions.list_tasks(mission["id"])
+            active_task = self._select_active_task(tasks)
+            learned_procedures = a.consolidator.retrieve(str(mission["description"]))
+            learned_facts = a.semantic_memory.retrieve(str(mission["description"]))
+
+            # Direct knowledge query — we ARE the brain, no bridge needed
+            genesis_knowledge = self._query_own_knowledge(str(mission["description"]))
+
+            memory = a.mission_wm.load_or_create(
+                str(mission["id"]),
+                str(mission["description"]),
+                active_task_id=active_task["id"] if active_task else None,
+            )
+            a.world_model.refresh(
+                missions=active_missions, tasks=tasks,
+                active_mission_id=str(mission["id"]),
+                current_focus=str(memory["current_focus"]),
+                last_plan_id=None, last_reflection_id=None,
+                notes=[f"Loaded mission '{mission['description']}' into world state."],
+            )
+            plan = a.planner.build_plan(mission, tasks)
+            proposed_action = a.planner.next_action(plan)
+            world_entities = a.storage.world_entities.load(default={})
+            world_relations = a.storage.world_relations.load(default=[])
+            verification = a.verifier.verify(
+                mission=mission, tasks=tasks, plan=plan,
+                next_action=proposed_action,
+                world_entities=world_entities,
+                world_relations=world_relations,
+            )
+            critique = a.critic.critique(
+                mission=mission, tasks=tasks, plan=plan,
+                proposed_action=proposed_action,
+                verification=verification,
+            )
+            next_action = critique["final_action"]
+
+            blockers = self._collect_blockers(tasks)
+            focus = (next_action["description"]
+                     if next_action["type"] != "mission_complete"
+                     else str(mission["description"]))
+
+            # Bridge: cognitive working memory tracks current action
+            self.working_memory.attend(focus[:30], "task", "mission")
+
+            memory = a.mission_wm.update(
+                str(mission["id"]),
+                current_focus=focus,
+                active_task_id=next_action.get("task_id"),
+                active_plan_id=str(plan["id"]),
+                blockers=blockers,
+                relevant_memories=[
+                    f"Mission priority is {mission['priority']}.",
+                    *learned_procedures, *learned_facts, *genesis_knowledge,
+                ],
+                verification_alerts=list(verification.get("issues", []))
+                    + list(verification.get("warnings", [])),
+                critique_notes=list(critique.get("notes", [])),
+                last_action=str(next_action["type"]),
+                hypothesis=f"Next action selected: {next_action['description']}",
+            )
+
+            # Execute action and learn directly (no bridge needed)
+            action_outcome = self._apply_autonomous_action(mission, next_action)
+
+            tasks = a.missions.list_tasks(mission["id"])
+            mission = a.missions.get_mission(mission["id"]) or mission
+            reflection = a.reflection.reflect(mission, tasks, memory, next_action, action_outcome)
+
+            # Cross-mode learning: feed reflection into experiential learner
+            try:
+                ref_desc = str(reflection.get("summary", next_action.get("description", "")))[:100]
+                ref_success = action_outcome["status"] == "completed"
+                att = self.experiential.attempt(
+                    ref_desc, "autonomous_execution", ref_desc, 0.7 if ref_success else 0.2)
+                if ref_success:
+                    self.experiential.learn_from_success(att)
+            except Exception:
+                pass
+
+            procedure = a.consolidator.consolidate(
+                mission=mission, reflection=reflection,
+                action_outcome=action_outcome,
+            )
+            semantic_fact = a.semantic_memory.remember(
+                mission=mission, reflection=reflection,
+                action_outcome=action_outcome,
+            )
+
+            # Cross-mode learning: store semantic facts in concept store too
+            if semantic_fact and isinstance(semantic_fact, dict):
+                fact_text = str(semantic_fact.get("fact", ""))
+                if len(fact_text) > 20:
+                    topic = str(mission.get("description", "general")).split()[0].lower()
+                    existing = self.base.memory.concepts.get(topic, {})
+                    if "facts" not in existing:
+                        existing["facts"] = []
+                    if fact_text not in existing["facts"]:
+                        existing["facts"].append(fact_text)
+                        self.base.memory.concepts[topic] = existing
+
+            promoted_skills = a.skill_forge.scan_and_promote()
+
+            step_history.append({
+                "step_number": step_number,
+                "plan_id": plan["id"],
+                "next_action": next_action,
+                "action_outcome": action_outcome,
+                "reflection_id": reflection["id"],
+            })
+
+            final_plan = plan
+            final_verification = verification
+            final_critique = critique
+            final_action = next_action
+            final_outcome = action_outcome
+            final_memory = memory
+            final_reflection = reflection
+            final_procedure = procedure
+            final_semantic_fact = semantic_fact
+            final_promoted_skills = promoted_skills
+
+            if next_action["type"] == "replan":
+                if replan_count < max_replans:
+                    replan_count += 1
+                    a.storage.event_log.append(
+                        "runtime.replan.recovery",
+                        {"mission_id": mission["id"], "replan_count": replan_count},
+                    )
+                    continue
+                stop_reason = "replan_requested"
+                break
+            if action_outcome["status"] in {"failed", "blocked"}:
+                failure_count += 1
+                if failure_count < max_replans and replan_count < max_replans:
+                    replan_count += 1
+                    a.storage.event_log.append(
+                        "runtime.failure.replan",
+                        {"mission_id": mission["id"],
+                         "failure_count": failure_count,
+                         "replan_count": replan_count},
+                    )
+                    continue
+                stop_reason = action_outcome["status"]
+                break
+            if (mission["status"] == "completed"
+                    or action_outcome.get("mission_status") == "completed"):
+                stop_reason = "mission_completed"
+                self.inner.record_success()
+                break
+            if step_number >= a.max_cycle_steps:
+                stop_reason = "budget_exhausted"
+                break
+
+        world_state = a.world_model.refresh(
+            missions=[m if m["id"] != mission["id"] else mission for m in active_missions],
+            tasks=a.missions.list_tasks(mission["id"]),
+            active_mission_id=str(mission["id"]),
+            current_focus=str(final_memory["current_focus"]),
+            last_plan_id=str(final_plan["id"]),
+            last_reflection_id=str(final_reflection["id"]),
+            notes=[f"Current mission focus: {final_memory['current_focus']}"],
+        )
+        cycle_trace = self._record_cycle_trace(
+            mission=mission, step_history=step_history, stop_reason=stop_reason,
+        )
+        autonomy_eval = a.autonomy.record(
+            mission=mission, plan=final_plan,
+            verification=final_verification, critique=final_critique,
+            next_action=final_action, action_outcome=final_outcome,
+            working_memory=final_memory, cycle_trace=cycle_trace,
+        )
+        autonomy_report = a.autonomy.summarize()
+        payload = {
+            "status": "active",
+            "mission": mission,
+            "plan": final_plan,
+            "verification": final_verification,
+            "critique": final_critique,
+            "next_action": final_action,
+            "action_outcome": final_outcome,
+            "semantic_fact": final_semantic_fact,
+            "procedure": final_procedure,
+            "working_memory": final_memory,
+            "reflection": final_reflection,
+            "cycle_trace": cycle_trace,
+            "autonomy_eval": autonomy_eval,
+            "autonomy_report": autonomy_report,
+            "world_state": world_state,
+            "world_entities": a.storage.world_entities.load(default={}),
+            "world_relations": a.storage.world_relations.load(default=[]),
+            "mission_queue": a.storage.mission_queue.load(default=[]),
+        }
+        a.storage.event_log.append(
+            "runtime.cycle.completed",
+            {
+                "mission_id": mission["id"],
+                "plan_id": final_plan["id"],
+                "verification_valid": final_verification["valid"],
+                "critique_approved": final_critique["approved"],
+                "reflection_id": final_reflection["id"],
+                "action_outcome": final_outcome["status"],
+                "next_action": final_action["type"],
+                "cycle_steps": cycle_trace["step_count"],
+                "stop_reason": cycle_trace["stop_reason"],
+            },
+        )
+
+        # Cross-session learning: record episode
+        try:
+            tool_calls = [
+                {"tool": step["next_action"]["type"],
+                 "success": step["action_outcome"]["status"] == "completed"}
+                for step in step_history
+                if "next_action" in step and "action_outcome" in step
+            ]
+            episode = a.episode_indexer.build_episode(
+                session_id=str(mission["id"]),
+                project_root=str(a.storage.paths.runtime_root),
+                goal=str(mission.get("description", "")),
+                tool_calls=tool_calls,
+                success=stop_reason == "mission_completed",
+                outcomes=[str(final_outcome.get("status", "unknown"))],
+            )
+            a.episode_indexer.record_episode(episode)
+        except Exception:
+            pass
+
+        return payload
+
+    def _query_own_knowledge(self, description: str) -> list[str]:
+        """
+        Query own knowledge for facts relevant to a mission description.
+
+        This replaces the old bridge pattern (_query_genesis) — we ARE
+        the brain, so we access beliefs and concepts directly.
+        """
+        relevant = []
+        desc_words = set(description.lower().split())
+        stop = {"the", "a", "an", "to", "for", "and", "or", "in", "of", "is", "are",
+                "with", "that", "this", "from", "by", "on", "at"}
+        desc_words -= stop
+
+        for stmt, belief in self.base._beliefs.items():
+            stmt_words = set(stmt.lower().split()) - stop
+            if desc_words & stmt_words and len(relevant) < 5:
+                relevant.append(f"[brain] {stmt}")
+
+        for word in desc_words:
+            facts = self.base.memory.concepts.get(word, {}).get("facts", [])
+            for fact in facts[:2]:
+                if isinstance(fact, str) and len(fact) > 20 and fact not in relevant:
+                    relevant.append(f"[brain] {fact[:150]}")
+                    if len(relevant) >= 10:
+                        break
+
+        return relevant
+
+    def _apply_autonomous_action(self, mission: dict, next_action: dict) -> dict[str, object]:
+        """Execute an action and learn directly from the outcome."""
+        result = self._autonomous.executor.execute(mission, next_action)
+        # Direct learning — no bridge needed
+        statement = f"task '{str(next_action.get('description', ''))[:50]}' resulted in {result.get('status', 'unknown')}"
+        try:
+            self.hear(statement)
+        except Exception:
+            pass
+        return result
+
+    def _select_active_task(self, tasks: list[dict[str, object]]) -> dict[str, object] | None:
+        """Select the next active or ready task."""
+        for task in tasks:
+            if task["status"] == "active":
+                return task
+        completed_ids = {str(task["id"]) for task in tasks if task["status"] == "completed"}
+        for task in tasks:
+            if task["status"] not in {"queued", "active"}:
+                continue
+            dependencies = {str(dep) for dep in task.get("dependencies", [])}
+            if dependencies.issubset(completed_ids):
+                return task
+        return None
+
+    def _collect_blockers(self, tasks: list[dict[str, object]]) -> list[str]:
+        """Collect blocked task reasons."""
+        blockers = []
+        for task in tasks:
+            if task["status"] == "blocked" and task.get("blocked_reason"):
+                blockers.append(str(task["blocked_reason"]))
+        return blockers
+
+    def _record_cycle_trace(self, *, mission, step_history, stop_reason) -> dict[str, object]:
+        """Record a cycle trace to storage."""
+        a = self._autonomous
+        traces = a.storage.cycle_traces.load(default=[])
+        trace = {
+            "mission_id": mission["id"],
+            "step_count": len(step_history),
+            "stop_reason": stop_reason,
+            "steps": step_history,
+        }
+        traces.append(trace)
+        a.storage.cycle_traces.save(traces)
+        a.storage.event_log.append(
+            "runtime.cycle.trace",
+            {"mission_id": mission["id"],
+             "step_count": len(step_history),
+             "stop_reason": stop_reason},
+        )
+        return trace
+
     def get_runtime_loop(self):
         """
-        Get a RuntimeLoop connected to this brain.
+        Get a RuntimeLoop compatibility wrapper connected to this brain.
 
         Usage:
             genesis = Genesis()
             runtime = genesis.get_runtime_loop()
-            runtime.run_cycle()  # uses Genesis's knowledge for planning
+            runtime.run_cycle()  # uses Genesis's unified cognition pipeline
         """
         from klomboagi.core.loop import RuntimeLoop
         from klomboagi.storage.manager import StorageManager

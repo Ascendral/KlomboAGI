@@ -15,7 +15,7 @@ from klomboagi.core.loop import RuntimeLoop
 from klomboagi.core.mission import MissionManager
 from klomboagi.learning.consolidation import MemoryConsolidator
 from klomboagi.learning.semantic import SemanticMemory
-from klomboagi.memory.working_memory import WorkingMemoryManager
+from klomboagi.memory.working_memory import MissionMemoryManager
 from klomboagi.storage.manager import StorageManager
 
 
@@ -154,7 +154,7 @@ class TestWorkingMemoryPersistsAcrossRuntimeLoops(unittest.TestCase):
         missions1.create_task(mission.id, "Step beta")
         runtime1.run_cycle()
 
-        wm_mgr1 = WorkingMemoryManager(storage1)
+        wm_mgr1 = MissionMemoryManager(storage1)
         wm_s1 = wm_mgr1.load(mission.id)
         self.assertIsNotNone(wm_s1, "Working memory should exist after cycle 1")
         self.assertEqual(wm_s1["mission_id"], mission.id)
@@ -168,7 +168,7 @@ class TestWorkingMemoryPersistsAcrossRuntimeLoops(unittest.TestCase):
 
         # Session 2: fresh RuntimeLoop over same storage roots
         storage2 = StorageManager.bootstrap()
-        wm_mgr2 = WorkingMemoryManager(storage2)
+        wm_mgr2 = MissionMemoryManager(storage2)
         wm_s2 = wm_mgr2.load(mission.id)
         self.assertIsNotNone(wm_s2, "Working memory should persist into session 2")
         self.assertEqual(wm_s2["mission_id"], mission.id)
@@ -185,14 +185,14 @@ class TestWorkingMemoryPersistsAcrossRuntimeLoops(unittest.TestCase):
         missions1.create_task(mission.id, "Do something")
         runtime1.run_cycle()
 
-        wm_mgr1 = WorkingMemoryManager(storage1)
+        wm_mgr1 = MissionMemoryManager(storage1)
         wm_mgr1.update(mission.id, current_focus="custom focus from session 1")
 
         del runtime1
 
         # Session 2: verify the manual update persists
         storage2 = StorageManager.bootstrap()
-        wm_mgr2 = WorkingMemoryManager(storage2)
+        wm_mgr2 = MissionMemoryManager(storage2)
         wm_s2 = wm_mgr2.load(mission.id)
         self.assertIsNotNone(wm_s2)
         self.assertEqual(wm_s2["current_focus"], "custom focus from session 1")
