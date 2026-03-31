@@ -307,6 +307,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_most_frequent_at_center_bottom,
             self._try_ring_at_crosshair_intersection,
             self._try_fill_to_nearest_corner,
+            self._try_tile_from_marked_rows,
         ]
         for s in v2:
             try:
@@ -1624,6 +1625,52 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             predicted = _apply(inp)
             if predicted is None or predicted != [list(map(int, row)) for row in out]:
+                return None
+
+        result = _apply(test_input)
+        if result is None or result == [list(map(int, row)) for row in test_input]:
+            return None
+        return result
+
+    def _try_tile_from_marked_rows(self, train, test_input):
+        """Rows marked by a uniform marker color in col 0 define a repeating tile.
+        After the last content row, fill remaining empty rows by repeating the tile.
+        The tile = marked rows with the marker replaced by background (0).
+        """
+        def _apply(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = 0
+            # Find marker column: a column where all non-bg values are the same color
+            marker_col = None
+            marker_color = None
+            for c in range(cols):
+                col_vals = [int(grid[r][c]) for r in range(rows)]
+                non_bg = [v for v in col_vals if v != bg]
+                if len(non_bg) >= 1 and len(set(non_bg)) == 1:
+                    marker_col = c
+                    marker_color = non_bg[0]
+                    break
+            if marker_col is None:
+                return None
+            # Tile = rows where marker_col == marker_color, with that cell zeroed out
+            tile_rows = [r for r in range(rows) if int(grid[r][marker_col]) == marker_color]
+            if not tile_rows:
+                return None
+            tile = [[int(grid[r][c]) if c != marker_col else bg for c in range(cols)] for r in tile_rows]
+            # Last non-empty row
+            last_content = max(
+                (r for r in range(rows) if any(int(grid[r][c]) != bg for c in range(cols))),
+                default=0,
+            )
+            # Fill rows after last_content by repeating tile cyclically
+            result = [list(map(int, row)) for row in grid]
+            for i, r in enumerate(range(last_content + 1, rows)):
+                result[r] = list(tile[i % len(tile)])
+            return result
+
+        for ex in train:
+            predicted = _apply(ex["input"])
+            if predicted is None or predicted != [list(map(int, row)) for row in ex["output"]]:
                 return None
 
         result = _apply(test_input)
