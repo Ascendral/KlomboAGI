@@ -1069,3 +1069,67 @@ def learn_conditional_span_fill(train: list[dict]) -> callable | None:
         return fill_col_conditional
 
     return None
+
+
+# ─── U-Shape Gap Drop ────────────────────────────────────────────────────────
+
+def learn_ushape_gap_drop(train: list[dict]) -> callable | None:
+    """
+    U-shaped openings have a gap (bg cell surrounded on 3 sides by non-bg).
+    A marker color (4) is placed at the bottom of the grid in the same
+    column as each gap.
+
+    Handles task 54d82841.
+    """
+    for ex in train:
+        if (len(ex["input"]) != len(ex["output"]) or
+                len(ex["input"][0]) != len(ex["output"][0])):
+            return None
+
+    bg = 0
+
+    # Learn the drop color from training diffs
+    drop_colors = set()
+    for ex in train:
+        for r in range(len(ex["input"])):
+            for c in range(len(ex["input"][0])):
+                if ex["input"][r][c] == bg and ex["output"][r][c] != bg:
+                    drop_colors.add(int(ex["output"][r][c]))
+    if len(drop_colors) != 1:
+        return None
+    drop_color = drop_colors.pop()
+
+    def find_gaps(grid, bg_val):
+        """Find bg cells surrounded on 3+ cardinal sides by same non-bg color."""
+        rows, cols = len(grid), len(grid[0])
+        gaps = []
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] != bg_val:
+                    continue
+                neighbors = []
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        neighbors.append(grid[nr][nc])
+                    else:
+                        neighbors.append(bg_val)
+                non_bg_neighbors = [n for n in neighbors if n != bg_val]
+                if len(non_bg_neighbors) >= 3:
+                    gaps.append((r, c))
+        return gaps
+
+    def apply_drop(grid, bg_val=bg, dc=drop_color):
+        rows, cols = len(grid), len(grid[0])
+        result = [row[:] for row in grid]
+        gaps = find_gaps(grid, bg_val)
+        for gr, gc in gaps:
+            # Drop to the last row
+            result[rows - 1][gc] = dc
+        return result
+
+    if all(apply_drop(ex["input"]) == ex["input"] for ex in train):
+        return None
+    if all(apply_drop(ex["input"]) == ex["output"] for ex in train):
+        return apply_drop
+    return None
