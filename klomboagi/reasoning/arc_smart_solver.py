@@ -212,29 +212,70 @@ class SmartARCSolverV2(SmartARCSolver):
 
         # Order: fast → slow, specific → general
         # LOO=True only for pattern_match which is prone to overfitting
-        learners = [
-            (learn_cell_rule, False),        # Per-cell rules (fast, precise)
-            (learn_span_fill_rule, False),   # Fill row/col span of each color
-            (learn_color_key_swap, False),   # 2×2 color key swap
-            (learn_template_row_stamp, False), # Template row stamp at marker rows
-            (learn_grid_gap_fill, False),    # Fill gaps in block grid
-            (learn_single_cell_paint, False), # Single cell → row or col paint
-            (learn_region_rule, False),       # Region filling (high value)
-            (learn_context_rule, False),      # Context-based (Voronoi, border/interior)
-            (learn_ranking_rule, False),      # Ranking by height, diagonal tile, stamp
-            (learn_legend_rule, False),       # Color legend/key mapping
-            (learn_compose_rule, False),      # Compositional (remove color, mask, filter+crop)
-            (learn_gravity_rule, False),      # Gravity/movement
-            (learn_tiling_rule, False),       # Tiling/scaling
-            (learn_object_rule, False),       # Object-level rules
-            (learn_multiobj_rule, False),     # Multi-object/composition rules
-            (learn_extraction_rule, False),   # Sub-region extraction
-            (learn_grid_rule, False),         # Grid split/combine
-            (learn_advanced_rule, False),     # Symmetry, propagate, etc.
-            (learn_pattern_rule, True),       # Pattern match (can overfit → LOO)
+        #
+        # Family name mapping for classifier-guided reordering
+        family_learner_map = {
+            "cell_rule": (learn_cell_rule, False),
+            "region": (learn_region_rule, False),
+            "context": (learn_context_rule, False),
+            "ranking": (learn_ranking_rule, False),
+            "legend": (learn_legend_rule, False),
+            "compose": (learn_compose_rule, False),
+            "gravity": (learn_gravity_rule, False),
+            "tiling": (learn_tiling_rule, False),
+            "object_rule": (learn_object_rule, False),
+            "multiobj": (learn_multiobj_rule, False),
+            "extraction": (learn_extraction_rule, False),
+            "grid_ops": (learn_grid_rule, False),
+            "advanced": (learn_advanced_rule, False),
+            "pattern": (learn_pattern_rule, True),
+        }
+
+        default_order = [
+            "cell_rule", "region", "context", "ranking", "legend",
+            "compose", "gravity", "tiling", "object_rule", "multiobj",
+            "extraction", "grid_ops", "advanced", "pattern",
         ]
 
-        for learn_fn, loo in learners:
+        # ── Classifier-guided reordering ──
+        # If classifier predicts a specific family, try it first
+        try:
+            from klomboagi.reasoning.arc_classifier import predict_family_proba
+            ranked = predict_family_proba(train)
+            if ranked:
+                # Get top predicted families (non-"none", probability > 0.1)
+                priority = [fam for fam, prob in ranked
+                            if fam != "none" and fam in family_learner_map
+                            and prob > 0.1]
+                if priority:
+                    # Reorder: priority families first, then rest in default order
+                    rest = [f for f in default_order if f not in priority]
+                    ordered = priority + rest
+                else:
+                    ordered = default_order
+            else:
+                ordered = default_order
+        except Exception:
+            ordered = default_order
+
+        # Also include span_fill variants in the loop
+        extra_learners = [
+            (learn_span_fill_rule, False),
+            (learn_color_key_swap, False),
+            (learn_template_row_stamp, False),
+            (learn_grid_gap_fill, False),
+            (learn_single_cell_paint, False),
+        ]
+
+        # Try extra learners first (fast, specific)
+        for learn_fn, loo in extra_learners:
+            result = self._try_learner(learn_fn, train, test_input, loo=loo)
+            if result is not None:
+                return result
+
+        # Try classifier-ordered families
+        for family in ordered:
+            learn_fn, loo = family_learner_map[family]
             result = self._try_learner(learn_fn, train, test_input, loo=loo)
             if result is not None:
                 return result
