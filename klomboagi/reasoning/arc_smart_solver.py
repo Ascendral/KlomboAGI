@@ -428,6 +428,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_shape_cross_pattern,
             self._try_original_then_vflip,
             self._try_dedup_horiz_tile,
+            self._try_fill_border_8,
+            self._try_lower_to_upper_triangle,
+            self._try_extract_symmetric_shape,
         ]
         for s in v2:
             try:
@@ -7129,6 +7132,85 @@ class SmartARCSolverV2(SmartARCSolver):
             if pr is not None and pr < len(grid):
                 return grid[:pr]
             return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_fill_border_8(self, train, test_input):
+        """All-zero input → output with border cells = 8, interior = 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if any(grid[r][c] != 0 for r in range(rows) for c in range(cols)):
+                return None
+            out = [[0]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    if r == 0 or r == rows-1 or c == 0 or c == cols-1:
+                        out[r][c] = 8
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_lower_to_upper_triangle(self, train, test_input):
+        """Grid with diagonal of identical values; transpose lower triangle into upper, zero lower."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows != cols:
+                return None
+            n = rows
+            # Detect diagonal value (must be same on all diagonal cells)
+            diag_vals = [grid[i][i] for i in range(n)]
+            if len(set(diag_vals)) != 1:
+                return None
+            # Upper triangle should be all 0 in input
+            if any(grid[r][c] != 0 for r in range(n) for c in range(r+1, n)):
+                return None
+            out = [[0]*n for _ in range(n)]
+            for i in range(n):
+                out[i][i] = diag_vals[0]
+            # Transpose lower to upper: out[r][c] = grid[c][r] for r < c
+            for r in range(n):
+                for c in range(r+1, n):
+                    out[r][c] = grid[c][r]
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_extract_symmetric_shape(self, train, test_input):
+        """Grid has multiple non-zero shapes; output is the bounding-box of the
+        horizontally symmetric (left-right) shape."""
+        def get_color_bboxes(grid):
+            rows, cols = len(grid), len(grid[0])
+            from collections import defaultdict
+            color_cells = defaultdict(list)
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        color_cells[grid[r][c]].append((r, c))
+            bboxes = {}
+            for color, cells in color_cells.items():
+                min_r = min(r for r,c in cells)
+                max_r = max(r for r,c in cells)
+                min_c = min(c for r,c in cells)
+                max_c = max(c for r,c in cells)
+                sub = [grid[r][min_c:max_c+1] for r in range(min_r, max_r+1)]
+                bboxes[color] = sub
+            return bboxes
+        def is_h_symmetric(sub):
+            return all(row == row[::-1] for row in sub)
+        def apply_rule(grid):
+            bboxes = get_color_bboxes(grid)
+            if len(bboxes) < 2:
+                return None
+            sym_shapes = [(color, sub) for color, sub in bboxes.items() if is_h_symmetric(sub)]
+            if len(sym_shapes) != 1:
+                return None
+            return sym_shapes[0][1]
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
