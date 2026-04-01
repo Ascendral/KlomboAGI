@@ -46,4 +46,14 @@ class LearningPhase(Phase):
             except Exception:
                 pass
 
+        # Global inference — derive new beliefs from existing ones
+        # Runs after teaches (when new facts are added) and periodically
+        if ctx.intent.get("type") == "teach" or g.total_turns % 5 == 0:
+            try:
+                derived = g.inference_engine.run(max_derivations=50)
+                if derived:
+                    g.belief_index.build(g.base._beliefs)
+            except Exception:
+                pass
+
         return ctx

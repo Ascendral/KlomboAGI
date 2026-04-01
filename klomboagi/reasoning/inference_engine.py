@@ -38,11 +38,18 @@ class GlobalInferenceEngine:
         derived = []
         seen = set(self.beliefs.keys())
 
+        def strip_article(s: str) -> str:
+            s = s.strip()
+            for art in ("a ", "an ", "the "):
+                if s.startswith(art):
+                    return s[len(art):]
+            return s
+
         # Build subject→predicate index for fast lookup
         by_subject: dict[str, list[tuple[str, object]]] = {}
         for stmt, belief in self.beliefs.items():
             if hasattr(belief, 'subject') and belief.subject:
-                subj = belief.subject.lower()
+                subj = belief.subject.lower().strip()
                 if subj not in by_subject:
                     by_subject[subj] = []
                 by_subject[subj].append((stmt, belief))
@@ -52,7 +59,10 @@ class GlobalInferenceEngine:
             for stmt1, b1 in beliefs_list:
                 if not hasattr(b1, 'predicate') or not b1.predicate:
                     continue
-                pred1 = b1.predicate.lower()
+                # Strip articles from predicate for lookup
+                # "a mammal" → "mammal" so it matches subject "mammal"
+                pred1_raw = b1.predicate.lower()
+                pred1 = strip_article(pred1_raw)
 
                 # Does the predicate appear as a subject somewhere?
                 if pred1 in by_subject:

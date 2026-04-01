@@ -629,11 +629,15 @@ class Genesis:
             return True
 
         # Graph-based: check if both predicates share a parent category
+        # BUT NOT if one is a parent of the other (that's refinement, not conflict)
         old_concept = self.base.graph.get(old_clean)
         new_concept = self.base.graph.get(new_clean)
         if old_concept and new_concept:
             old_parents = set(old_concept.is_a)
             new_parents = set(new_concept.is_a)
+            # Skip if one IS the parent of the other (refinement, not conflict)
+            if old_clean in new_parents or new_clean in old_parents:
+                return False
             shared = old_parents & new_parents
             if shared and old_clean != new_clean:
                 return True
@@ -2565,7 +2569,13 @@ class Genesis:
         # Build belief index for fast lookup
         self.belief_index.build(self.base._beliefs)
 
-        # Save immediately so boot knowledge persists
+        # Run global inference on boot knowledge — derive transitive chains
+        # "dog is mammal" + "mammal is animal" → "dog is animal"
+        derived = self.inference_engine.run(max_derivations=200)
+        if derived:
+            self.belief_index.build(self.base._beliefs)
+
+        # Save immediately so boot knowledge + derivations persist
         self.base.memory.save(self.base.memory_path)
         self.save_state()
 
