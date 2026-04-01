@@ -441,9 +441,8 @@ class Genesis:
         # Load saved state if it exists
         self.load_state()
 
-        # Boot knowledge — seed foundational categories if brain is empty
-        if len(self.base._beliefs) == 0:
-            self._seed_boot_knowledge()
+        # Boot knowledge — always ensure foundational categories exist
+        self._seed_boot_knowledge()
 
     def _init_cognition_loop(self) -> None:
         """Wire the CognitionLoop with a lightweight mock storage."""
