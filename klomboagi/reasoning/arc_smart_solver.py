@@ -386,6 +386,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_odd_patch_out,
             self._try_middle_col_only,
             self._try_bar_bottom_half_to_8,
+            self._try_color_stripe_list,
         ]
         for s in v2:
             try:
@@ -5944,6 +5945,39 @@ class SmartARCSolverV2(SmartARCSolver):
         for ex in train:
             if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
                 return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_color_stripe_list(self, train, test_input):
+        """Diagonal or horizontal color stripes → output 1xN row or Nx1 column listing colors in order."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find distinct colors (all non-zero values)
+            colors_seen = []
+            seen_set = set()
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != 0 and v not in seen_set:
+                        colors_seen.append(v)
+                        seen_set.add(v)
+            if len(colors_seen) < 2:
+                return None
+            # Determine orientation: if first row has multiple colors → horizontal stripes → row output
+            # if first row is all one color → diagonal/mixed → column output
+            first_row_colors = set(grid[0])
+            if len(first_row_colors) > 1:
+                # Multiple colors in first row → left-to-right order (already in colors_seen order)
+                # Output: 1 x N row
+                return [list(colors_seen)]
+            else:
+                # Horizontal bands → top-to-bottom (colors_seen is already in top-to-bottom order)
+                # Output: N x 1 column
+                return [[c] for c in colors_seen]
+
+        for ex in train:
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
                 return None
