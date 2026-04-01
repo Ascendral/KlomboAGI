@@ -402,6 +402,11 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_row_tile_mirror_tile,
             self._try_rev_row_block_mirror_tile,
             self._try_dominant_band_color,
+            self._try_pair_bbox_fill,
+            self._try_rect_interior_fill2,
+            self._try_fill_bbox_holes_7,
+            self._try_grid_split_unique_quadrant,
+            self._try_swap_colors_per_shape,
         ]
         for s in v2:
             try:
@@ -6327,5 +6332,164 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_pair_bbox_fill(self, train, test_input):
+        """Two cells of same non-zero color define a bounding rectangle; fill it with that color."""
+        from collections import defaultdict
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            cp = defaultdict(list)
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        cp[grid[r][c]].append((r, c))
+            if not cp or any(len(v) != 2 for v in cp.values()):
+                return None
+            out = [[0]*cols for _ in range(rows)]
+            for color, [(r1,c1),(r2,c2)] in cp.items():
+                for r in range(min(r1,r2), max(r1,r2)+1):
+                    for c in range(min(c1,c2), max(c1,c2)+1):
+                        out[r][c] = color
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_rect_interior_fill2(self, train, test_input):
+        """Solid rectangles of non-zero cells: interior (non-border-row/col) cells become 2."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r,c in comp)
+                        max_r = max(r for r,c in comp)
+                        min_c = min(c for r,c in comp)
+                        max_c = max(c for r,c in comp)
+                        for r, c in comp:
+                            if r != min_r and r != max_r and c != min_c and c != max_c:
+                                out[r][c] = 2
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_fill_bbox_holes_7(self, train, test_input):
+        """Shapes of non-zero color (8-connected): 0-cells within bounding box become 7."""
+        from collections import deque
+        DIRS8 = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in DIRS8:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r,c in comp)
+                        max_r = max(r for r,c in comp)
+                        min_c = min(c for r,c in comp)
+                        max_c = max(c for r,c in comp)
+                        for r in range(min_r, max_r+1):
+                            for c in range(min_c, max_c+1):
+                                if grid[r][c] == 0:
+                                    out[r][c] = 7
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_grid_split_unique_quadrant(self, train, test_input):
+        """Grid divided by a row+col of separator color; output is the quadrant with unique non-bg cell."""
+        from collections import Counter
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows) if len(set(grid[r])) == 1 and grid[r][0] != 0]
+            sep_cols = [c for c in range(cols)
+                        if len(set(grid[r][c] for r in range(rows))) == 1 and grid[0][c] != 0]
+            if not sep_rows or not sep_cols:
+                return None
+            sep_r = sep_rows[0]
+            sep_c = sep_cols[0]
+            sep_color = grid[sep_r][sep_c]
+            all_vals = [grid[r][c] for r in range(rows) for c in range(cols) if grid[r][c] != sep_color]
+            if not all_vals: return None
+            bg = Counter(all_vals).most_common(1)[0][0]
+            q_rows = [list(range(0, sep_r)), list(range(sep_r+1, rows))]
+            q_cols = [list(range(0, sep_c)), list(range(sep_c+1, cols))]
+            for rrange in q_rows:
+                for crange in q_cols:
+                    if not rrange or not crange: continue
+                    has_unique = any(grid[r][c] != bg and grid[r][c] != sep_color
+                                     for r in rrange for c in crange)
+                    if has_unique:
+                        return [[grid[r][c] for c in crange] for r in rrange]
+            return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_swap_colors_per_shape(self, train, test_input):
+        """Each connected shape (4-conn non-zero) has exactly 2 colors; swap them."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] != 0:
+                                    q.append((nr, nc))
+                        colors = set(grid[r][c] for r, c in comp)
+                        if len(colors) != 2:
+                            return None
+                        c1, c2 = tuple(colors)
+                        for r, c in comp:
+                            out[r][c] = c2 if grid[r][c] == c1 else c1
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
                 return None
         return apply_rule(test_input)
