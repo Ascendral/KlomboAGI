@@ -67,6 +67,21 @@ class KlomboHandler(BaseHTTPRequestHandler):
         genesis = self.server.genesis
 
         try:
+            # Serve dashboard
+            if self.path in ("/", "/index.html"):
+                import os
+                static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+                html_path = os.path.join(static_dir, "index.html")
+                if os.path.exists(html_path):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    with open(html_path, "rb") as f:
+                        self.wfile.write(f.read())
+                    return
+                self._send_json({"error": "Dashboard not found"}, 404)
+                return
+
             if self.path == "/health":
                 obs = self.server.observer
                 obs_data = obs.get_summary() if obs else {}

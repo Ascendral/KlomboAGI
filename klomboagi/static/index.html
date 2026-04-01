@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KlomboAGI</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; min-height: 100vh; }
+.container { max-width: 900px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 24px; font-weight: 600; color: #00ff88; margin-bottom: 4px; }
+.subtitle { color: #666; font-size: 13px; margin-bottom: 20px; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.card { background: #12121a; border: 1px solid #1e1e2e; border-radius: 10px; padding: 14px; }
+.card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 8px; }
+.metric { font-size: 28px; font-weight: 700; color: #fff; }
+.metric-small { font-size: 14px; color: #888; margin-top: 2px; }
+.metric.green { color: #00ff88; }
+.metric.yellow { color: #ffaa00; }
+.metric.red { color: #ff4444; }
+
+.bar { height: 6px; background: #1e1e2e; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
+.bar-fill.green { background: #00ff88; }
+.bar-fill.yellow { background: #ffaa00; }
+.bar-fill.red { background: #ff4444; }
+
+.chat { background: #12121a; border: 1px solid #1e1e2e; border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+.chat h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 10px; }
+#messages { max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+.msg { margin-bottom: 8px; line-height: 1.4; }
+.msg.you { color: #888; }
+.msg.you span { color: #00aaff; }
+.msg.klombo { color: #e0e0e0; }
+.msg.klombo span { color: #00ff88; }
+.chat-input { display: flex; gap: 8px; }
+.chat-input input { flex: 1; background: #0a0a0f; border: 1px solid #2a2a3a; border-radius: 6px; padding: 10px 12px; color: #fff; font-size: 14px; outline: none; }
+.chat-input input:focus { border-color: #00ff88; }
+.chat-input button { background: #00ff88; color: #000; border: none; border-radius: 6px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
+.chat-input button:hover { background: #00cc6a; }
+
+.beliefs { background: #12121a; border: 1px solid #1e1e2e; border-radius: 10px; padding: 14px; }
+.beliefs h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #666; margin-bottom: 10px; }
+.belief { font-size: 13px; color: #aaa; padding: 4px 0; border-bottom: 1px solid #1a1a25; }
+.belief:last-child { border-bottom: none; }
+
+.anomaly { font-size: 13px; padding: 6px 8px; border-radius: 4px; margin-bottom: 4px; }
+.anomaly.warning { background: #332200; color: #ffaa00; }
+.anomaly.critical { background: #330000; color: #ff4444; }
+.anomaly.info { background: #002233; color: #00aaff; }
+
+@media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>KlomboAGI</h1>
+  <div class="subtitle" id="host-info">Connecting...</div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>CPU</h3>
+      <div class="metric" id="cpu">--</div>
+      <div class="bar"><div class="bar-fill green" id="cpu-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <h3>RAM</h3>
+      <div class="metric" id="ram">--</div>
+      <div class="metric-small" id="ram-detail"></div>
+      <div class="bar"><div class="bar-fill green" id="ram-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <h3>Brain</h3>
+      <div class="metric green" id="turns">0</div>
+      <div class="metric-small" id="brain-detail">turns</div>
+    </div>
+    <div class="card">
+      <h3>Beliefs</h3>
+      <div class="metric" id="belief-count">0</div>
+      <div class="metric-small" id="topic">idle</div>
+    </div>
+  </div>
+
+  <div id="anomaly-box"></div>
+
+  <div class="chat">
+    <h3>Talk to Klombo</h3>
+    <div id="messages"></div>
+    <div class="chat-input">
+      <input type="text" id="input" placeholder="Type something..." autofocus>
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <div class="beliefs">
+    <h3>Recent Beliefs</h3>
+    <div id="belief-list"></div>
+  </div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+
+function colorClass(pct) { return pct > 90 ? 'red' : pct > 70 ? 'yellow' : 'green'; }
+
+async function refresh() {
+  try {
+    const h = await (await fetch(BASE + '/health')).json();
+    const hw = await (await fetch(BASE + '/hardware')).json();
+    const obs = await (await fetch(BASE + '/observe')).json();
+    const b = await (await fetch(BASE + '/beliefs')).json();
+
+    document.getElementById('host-info').textContent =
+      hw.cpu.model + ' | ' + hw.ram.total_gb + 'GB RAM | Uptime: ' + Math.round(h.uptime_seconds/60) + 'm';
+
+    const cpu = obs.current?.cpu_percent || 0;
+    const ram = obs.current?.ram_percent || 0;
+    document.getElementById('cpu').textContent = cpu + '%';
+    document.getElementById('cpu').className = 'metric ' + colorClass(cpu);
+    document.getElementById('cpu-bar').style.width = cpu + '%';
+    document.getElementById('cpu-bar').className = 'bar-fill ' + colorClass(cpu);
+
+    document.getElementById('ram').textContent = ram + '%';
+    document.getElementById('ram').className = 'metric ' + colorClass(ram);
+    document.getElementById('ram-detail').textContent = (obs.current?.ram_available_gb || 0) + 'GB free';
+    document.getElementById('ram-bar').style.width = ram + '%';
+    document.getElementById('ram-bar').className = 'bar-fill ' + colorClass(ram);
+
+    document.getElementById('turns').textContent = h.total_turns;
+    document.getElementById('belief-count').textContent = b.count;
+
+    // Anomalies
+    const abox = document.getElementById('anomaly-box');
+    abox.innerHTML = '';
+    for (const a of (obs.anomalies || [])) {
+      const d = document.createElement('div');
+      d.className = 'anomaly ' + a.severity;
+      d.textContent = a.message;
+      abox.appendChild(d);
+    }
+
+    // Beliefs
+    const blist = document.getElementById('belief-list');
+    blist.innerHTML = '';
+    for (const bl of b.beliefs.slice(0, 15)) {
+      const d = document.createElement('div');
+      d.className = 'belief';
+      d.textContent = bl.statement;
+      blist.appendChild(d);
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function send() {
+  const input = document.getElementById('input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+
+  const messages = document.getElementById('messages');
+  messages.innerHTML += '<div class="msg you"><span>you:</span> ' + escapeHtml(msg) + '</div>';
+  messages.scrollTop = messages.scrollHeight;
+
+  try {
+    const r = await fetch(BASE + '/hear', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    const data = await r.json();
+    messages.innerHTML += '<div class="msg klombo"><span>klombo:</span> ' + escapeHtml(data.response) + '</div>';
+    messages.scrollTop = messages.scrollHeight;
+    document.getElementById('turns').textContent = data.turn;
+    if (data.topic) document.getElementById('topic').textContent = 'topic: ' + data.topic;
+  } catch(e) {
+    messages.innerHTML += '<div class="msg klombo" style="color:#ff4444">Error: ' + e.message + '</div>';
+  }
+}
+
+function escapeHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+
+document.getElementById('input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

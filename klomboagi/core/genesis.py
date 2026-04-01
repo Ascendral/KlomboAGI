@@ -198,8 +198,18 @@ class Genesis:
     - Proactive curiosity (system asks what it wants to know)
     """
 
-    def __init__(self, memory_path: str = "/tmp/klomboagi_genesis.json",
+    def __init__(self, memory_path: str | None = None,
                  storage=None) -> None:
+        if memory_path is None:
+            # Use persistent path: KLOMBOAGI_HOME/brain.json or fallback to /tmp
+            import os
+            home = os.environ.get("KLOMBOAGI_HOME", "")
+            if home and os.path.isdir(home):
+                memory_path = os.path.join(home, "brain.json")
+            elif os.path.isdir("/opt/klomboagi/data"):
+                memory_path = "/opt/klomboagi/data/brain.json"
+            else:
+                memory_path = "/tmp/klomboagi_genesis.json"
         # Base conversation system — already handles teaching, questions, commands
         self.base = Baby(memory_path=memory_path)
 
@@ -795,6 +805,20 @@ class Genesis:
         if any(p in q_lower for p in hardware_patterns):
             hw = self.scan_hardware()
             return hw.summary()
+
+        # System observation: "how's the system", "any anomalies", "what do you see"
+        observe_patterns = ("how's the system", "hows the system", "system health",
+                           "any anomalies", "any problems", "what do you see",
+                           "what do you notice", "anything wrong",
+                           "how are things", "how is everything",
+                           "what's happening", "whats happening")
+        if any(p in q_lower for p in observe_patterns):
+            return self._system_observation_report()
+
+        # System commands through natural language
+        action_result = self._try_system_action(q_lower, query)
+        if action_result is not None:
+            return action_result
 
         # Personal/opinion questions — "favorite color?", "what do you prefer?"
         opinion_words = ("favorite", "favourite", "prefer", "like better",
@@ -2511,6 +2535,109 @@ class Genesis:
         """Force a fresh hardware scan."""
         self._hardware_state = self.hardware.scan()
         return self._hardware_state
+
+    # ── System Awareness ──
+
+    def _system_observation_report(self) -> str:
+        """Report on what the system observer has noticed."""
+        try:
+            from klomboagi.senses.system_observer import SystemObserver
+            obs = SystemObserver()
+            snap = obs.take_snapshot()
+
+            lines = []
+            lines.append(f"CPU: {snap.cpu_percent:.0f}% | RAM: {snap.ram_percent:.0f}% "
+                        f"({snap.ram_available_gb:.1f}GB free) | Disk: {snap.disk_percent:.0f}%")
+            lines.append(f"Processes: {snap.process_count} running")
+            if snap.top_process:
+                lines.append(f"Top process: {snap.top_process} ({snap.top_process_cpu:.0f}% CPU)")
+
+            # Check for issues
+            issues = []
+            if snap.cpu_percent > 80:
+                issues.append(f"High CPU ({snap.cpu_percent:.0f}%)")
+            if snap.ram_percent > 85:
+                issues.append(f"High RAM ({snap.ram_percent:.0f}%)")
+            if snap.disk_percent > 90:
+                issues.append(f"Disk almost full ({snap.disk_percent:.0f}%)")
+
+            if issues:
+                lines.append(f"\nIssues: {', '.join(issues)}")
+            else:
+                lines.append("\nNo issues detected. System is healthy.")
+
+            return "\n".join(lines)
+        except Exception:
+            return "I can't check the system right now."
+
+    def _try_system_action(self, q_lower: str, original: str) -> str | None:
+        """Try to handle natural language system commands.
+
+        Returns a response string if handled, None if not a system command.
+        """
+        import re
+
+        # "open X" — launch an app
+        open_match = re.match(r"(?:open|launch|start|run)\s+(.+)", q_lower)
+        if open_match:
+            app = open_match.group(1).strip().rstrip("?.")
+            try:
+                from klomboagi.senses.system_control import SystemControl
+                ctrl = SystemControl()
+                result = ctrl.open_app(app)
+                if result.allowed and result.returncode == 0:
+                    return f"Opened {app}."
+                else:
+                    return f"Couldn't open {app}: {result.stderr or result.blocked_reason}"
+            except Exception as e:
+                return f"Error: {e}"
+
+        # "kill/stop process X" or "kill PID"
+        kill_match = re.match(r"(?:kill|stop|end)\s+(?:process\s+)?(\S+)", q_lower)
+        if kill_match:
+            target = kill_match.group(1)
+            try:
+                pid = int(target)
+                from klomboagi.senses.system_control import SystemControl
+                ctrl = SystemControl()
+                result = ctrl.kill_process(pid)
+                return result.stdout or result.stderr
+            except ValueError:
+                return f"To kill a process, give me the PID number. Use 'what processes are running' to see them."
+
+        # "what processes" / "what's running" / "top processes"
+        proc_patterns = ("what processes", "what's running", "whats running",
+                        "top processes", "show processes", "list processes",
+                        "what is using", "what's using")
+        if any(p in q_lower for p in proc_patterns):
+            try:
+                from klomboagi.senses.system_control import SystemControl
+                ctrl = SystemControl()
+                procs = ctrl.list_processes()[:10]
+                lines = ["Top processes by CPU:"]
+                for p in procs:
+                    lines.append(f"  {p['name']:20s} PID {p['pid']:>7}  CPU {p['cpu']:>5.1f}%  MEM {p['mem']:>5.1f}%")
+                return "\n".join(lines)
+            except Exception:
+                return "Couldn't list processes."
+
+        # "check network" / "am i online" / "network status"
+        net_patterns = ("check network", "am i online", "network status",
+                       "internet connection", "wifi status", "is the network")
+        if any(p in q_lower for p in net_patterns):
+            try:
+                from klomboagi.senses.system_control import SystemControl
+                ctrl = SystemControl()
+                status = ctrl.network_status()
+                if status["connected"]:
+                    ifaces = ", ".join(f"{k}: {v}" for k, v in status["interfaces"].items())
+                    return f"Online. Interfaces: {ifaces}"
+                else:
+                    return "No internet connection detected."
+            except Exception:
+                return "Couldn't check network."
+
+        return None
 
     # ── Mission Execution (Bridge to RuntimeLoop) ──
 
