@@ -445,6 +445,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_recolor_8_blobs_by_palette,
             self._try_cross_and_diagonals,
             self._try_flow_to_wall,
+            self._try_row_bars_with_zone_borders,
         ]
         for s in v2:
             try:
@@ -7482,6 +7483,62 @@ class SmartARCSolverV2(SmartARCSolver):
                 if all(others[0] == o for o in others) and q[i] != others[0]:
                     return q[i]
             return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_row_bars_with_zone_borders(self, train, test_input):
+        """Grid of zeros with single non-zero cells defining 'bar' rows.
+        Each bar row fills entirely. Non-bar rows get left/right borders colored
+        by nearest bar (nearest = smaller distance, ties to upper).
+        First and last rows always become full bars of first/last bar color."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find bar rows: rows with exactly one non-zero cell anywhere
+            bar_rows = []
+            for r in range(rows):
+                nz = [(c, grid[r][c]) for c in range(cols) if grid[r][c] != 0]
+                if len(nz) == 1:
+                    bar_rows.append((r, nz[0][1]))
+                elif len(nz) > 1:
+                    return None  # multiple non-zero cells in a row
+            if len(bar_rows) < 2:
+                return None
+            bar_rows.sort()
+            out = [[0]*cols for _ in range(rows)]
+            # Set bar rows
+            for r, v in bar_rows:
+                out[r] = [v] * cols
+            # Set first and last rows as full bars
+            out[0] = [bar_rows[0][1]] * cols
+            out[rows-1] = [bar_rows[-1][1]] * cols
+            # Zone assignment: for each non-bar row, find zone color
+            bar_positions = [r for r, v in bar_rows]
+            bar_colors = {r: v for r, v in bar_rows}
+            for r in range(rows):
+                # skip bar rows and first/last
+                if r == 0 or r == rows-1 or r in bar_colors:
+                    continue
+                # Find zone: which bar interval contains r
+                zone_color = None
+                if r < bar_positions[0]:
+                    zone_color = bar_rows[0][1]
+                elif r > bar_positions[-1]:
+                    zone_color = bar_rows[-1][1]
+                else:
+                    for i in range(len(bar_rows)-1):
+                        ri, ci = bar_rows[i]
+                        ri1, ci1 = bar_rows[i+1]
+                        if ri < r < ri1:
+                            mid = (ri + ri1) // 2
+                            zone_color = ci if r <= mid else ci1
+                            break
+                if zone_color is None:
+                    return None
+                out[r][0] = zone_color
+                out[r][cols-1] = zone_color
+            return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
