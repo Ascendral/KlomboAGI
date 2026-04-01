@@ -179,19 +179,65 @@ echo
 # Check if it's running
 if curl -s http://localhost:3141/health | grep -q "alive" 2>/dev/null; then
     echo -e "  Status:  ${GREEN}RUNNING${NC}"
-    echo -e "\n${GREEN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║  KlomboAGI is alive on port 3141         ║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
-    echo
-    echo "  Talk to it:  curl -X POST http://localhost:3141/hear -d '{\"message\": \"hello\"}'"
-    echo "  Status:      curl http://localhost:3141/status"
-    echo "  Hardware:    curl http://localhost:3141/hardware"
-    echo "  Health:      curl http://localhost:3141/health"
-    echo
-    echo "  Logs:        tail -f ${INSTALL_DIR}/logs/stdout.log"
-    echo "  Stop:        launchctl unload ${PLIST_DST}"
-    echo "  Uninstall:   ${REPO_DIR}/deploy/install.sh --uninstall"
 else
     echo -e "  Status:  ${YELLOW}Starting... (check logs)${NC}"
-    echo "  Logs:    tail -f ${INSTALL_DIR}/logs/stderr.log"
 fi
+
+# ── Install menu bar app ──
+MENUBAR_PLIST="$HOME/Library/LaunchAgents/com.klomboagi.menubar.plist"
+echo -e "\n${YELLOW}Installing menu bar app...${NC}"
+
+launchctl unload "$MENUBAR_PLIST" 2>/dev/null || true
+
+cat > "$MENUBAR_PLIST" << MBEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.klomboagi.menubar</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${PYTHON_PATH}</string>
+        <string>-m</string>
+        <string>klomboagi</string>
+        <string>menubar</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${INSTALL_DIR}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${INSTALL_DIR}/logs/menubar_stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>${INSTALL_DIR}/logs/menubar_stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>${INSTALL_DIR}</string>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
+MBEOF
+
+launchctl load "$MENUBAR_PLIST"
+echo -e "  Menu bar: ${GREEN}installed${NC}"
+
+# ── Open dashboard ──
+sleep 2
+open "http://localhost:3141" 2>/dev/null || true
+
+echo -e "\n${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║  KlomboAGI is alive                      ║${NC}"
+echo -e "${GREEN}║  🧠 Menu bar icon active                  ║${NC}"
+echo -e "${GREEN}║  🌐 Dashboard: http://localhost:3141       ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo
+echo "  Chat:        python3 -m klomboagi chat"
+echo "  Dashboard:   http://localhost:3141"
+echo "  Logs:        tail -f ${INSTALL_DIR}/logs/stdout.log"
+echo "  Uninstall:   ${REPO_DIR}/deploy/install.sh --uninstall"

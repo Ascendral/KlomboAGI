@@ -30,6 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser = sub.add_parser("chat", help="Talk to KlomboAGI")
     chat_parser.add_argument("--port", type=int, default=3141, help="Server port")
 
+    sub.add_parser("menubar", help="Run menu bar app")
+
     daemon_parser = sub.add_parser("daemon")
     daemon_sub = daemon_parser.add_subparsers(dest="daemon_command", required=True)
     daemon_sub.add_parser("start")
@@ -103,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "chat":
         from klomboagi.interfaces.chat import chat
         chat(port=args.port)
+        return 0
+    elif args.command == "menubar":
+        from klomboagi.interfaces.menubar import run_menubar
+        run_menubar()
         return 0
     elif args.command == "serve":
         from klomboagi.core.genesis import Genesis
