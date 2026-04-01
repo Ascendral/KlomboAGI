@@ -435,6 +435,12 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_mirror_top_rows_to_bottom,
             self._try_color_col_diagonal_and_bottom,
             self._try_dedup_consecutive_rows_cols,
+            self._try_split_insert_9_sep,
+            self._try_extend_row_adding_one,
+            self._try_nor_top_bottom_half,
+            self._try_or_left_right_half,
+            self._try_extract_diamond_5x5,
+            self._try_unique_quadrant,
         ]
         for s in v2:
             try:
@@ -7341,6 +7347,137 @@ class SmartARCSolverV2(SmartARCSolver):
             if g == grid:
                 return None
             return g
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_split_insert_9_sep(self, train, test_input):
+        """Split input at midrow. Output: top rows + right-9-col, separator row of 9s,
+        bottom rows + left-9-col. Output size (H+1)x(W+1)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows % 2 != 0:
+                return None
+            mid = rows // 2
+            top = [list(row) + [9] for row in grid[:mid]]
+            sep = [9] * (cols + 1)
+            bot = [[9] + list(row) for row in grid[mid:]]
+            return top + [sep] + bot
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_extend_row_adding_one(self, train, test_input):
+        """1-row input: N non-zeros then zeros. Output K = cols//2 rows, each adding 1 more non-zero."""
+        def apply_rule(grid):
+            if len(grid) != 1:
+                return None
+            row = grid[0]
+            cols = len(row)
+            # Count initial non-zeros
+            n = 0
+            val = row[0]
+            while n < cols and row[n] != 0:
+                n += 1
+            if n == 0:
+                return None
+            val = row[0]
+            k = cols // 2
+            out = []
+            for i in range(k):
+                filled = n + i
+                out.append([val] * min(filled, cols) + [0] * max(0, cols - filled))
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_nor_top_bottom_half(self, train, test_input):
+        """Stack of 2 identical-height patterns (no separator). Output 2 at positions
+        where BOTH halves are 0, else 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows % 2 != 0:
+                return None
+            half = rows // 2
+            top = [grid[r] for r in range(half)]
+            bot = [grid[r] for r in range(half, rows)]
+            out = []
+            for r in range(half):
+                row = []
+                for c in range(cols):
+                    row.append(2 if top[r][c] == 0 and bot[r][c] == 0 else 0)
+                out.append(row)
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_or_left_right_half(self, train, test_input):
+        """Side-by-side two identical-width patterns. Output 6 at positions where
+        at least one half is non-zero, else 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if cols % 2 != 0:
+                return None
+            half = cols // 2
+            out = []
+            for r in range(rows):
+                row = []
+                for c in range(half):
+                    row.append(6 if grid[r][c] != 0 or grid[r][c + half] != 0 else 0)
+                out.append(row)
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_extract_diamond_5x5(self, train, test_input):
+        """5x5 grid with values on main diagonal and anti-diagonal. Extract to 3x3."""
+        def apply_rule(grid):
+            if len(grid) != 5 or len(grid[0]) != 5:
+                return None
+            return [
+                [grid[0][0], grid[1][1], grid[0][4]],
+                [grid[1][3], grid[2][2], grid[3][1]],
+                [grid[4][0], grid[3][3], grid[4][4]]
+            ]
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_unique_quadrant(self, train, test_input):
+        """5x5 grid with zero separator row and col. Find the unique 2x2 quadrant
+        (differs from the other three) and return it."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find zero row and zero col separators
+            sep_rows = [r for r in range(rows) if all(grid[r][c] == 0 for c in range(cols))]
+            sep_cols = [c for c in range(cols) if all(grid[r][c] == 0 for r in range(rows))]
+            if len(sep_rows) != 1 or len(sep_cols) != 1:
+                return None
+            sr, sc = sep_rows[0], sep_cols[0]
+            # Extract 4 quadrants
+            def quad(r_range, c_range):
+                return [grid[r][c_range.start:c_range.stop] for r in r_range]
+            q = [
+                quad(range(0, sr), range(0, sc)),
+                quad(range(0, sr), range(sc+1, cols)),
+                quad(range(sr+1, rows), range(0, sc)),
+                quad(range(sr+1, rows), range(sc+1, cols))
+            ]
+            # Find the unique quadrant
+            for i in range(4):
+                others = [q[j] for j in range(4) if j != i]
+                if all(others[0] == o for o in others) and q[i] != others[0]:
+                    return q[i]
+            return None
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
