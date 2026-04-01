@@ -32,11 +32,12 @@ class RoutingPhase(Phase):
             return ctx
 
         # Check for system observation questions
-        observe_patterns = ("how's the system", "hows the system", "system health",
-                           "any anomalies", "any problems", "what do you see",
-                           "what do you notice", "anything wrong",
-                           "how are things", "how is everything",
-                           "what's happening", "whats happening")
+        observe_patterns = ("how's the system", "hows the system", "how is the system",
+                           "system health", "any anomalies", "any problems",
+                           "what do you see", "what do you notice", "anything wrong",
+                           "how are things", "how is everything", "how are you doing",
+                           "what's happening", "whats happening", "status report",
+                           "how is the machine", "machine status", "check the system")
         if any(p in q_lower for p in observe_patterns):
             ctx.response = g._system_observation_report()
             g.context.update(ctx.intent, ctx.resolved_message)
