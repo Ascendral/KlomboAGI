@@ -169,13 +169,17 @@ class SmartARCSolverV2(SmartARCSolver):
             return None
 
     def solve(self, train, test_input):
-        # ── Pre-phase: high-precision v2 strategies that beat Phase 1 mismatches ──
+        # ── Pre-phase: high-precision v2 strategies (cross-validated) ──
         for pre_fn in [self._try_bordered_rect_center, self._try_rect_corner_edge_interior,
                        self._try_convert_isolated_cells, self._try_fill_zero_rect_interior,
                        self._try_connect_pairs_with_8]:
-            result = pre_fn(train, test_input)
-            if result is not None:
-                return result
+            try:
+                result = pre_fn(train, test_input)
+                if result is not None:
+                    if self._cross_validate(pre_fn, train):
+                        return result
+            except Exception:
+                continue
 
         # ── Phase 0: High-confidence specific learners (before hand-coded) ─────
         from klomboagi.reasoning.arc_cell_rules import (
@@ -192,7 +196,7 @@ class SmartARCSolverV2(SmartARCSolver):
                        learn_cross_from_dots, learn_diamond_expand,
                        learn_arrow_ray, learn_lshape_concavity,
                        learn_ushape_gap_drop, learn_template_stamp_at_marker]:
-            result = SmartARCSolverV2._try_learner(p0_fn, train, test_input, loo=False)
+            result = SmartARCSolverV2._try_learner(p0_fn, train, test_input, loo=True)
             if result is not None:
                 return result
 
