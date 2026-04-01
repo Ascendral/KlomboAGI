@@ -9,11 +9,16 @@ Endpoints:
   GET  /status        — Full system status
   GET  /hardware      — Hardware state
   GET  /health        — Quick health check (for monitoring)
-  POST /mission       — Create a mission
-  GET  /missions      — List missions
   POST /learn         — Teach Klombo something
   GET  /beliefs       — What Klombo believes (paginated)
   GET  /curiosity     — What Klombo wants to know
+  GET  /observe       — System observation summary (CPU/RAM/disk trends)
+  POST /exec          — Execute a safe system command
+  GET  /processes     — Top processes by CPU/memory
+  GET  /network       — Network status
+  POST /open          — Open a macOS app
+  GET  /peers         — Other KlomboAGI instances on the network
+  POST /peer/hear     — Forward a message to a peer
 """
 
 from __future__ import annotations
@@ -35,8 +40,7 @@ class KlomboHandler(BaseHTTPRequestHandler):
     server: "KlomboServer"
 
     def log_message(self, format, *args):
-        """Override to use our own logging."""
-        pass  # Silence default stderr logging
+        pass
 
     def _send_json(self, data: dict, status: int = 200) -> None:
         self.send_response(status)
@@ -53,7 +57,6 @@ class KlomboHandler(BaseHTTPRequestHandler):
         return json.loads(raw)
 
     def do_OPTIONS(self):
-        """Handle CORS preflight."""
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -65,16 +68,23 @@ class KlomboHandler(BaseHTTPRequestHandler):
 
         try:
             if self.path == "/health":
+                obs = self.server.observer
+                obs_data = obs.get_summary() if obs else {}
                 self._send_json({
                     "status": "alive",
                     "uptime_seconds": round(time.time() - self.server.start_time, 1),
                     "total_turns": genesis.total_turns if genesis else 0,
+                    "cpu_percent": obs_data.get("current", {}).get("cpu_percent"),
+                    "ram_percent": obs_data.get("current", {}).get("ram_percent"),
                 })
 
             elif self.path == "/status":
                 if not genesis:
                     self._send_json({"error": "Brain not initialized"}, 503)
                     return
+                curiosity_status = {}
+                if self.server.curiosity_loop:
+                    curiosity_status = self.server.curiosity_loop.status()
                 self._send_json({
                     "status": genesis.status(),
                     "total_turns": genesis.total_turns,
@@ -83,6 +93,7 @@ class KlomboHandler(BaseHTTPRequestHandler):
                     "topic": genesis.context.current_topic or None,
                     "beliefs": len(genesis.base._beliefs),
                     "uptime_seconds": round(time.time() - self.server.start_time, 1),
+                    "curiosity_loop": curiosity_status,
                 })
 
             elif self.path == "/hardware":
@@ -100,6 +111,13 @@ class KlomboHandler(BaseHTTPRequestHandler):
                     "gpu": {"model": hw.gpu.model, "cores": hw.gpu.cores,
                             "vram_gb": round(hw.gpu.vram_gb, 1)},
                 })
+
+            elif self.path == "/observe":
+                obs = self.server.observer
+                if not obs:
+                    self._send_json({"error": "Observer not running"}, 503)
+                    return
+                self._send_json(obs.get_summary())
 
             elif self.path == "/beliefs":
                 if not genesis:
@@ -127,8 +145,22 @@ class KlomboHandler(BaseHTTPRequestHandler):
                     })
                 self._send_json({"gaps": gaps})
 
-            elif self.path == "/missions":
-                self._send_json({"error": "No storage connected"}, 501)
+            elif self.path == "/processes":
+                ctrl = self.server.system_control
+                if not ctrl:
+                    self._send_json({"error": "System control not available"}, 503)
+                    return
+                self._send_json({"processes": ctrl.list_processes()})
+
+            elif self.path == "/network":
+                ctrl = self.server.system_control
+                if not ctrl:
+                    self._send_json({"error": "System control not available"}, 503)
+                    return
+                self._send_json(ctrl.network_status())
+
+            elif self.path == "/peers":
+                self._send_json({"peers": list(self.server.peers.values())})
 
             else:
                 self._send_json({"error": f"Unknown path: {self.path}"}, 404)
@@ -150,6 +182,9 @@ class KlomboHandler(BaseHTTPRequestHandler):
                 if not message:
                     self._send_json({"error": "Missing 'message' field"}, 400)
                     return
+                # Notify curiosity loop of activity
+                if self.server.curiosity_loop:
+                    self.server.curiosity_loop.notify_activity()
                 start = time.time()
                 response = genesis.hear(message)
                 elapsed = time.time() - start
@@ -171,6 +206,54 @@ class KlomboHandler(BaseHTTPRequestHandler):
                 response = genesis._active_learn(topic)
                 self._send_json({"response": response})
 
+            elif self.path == "/exec":
+                ctrl = self.server.system_control
+                if not ctrl:
+                    self._send_json({"error": "System control not available"}, 503)
+                    return
+                command = body.get("command", "")
+                if not command:
+                    self._send_json({"error": "Missing 'command' field"}, 400)
+                    return
+                result = ctrl.execute(command)
+                self._send_json({
+                    "allowed": result.allowed,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "returncode": result.returncode,
+                    "blocked_reason": result.blocked_reason,
+                })
+
+            elif self.path == "/open":
+                ctrl = self.server.system_control
+                if not ctrl:
+                    self._send_json({"error": "System control not available"}, 503)
+                    return
+                app = body.get("app", "")
+                if not app:
+                    self._send_json({"error": "Missing 'app' field"}, 400)
+                    return
+                result = ctrl.open_app(app)
+                self._send_json({
+                    "allowed": result.allowed,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                })
+
+            elif self.path == "/peer/register":
+                # Another KlomboAGI instance announces itself
+                name = body.get("name", "unknown")
+                host = body.get("host", "")
+                port = body.get("port", 3141)
+                if host:
+                    self.server.peers[name] = {
+                        "name": name, "host": host, "port": port,
+                        "last_seen": time.time(),
+                    }
+                    self._send_json({"registered": True})
+                else:
+                    self._send_json({"error": "Missing 'host'"}, 400)
+
             else:
                 self._send_json({"error": f"Unknown path: {self.path}"}, 404)
 
@@ -179,29 +262,47 @@ class KlomboHandler(BaseHTTPRequestHandler):
 
 
 class KlomboServer(HTTPServer):
-    """HTTP server with Genesis brain attached."""
+    """HTTP server with Genesis brain and all subsystems."""
 
     def __init__(self, host: str = "0.0.0.0", port: int = 3141,
                  genesis: "Genesis | None" = None):
         self.genesis = genesis
         self.start_time = time.time()
+        self.observer = None
+        self.curiosity_loop = None
+        self.system_control = None
+        self.peers: dict[str, dict] = {}
         super().__init__((host, port), KlomboHandler)
 
 
 def run_server(genesis: "Genesis | None" = None, host: str = "0.0.0.0",
                port: int = 3141, background: bool = False) -> KlomboServer:
-    """Start the HTTP server.
+    """Start the HTTP server with all subsystems.
 
-    Args:
-        genesis: Genesis brain instance
-        host: Bind address (0.0.0.0 = all interfaces)
-        port: Port number (3141 = pi * 1000, the mind's port)
-        background: If True, run in a background thread
-
-    Returns:
-        The server instance
+    Boots:
+    1. HTTP server on the specified port
+    2. System observer (background thread, 30s interval)
+    3. Curiosity loop (background thread, learns when idle)
+    4. System control (safe command execution)
     """
     server = KlomboServer(host, port, genesis)
+
+    # Start system observer
+    from klomboagi.senses.system_observer import SystemObserver
+    observer = SystemObserver(interval=30.0)
+    observer.start()
+    server.observer = observer
+
+    # Start curiosity loop
+    if genesis:
+        from klomboagi.core.curiosity_loop import CuriosityLoop
+        curiosity = CuriosityLoop(genesis, idle_threshold=120.0, explore_interval=300.0)
+        curiosity.start()
+        server.curiosity_loop = curiosity
+
+    # System control
+    from klomboagi.senses.system_control import SystemControl
+    server.system_control = SystemControl()
 
     if background:
         thread = Thread(target=server.serve_forever, daemon=True)
@@ -209,14 +310,20 @@ def run_server(genesis: "Genesis | None" = None, host: str = "0.0.0.0",
         return server
 
     print(f"KlomboAGI listening on http://{host}:{port}")
-    print(f"  POST /hear     — Talk to Klombo")
-    print(f"  GET  /status   — System status")
-    print(f"  GET  /hardware — Hardware info")
-    print(f"  GET  /health   — Health check")
+    print(f"  POST /hear       — Talk to Klombo")
+    print(f"  GET  /status     — System status")
+    print(f"  GET  /hardware   — Hardware info")
+    print(f"  GET  /observe    — System metrics & anomalies")
+    print(f"  GET  /processes  — Top processes")
+    print(f"  POST /exec       — Run a safe command")
+    print(f"  GET  /health     — Health check")
     print()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down...")
+        observer.stop()
+        if server.curiosity_loop:
+            server.curiosity_loop.stop()
         server.shutdown()
     return server

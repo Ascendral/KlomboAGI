@@ -118,6 +118,96 @@ def chat(port: int = 3141) -> None:
                 print(f"  Error: {e}")
             continue
 
+        if msg.lower() == "/observe":
+            try:
+                r = urllib.request.urlopen(f"{base}/observe", timeout=10)
+                data = json.loads(r.read())
+                cur = data.get("current", {})
+                print(f"  CPU: {cur.get('cpu_percent', '?')}%  RAM: {cur.get('ram_percent', '?')}%  "
+                      f"Disk: {cur.get('disk_percent', '?')}%")
+                print(f"  Top process: {cur.get('top_process', '?')}")
+                print(f"  Observations: {data.get('observations', 0)}  "
+                      f"Uptime: {data.get('uptime_hours', 0)}h")
+                for a in data.get("anomalies", []):
+                    print(f"  [{a['severity']}] {a['message']}")
+            except Exception as e:
+                print(f"  Error: {e}")
+            continue
+
+        if msg.lower() == "/processes":
+            try:
+                r = urllib.request.urlopen(f"{base}/processes", timeout=10)
+                data = json.loads(r.read())
+                print(f"  {'PID':>7} {'CPU%':>6} {'MEM%':>6}  NAME")
+                for p in data["processes"][:15]:
+                    print(f"  {p['pid']:>7} {p['cpu']:>6.1f} {p['mem']:>6.1f}  {p['name']}")
+            except Exception as e:
+                print(f"  Error: {e}")
+            continue
+
+        if msg.lower() == "/network":
+            try:
+                r = urllib.request.urlopen(f"{base}/network", timeout=10)
+                data = json.loads(r.read())
+                print(f"  Connected: {data.get('connected', False)}")
+                for name, ip in data.get("interfaces", {}).items():
+                    print(f"  {name}: {ip}")
+            except Exception as e:
+                print(f"  Error: {e}")
+            continue
+
+        if msg.lower().startswith("/open "):
+            app = msg[6:].strip()
+            try:
+                body = json.dumps({"app": app}).encode()
+                req = urllib.request.Request(
+                    f"{base}/open", data=body,
+                    headers={"Content-Type": "application/json"})
+                r = urllib.request.urlopen(req, timeout=10)
+                data = json.loads(r.read())
+                if data.get("allowed"):
+                    print(f"  Opened {app}")
+                else:
+                    print(f"  Blocked: {data.get('stderr', '')}")
+            except Exception as e:
+                print(f"  Error: {e}")
+            continue
+
+        if msg.lower().startswith("/exec "):
+            command = msg[6:].strip()
+            try:
+                body = json.dumps({"command": command}).encode()
+                req = urllib.request.Request(
+                    f"{base}/exec", data=body,
+                    headers={"Content-Type": "application/json"})
+                r = urllib.request.urlopen(req, timeout=30)
+                data = json.loads(r.read())
+                if data.get("allowed"):
+                    if data["stdout"]:
+                        print(data["stdout"].rstrip())
+                    if data["stderr"]:
+                        print(f"  stderr: {data['stderr'].rstrip()}")
+                else:
+                    print(f"  Blocked: {data.get('blocked_reason', '')}")
+            except Exception as e:
+                print(f"  Error: {e}")
+            continue
+
+        if msg.lower() == "/help":
+            print("  Commands:")
+            print("    /status     — Brain status")
+            print("    /hardware   — Machine info")
+            print("    /observe    — CPU/RAM/disk metrics")
+            print("    /processes  — Top processes")
+            print("    /network    — Network status")
+            print("    /beliefs    — What Klombo knows")
+            print("    /open X     — Open an app")
+            print("    /exec X     — Run a command")
+            print("    /help       — This help")
+            print("    quit        — Exit chat")
+            print("  Or just type to talk.")
+            continue
+
         # Send message to brain
         try:
             body = json.dumps({"message": msg}).encode()
