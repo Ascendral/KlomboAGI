@@ -499,197 +499,36 @@ class Genesis:
 
     def hear(self, message: str) -> str:
         """
-        Main entry point. Process a message through the full Genesis pipeline.
+        Main entry point. Process a message through the Genesis phase pipeline.
 
-        Pipeline:
-        1. Resolve pronouns from dialog context
-        2. Parse intent (via base Baby)
-        3. Check for surprises (contradictions with beliefs)
-        4. Consult traits (which personality aspects activate?)
-        5. Process through base conversation system
-        6. Update dialog context
-        7. Check proactive curiosity (anything we want to ask?)
-        8. Return response
+        Phases:
+        1. Input — parse, resolve pronouns, prime working memory
+        2. Surprise — detect contradictions with existing beliefs
+        3. Routing — dispatch to question/learn/correct/statement + traits + curiosity
+        4. Metacognitive — self-model, conflicts, workspace, modulators, inner state
+        5. Dialog — emotional intel, follow-ups
+        6. Learning — meta-learning, strengthening, dedup, calibration, refresh
+        7. Persistence — cost tracking, save state
         """
-        self.total_turns += 1
-        self.cost_tracker.start("hear_cycle")
-
-        # 0. Update working memory with this input
-        self.working_memory.add_context(message)
-
-        # 1. Resolve pronouns
-        resolved_message = self.context.resolve_pronoun(message)
-
-        # 2. Parse intent
-        intent = self.base._parse_intent(resolved_message)
-
-        # 2.5. Conversation memory — track topics
-        if self.context.current_topic:
-            self.conversation_memory.record_topic(self.context.current_topic)
-
-        # 3. Working memory + ACT-R decay + attention economy
-        for word in resolved_message.lower().split():
-            if len(word) > 3 and word not in self.base.COMMON_WORDS:
-                self.working_memory.attend(word, "concept", "input")
-                self.memory_decay.access(word)
-                self.attention_economy.allocate(word, 5.0)  # zero-sum attention
-
-        # 4. Check for surprise BEFORE learning
-        surprise = self._check_surprise(intent)
-
-        # 5. Consult traits
-        trait_influence = self.traits.influence({
-            "description": resolved_message,
-            "known_entities": self.context.entities_mentioned,
-        })
-
-        # 6. Route: deep think for questions, base system for everything else
-        if intent["type"] == "question":
-            self.metacognition.record_question("knowledge")
-            response = self._think_deep(resolved_message, intent)
-        elif intent["type"] == "command" and intent.get("command") == "learn":
-            response = self._active_learn(intent.get("target", ""))
-        elif intent["type"] == "correction":
-            self.metacognition.record_correction()
-            self.inner.record_failure()
-            self.failure_memory.record(
-                description=resolved_message,
-                context=self.context.current_topic,
-                approach="previous_answer",
-                what_went_wrong="human corrected us",
-            )
-            response = self.base.hear(resolved_message)
-        else:
-            response = self.base.hear(resolved_message)
-            self._extract_relations(resolved_message)
-
-        # 6. Update dialog context
-        self.context.update(intent, resolved_message)
-
-        # 7. Handle surprise — append to response
-        if surprise:
-            self.total_surprises += 1
-            response = self._handle_surprise(surprise, response)
-            self.traits.record_outcome("accuracy", "verify", "self_check", True)
-            self.inner.record_surprise(surprise.surprise_magnitude)
-
-        # 8. Record trait outcome
-        if trait_influence.active_traits:
-            for t_name in trait_influence.active_traits:
-                trait = self.traits.get_trait(t_name)
-                if trait:
-                    trait.strengthen(0.01)
-
-        # 9. Check proactive curiosity — anything we want to ask?
-        proactive = self._check_proactive_curiosity()
-        if proactive:
-            self.total_proactive += 1
-            response += f"\n\nBy the way — {proactive}"
-
-        # 10. Working memory tick — decay unused items
-        self.working_memory.tick()
-
-        # 11. Self-model snapshot — track own trajectory
-        gaps = len([g for g in self.base.curiosity.gaps if not g.resolved])
-        self.self_model.snapshot(
-            self.base._beliefs, self.relations,
-            self.base.memory.concepts, gaps)
-
-        # 12. NARS conflict check — disagreements become top priority
-        new_conflicts = self.conflict_detector.check(self.base._beliefs)
-        for c in new_conflicts:
-            self.workspace.submit(
-                f"Conflict: {c.belief_a} vs {c.belief_b}",
-                SignalType.CONFLICT, c.severity, "conflict_detector")
-
-        # 13. Global Workspace broadcast — winner shapes next cycle
-        if self.context.current_topic:
-            self.workspace.submit(
-                self.context.current_topic, SignalType.PERCEPTION,
-                0.5, "dialog_context")
-        if self.inner.state.wonder > 0.3:
-            self.workspace.submit(
-                "surprise_detected", SignalType.EMOTION,
-                self.inner.state.wonder, "inner_state")
-        if self.inner.state.boredom > 0.5:
-            self.workspace.submit(
-                "bored_need_stimulation", SignalType.EMOTION,
-                self.inner.state.boredom, "inner_state")
-
-        broadcast = self.workspace.compete()
-        broadcast_result = self.workspace.broadcast()
-
-        # Workspace winner influences working memory priority
-        if broadcast and broadcast.signal_type == SignalType.CONFLICT:
-            # Conflict won — focus working memory on the conflict
-            self.working_memory.focus_on(broadcast.content[:30])
-        elif broadcast and broadcast.content:
-            self.working_memory.attend(broadcast.content[:30], "broadcast", "workspace")
-
-        # 14. Attention economy tax — zero-sum, forces prioritization
-        self.attention_economy.tax()
-
-        # 15. Cognitive modulators — inner state changes HOW we reason
-        self.modulator.update(self.inner.state, self.traits)
-
-        # 15. Inner state — compute how we "feel" based on real metrics
-        self.inner.record_success()  # made it through a cycle
-        self.inner.compute(
-            beliefs_in_focus=len(self.working_memory.get_active_items()),
-            active_gaps=gaps,
-            total_beliefs=len(self.base._beliefs),
-            working_memory_items=len(self.working_memory._items),
+        from klomboagi.core.phases import (
+            HearContext, InputPhase, SurprisePhase, RoutingPhase,
+            MetacognitivePhase, DialogPhase, LearningPhase, PersistencePhase,
         )
 
-        # 13. Emotional Intelligence — read human's state, adapt
-        emotional_reading = self.emotional_intel.read(message)
+        ctx = HearContext(message=message)
 
-        # 14. Dialog Flow — track conversation, generate follow-ups
-        self.dialog_flow.update(message, response, intent["type"],
-                               self.context.current_topic)
-        followup = self.dialog_flow.get_followup()
-        if followup and emotional_reading.primary.value not in ("frustrated", "impatient"):
-            response += f"\n\n{followup}"
+        for phase in (
+            InputPhase(),
+            SurprisePhase(),
+            RoutingPhase(),
+            MetacognitivePhase(),
+            DialogPhase(),
+            LearningPhase(),
+            PersistencePhase(),
+        ):
+            ctx = phase.run(ctx, self)
 
-        # 16. Meta-Learning — track what learning approaches work
-        if intent["type"] == "question":
-            has_answer = len(response) > 20 and "don't know" not in response.lower()
-            domain = self.context.current_topic or "general"
-            self.meta_learner.record(
-                method="conversation", domain=domain,
-                duration_ms=0,  # duration tracked by cost_tracker separately
-                facts_gained=1 if has_answer else 0,
-                success=has_answer)
-
-        # 17. Belief Strengthening — periodically cross-confirm multi-source beliefs
-        if self.total_turns % 10 == 0 and len(self.base._beliefs) > 20:
-            self.belief_strengthener.cross_confirm()
-
-        # 18. Dedup — periodically clean near-duplicate beliefs
-        if self.total_turns % 20 == 0 and len(self.base._beliefs) > 50:
-            self.deduplicator.deduplicate(self.base._beliefs)
-
-        # 19. Confidence Calibration — are our confidence scores accurate?
-        if self.total_turns % 15 == 0 and len(self.base._beliefs) > 30:
-            # Record recent prediction accuracy for calibration
-            has_answer = len(response) > 20 and "don't know" not in response.lower()
-            raw_conf = 0.6 if has_answer else 0.2
-            self.calibrator.record(raw_conf, has_answer)
-
-        # 19b. Auto-Refresh — re-read stale concepts periodically
-        if self.total_turns % 50 == 0 and self.total_turns > 0:
-            try:
-                self.refresher.refresh(max_concepts=2)
-            except Exception:
-                pass  # Auto-refresh should never crash the pipeline
-
-        # 20. Cost tracking — record this cycle
-        self.cost_tracker.end("hear_cycle", success=True)
-
-        # 21. Auto-save state
-        self.save_state()
-
-        return response
+        return ctx.response
 
     def _check_surprise(self, intent: dict) -> Surprise | None:
         """
