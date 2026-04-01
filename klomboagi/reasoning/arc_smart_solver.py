@@ -385,6 +385,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_key_template_rotate_fill,
             self._try_odd_patch_out,
             self._try_middle_col_only,
+            self._try_bar_bottom_half_to_8,
         ]
         for s in v2:
             try:
@@ -5904,5 +5905,46 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_bar_bottom_half_to_8(self, train, test_input):
+        """Vertical bars of a color: bottom floor(height/2) cells become 8."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            # Find non-zero, non-8 cells; must be single color per col, contiguous from some start row
+            bar_color = None
+            for c in range(cols):
+                col_vals = [(r, grid[r][c]) for r in range(rows) if grid[r][c] != 0]
+                if not col_vals:
+                    continue
+                colors = set(v for r, v in col_vals)
+                if len(colors) != 1:
+                    return None
+                color = colors.pop()
+                if color == 8:
+                    return None
+                if bar_color is None:
+                    bar_color = color
+                elif color != bar_color:
+                    return None
+                # Check contiguous from some start row
+                rs = [r for r, v in col_vals]
+                if rs != list(range(rs[0], rs[0] + len(rs))):
+                    return None
+                height = len(rs)
+                n_eights = height // 2
+                start = rs[0]
+                # bottom n_eights become 8
+                for r in range(start + height - n_eights, start + height):
+                    out[r][c] = 8
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input)
