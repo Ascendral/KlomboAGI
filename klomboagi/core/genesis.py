@@ -883,7 +883,7 @@ class Genesis:
         # Why questions
         why_result = self._parse_why_question(query)
         if why_result:
-            return self._answer_why(why_result)
+            return self._answer_why(why_result, original_query=query)
 
         # Relational questions
         relational = self._parse_relational_question(query)
@@ -1169,6 +1169,13 @@ class Genesis:
 
             if best_definition:
                 _add_unique(best_definition)
+                # Add chain context — show the full reasoning chain
+                # "Dog is a mammal. A mammal is an animal. An animal is a living thing."
+                for f in known_facts[1:5]:
+                    b = self.base._beliefs.get(f)
+                    if b and hasattr(b, 'subject') and hasattr(b, 'predicate'):
+                        if b.source == "inference" and any(qt in b.subject.lower() for qt in query_terms):
+                            _add_unique(f"{b.statement.capitalize()}.")
                 # Add generated explanation as context (if it adds info)
                 if generated:
                     _add_unique(generated)
@@ -2254,15 +2261,29 @@ class Genesis:
             r"why does (.+?) happen",
             r"why is there (.+)",
             r"why does (.+?) occur",
+            r"why do (?:things |objects )?(.+)",
+            r"why does (.+)",
+            r"why is (.+?) (?:important|necessary|needed)",
             r"why (.+)",
         ]
         for pattern in patterns:
             m = re.match(pattern, q)
             if m:
-                return m.group(1).strip()
+                concept = m.group(1).strip()
+                # Clean up: "things fall" → "falling", "it rains" → "rain"
+                concept = re.sub(r"^(?:things|objects|it|they|we|you)\s+", "", concept)
+                # Convert verbs to gerund/noun: "fall" → "falling"
+                if concept and not concept.endswith("ing") and not concept.endswith("tion"):
+                    # Check if gerund form exists in relations
+                    gerund = concept.rstrip("e") + "ing" if concept.endswith("e") else concept + "ing"
+                    for rel_concept in [gerund, concept]:
+                        causes = self.relations.get_backward(rel_concept, RelationType.CAUSES)
+                        if causes:
+                            return rel_concept
+                return concept
         return None
 
-    def _answer_why(self, concept: str) -> str:
+    def _answer_why(self, concept: str, original_query: str = "") -> str:
         """
         Answer "why" by tracing causal chains and effects.
 
@@ -2274,12 +2295,14 @@ class Genesis:
         importance_words = ("important", "significant", "necessary", "essential",
                            "crucial", "vital", "needed", "useful", "valuable")
         asking_about_importance = False
+        check_text = (original_query or concept).lower()
         for word in importance_words:
-            if word in concept.lower():
+            if word in check_text:
                 asking_about_importance = True
-                # Extract the actual subject: "is photosynthesis important" → "photosynthesis"
                 clean = re.sub(rf"\b(?:is|are)\s+", "", concept)
                 clean = re.sub(rf"\s*{word}\s*", "", clean).strip()
+                if not clean:
+                    clean = concept  # fallback
                 break
 
         # If asking about importance, look at what this concept CAUSES/ENABLES (forward effects)
