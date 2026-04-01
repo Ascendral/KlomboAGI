@@ -378,6 +378,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_5border_swap_interior,
             self._try_ones_expand_3x3,
             self._try_stripe_mode_fill,
+            self._try_largest_solid_rect_only,
+            self._try_concentric_ring_rotation,
+            self._try_fill_1frame_by_interior_parity,
         ]
         for s in v2:
             try:
@@ -5591,3 +5594,169 @@ class SmartARCSolverV2(SmartARCSolver):
         if result is not None:
             return result
         return row_mode_grid(test_input)
+
+    def _try_largest_solid_rect_only(self, train, test_input):
+        """Keep only the largest solid single-color rectangle; zero everything else."""
+        def find_largest_solid_rect(grid):
+            rows, cols = len(grid), len(grid[0])
+            from collections import defaultdict
+            # Collect cells per color
+            color_cells = defaultdict(set)
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        color_cells[grid[r][c]].add((r, c))
+            best_area = 0
+            best = None
+            for color, cells in color_cells.items():
+                rs = sorted(set(r for r, c in cells))
+                cs = sorted(set(c for r, c in cells))
+                for i, r1 in enumerate(rs):
+                    for r2 in rs[i:]:
+                        for j, c1 in enumerate(cs):
+                            for c2 in cs[j:]:
+                                area = (r2 - r1 + 1) * (c2 - c1 + 1)
+                                if area <= best_area:
+                                    continue
+                                rect = set((r, c) for r in range(r1, r2+1) for c in range(c1, c2+1))
+                                if rect.issubset(cells):
+                                    # Check all rect cells are color
+                                    if all(grid[r][c] == color for r, c in rect):
+                                        best_area = area
+                                        best = (color, r1, r2, c1, c2)
+            return best
+
+        def apply_rule(grid, rect):
+            if rect is None:
+                return None
+            color, r1, r2, c1, c2 = rect
+            rows, cols = len(grid), len(grid[0])
+            out = [[0] * cols for _ in range(rows)]
+            for r in range(r1, r2 + 1):
+                for c in range(c1, c2 + 1):
+                    out[r][c] = color
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            rect = find_largest_solid_rect(ex['input'])
+            result = apply_rule(ex['input'], rect)
+            if result is None or result != ex['output']:
+                return None
+        rect = find_largest_solid_rect(test_input)
+        return apply_rule(test_input, rect)
+
+    def _try_concentric_ring_rotation(self, train, test_input):
+        """Concentric rectangular rings: rotate ring colors right by 1 (innermost→outermost)."""
+        def get_ring_colors(grid):
+            rows, cols = len(grid), len(grid[0])
+            n_rings = min(rows, cols) // 2 + (1 if min(rows, cols) % 2 else 0)
+            ring_colors = []
+            for ring_i in range(n_rings):
+                # Collect all cells on this ring
+                cells = []
+                r1, r2, c1, c2 = ring_i, rows - 1 - ring_i, ring_i, cols - 1 - ring_i
+                if r1 > r2 or c1 > c2:
+                    break
+                if r1 == r2:
+                    cells = [(r1, c) for c in range(c1, c2 + 1)]
+                elif c1 == c2:
+                    cells = [(r, c1) for r in range(r1, r2 + 1)]
+                else:
+                    cells = ([(r1, c) for c in range(c1, c2 + 1)] +
+                             [(r2, c) for c in range(c1, c2 + 1)] +
+                             [(r, c1) for r in range(r1 + 1, r2)] +
+                             [(r, c2) for r in range(r1 + 1, r2)])
+                colors = set(grid[r][c] for r, c in cells)
+                if len(colors) != 1:
+                    return None
+                ring_colors.append(colors.pop())
+            return ring_colors
+
+        def apply_rule(grid):
+            ring_colors = get_ring_colors(grid)
+            if ring_colors is None or len(ring_colors) < 2:
+                return None
+            # Find cycle length
+            cycle_len = len(ring_colors)
+            for i in range(1, len(ring_colors)):
+                if ring_colors[i] == ring_colors[0]:
+                    cycle_len = i
+                    break
+            # Rotate right by 1 within cycle
+            new_colors = [ring_colors[(i - 1) % cycle_len] for i in range(len(ring_colors))]
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            n_rings = len(ring_colors)
+            for ring_i in range(n_rings):
+                r1, r2, c1, c2 = ring_i, rows - 1 - ring_i, ring_i, cols - 1 - ring_i
+                if r1 > r2 or c1 > c2:
+                    break
+                if r1 == r2:
+                    cells = [(r1, c) for c in range(c1, c2 + 1)]
+                elif c1 == c2:
+                    cells = [(r, c1) for r in range(r1, r2 + 1)]
+                else:
+                    cells = ([(r1, c) for c in range(c1, c2 + 1)] +
+                             [(r2, c) for c in range(c1, c2 + 1)] +
+                             [(r, c1) for r in range(r1 + 1, r2)] +
+                             [(r, c2) for r in range(r1 + 1, r2)])
+                for r, c in cells:
+                    out[r][c] = new_colors[ring_i]
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_fill_1frame_by_interior_parity(self, train, test_input):
+        """Fill hollow 1-frames: odd interior side→7, even interior side→2."""
+        def find_1_frames(grid):
+            rows, cols = len(grid), len(grid[0])
+            frames = []
+            for r1 in range(rows - 2):
+                for r2 in range(r1 + 2, rows):
+                    for c1 in range(cols - 2):
+                        for c2 in range(c1 + 2, cols):
+                            # Check all border cells are 1
+                            border = ([(r1, c) for c in range(c1, c2 + 1)] +
+                                      [(r2, c) for c in range(c1, c2 + 1)] +
+                                      [(r, c1) for r in range(r1 + 1, r2)] +
+                                      [(r, c2) for r in range(r1 + 1, r2)])
+                            if not all(grid[r][c] == 1 for r, c in border):
+                                continue
+                            # Check interior is all 0
+                            if not all(grid[r][c] == 0 for r in range(r1+1, r2) for c in range(c1+1, c2)):
+                                continue
+                            interior_h = r2 - r1 - 1
+                            interior_w = c2 - c1 - 1
+                            if interior_h != interior_w:
+                                continue
+                            frames.append((r1, r2, c1, c2, interior_h))
+            return frames
+
+        def apply_rule(grid):
+            frames = find_1_frames(grid)
+            if not frames:
+                return None
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            for r1, r2, c1, c2, side in frames:
+                fill = 7 if side % 2 == 1 else 2
+                for r in range(r1 + 1, r2):
+                    for c in range(c1 + 1, c2):
+                        out[r][c] = fill
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
