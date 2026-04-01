@@ -27,6 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--host", default="0.0.0.0", help="Bind address")
     serve_parser.add_argument("--port", type=int, default=3141, help="Port number")
 
+    chat_parser = sub.add_parser("chat", help="Talk to KlomboAGI")
+    chat_parser.add_argument("--port", type=int, default=3141, help="Server port")
+
     daemon_parser = sub.add_parser("daemon")
     daemon_sub = daemon_parser.add_subparsers(dest="daemon_command", required=True)
     daemon_sub.add_parser("start")
@@ -97,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         payload = run_doctor()
+    elif args.command == "chat":
+        from klomboagi.interfaces.chat import chat
+        chat(port=args.port)
+        return 0
     elif args.command == "serve":
         from klomboagi.core.genesis import Genesis
         from klomboagi.server import run_server
