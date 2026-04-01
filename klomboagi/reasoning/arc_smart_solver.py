@@ -401,6 +401,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_swap_ends_keep_mid,
             self._try_row_tile_mirror_tile,
             self._try_rev_row_block_mirror_tile,
+            self._try_dominant_band_color,
         ]
         for s in v2:
             try:
@@ -6272,5 +6273,59 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_dominant_band_color(self, train, test_input):
+        """Grid has H-bands and V-bands. Output is the color that wins at ALL its intersections."""
+        def get_band_color(vals):
+            """Return dominant non-zero color if it appears in >50% of non-zero cells."""
+            nz = [v for v in vals if v != 0]
+            if not nz:
+                return None
+            from collections import Counter
+            c, n = Counter(nz).most_common(1)[0]
+            return c if n >= len(vals) * 0.4 else None
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            h_bands = {}  # color → list of row indices
+            v_bands = {}  # color → list of col indices
+            for r in range(rows):
+                c = get_band_color([grid[r][col] for col in range(cols)])
+                if c is not None:
+                    h_bands.setdefault(c, []).append(r)
+            for col in range(cols):
+                c = get_band_color([grid[r][col] for r in range(rows)])
+                if c is not None:
+                    v_bands.setdefault(c, []).append(col)
+            if not h_bands or not v_bands:
+                return None
+            # Check which color always wins at intersections
+            for h_color, h_rows in h_bands.items():
+                if all(
+                    grid[r][vc] == h_color
+                    for v_color, v_cols in v_bands.items()
+                    for r in h_rows
+                    for vc in v_cols
+                    if v_color != h_color
+                ):
+                    return [[h_color]]
+            for v_color, v_cols in v_bands.items():
+                if all(
+                    grid[hr][c] == v_color
+                    for h_color, h_rows in h_bands.items()
+                    for hr in h_rows
+                    for c in v_cols
+                    if h_color != v_color
+                ):
+                    return [[v_color]]
+            return None
+
+        for ex in train:
+            if ex['output'] not in [[[v]] for v in range(10)]:
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input)
