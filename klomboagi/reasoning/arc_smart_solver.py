@@ -412,6 +412,13 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_gravity_sink_1_through_5,
             self._try_unique_cell_box,
             self._try_band_zero_extend,
+            self._try_rot180,
+            self._try_vflip_then_original,
+            self._try_or_pattern_match,
+            self._try_merge_3_2_to_8,
+            self._try_find_hollow_shape_color,
+            self._try_row_color_fill_5,
+            self._try_reflect_bottom_to_top,
         ]
         for s in v2:
             try:
@@ -6652,6 +6659,144 @@ class SmartARCSolverV2(SmartARCSolver):
                                     else:
                                         for cc in range(min_c, max_c+1):
                                             out[r][cc] = 0
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_rot180(self, train, test_input):
+        """Output is input rotated 180 degrees."""
+        def apply_rule(grid):
+            return [row[::-1] for row in grid[::-1]]
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_vflip_then_original(self, train, test_input):
+        """Output is reversed-rows + original rows (vertical mirror on top, original on bottom)."""
+        def apply_rule(grid):
+            return list(grid[::-1]) + list(grid)
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_or_pattern_match(self, train, test_input):
+        """Two patterns stacked with separator row; output 3 where either is non-zero, else 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows) if len(set(grid[r])) == 1 and grid[r][0] != 0]
+            if not sep_rows:
+                return None
+            sep_r = sep_rows[0]
+            top = grid[:sep_r]
+            bot = grid[sep_r+1:]
+            if len(top) != len(bot) or len(top) == 0:
+                return None
+            out = [[0]*cols for _ in range(len(top))]
+            for r in range(len(top)):
+                for c in range(cols):
+                    if top[r][c] != 0 or bot[r][c] != 0:
+                        out[r][c] = 3
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_merge_3_2_to_8(self, train, test_input):
+        """Adjacent 3-2 pairs merge: 3 becomes 8, 2 disappears."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == 3:
+                        for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                            nr, nc = r+dr, c+dc
+                            if 0<=nr<rows and 0<=nc<cols and grid[nr][nc] == 2:
+                                out[r][c] = 8
+                                out[nr][nc] = 0
+                                break
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_find_hollow_shape_color(self, train, test_input):
+        """Find shape with interior 0s (hollow rectangle); output [[color]]."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r, c in comp)
+                        max_r = max(r for r, c in comp)
+                        min_c = min(c for r, c in comp)
+                        max_c = max(c for r, c in comp)
+                        for r in range(min_r+1, max_r):
+                            for c in range(min_c+1, max_c):
+                                if grid[r][c] == 0:
+                                    return [[color]]
+            return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_row_color_fill_5(self, train, test_input):
+        """Indicator column: row's non-zero non-5 value fills all 5s in that row."""
+        def find_indicator(grid):
+            rows, cols = len(grid), len(grid[0])
+            for c in range(cols):
+                col_vals = [grid[r][c] for r in range(rows)]
+                if any(v == 5 for v in col_vals):
+                    continue
+                if any(v != 0 for v in col_vals):
+                    return c
+            return None
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            ind = find_indicator(grid)
+            if ind is None:
+                return None
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                color = grid[r][ind]
+                if color != 0:
+                    for c in range(cols):
+                        if grid[r][c] == 5:
+                            out[r][c] = color
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_reflect_bottom_to_top(self, train, test_input):
+        """Top half becomes mirror of bottom half; bottom half unchanged (vertical symmetry)."""
+        def apply_rule(grid):
+            rows = len(grid)
+            out = [list(row) for row in grid]
+            for r in range(rows // 2):
+                out[r] = list(grid[rows - 1 - r])
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
