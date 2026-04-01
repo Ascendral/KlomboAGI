@@ -443,6 +443,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_unique_quadrant,
             self._try_fill_endpoints_with_midpoint5,
             self._try_recolor_8_blobs_by_palette,
+            self._try_cross_and_diagonals,
+            self._try_flow_to_wall,
         ]
         for s in v2:
             try:
@@ -7480,6 +7482,115 @@ class SmartARCSolverV2(SmartARCSolver):
                 if all(others[0] == o for o in others) and q[i] != others[0]:
                     return q[i]
             return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_cross_and_diagonals(self, train, test_input):
+        """Grid is all one background color with a few 1s. Each 1 at (r,c):
+        fills row r and col c with 1s, places 2 at intersection,
+        places 3 at the 4 diagonal neighbors (if still background)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find background and cross value
+            from collections import Counter
+            flat = [v for row in grid for v in row]
+            cnt = Counter(flat)
+            if len(cnt) < 2:
+                return None
+            bg = cnt.most_common(1)[0][0]
+            cross_vals = [v for v, c in cnt.items() if v != bg]
+            if len(cross_vals) != 1:
+                return None
+            cv = cross_vals[0]
+            crosses = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == cv]
+            if not crosses:
+                return None
+            out = [list(row) for row in grid]
+            # Draw bars
+            for r, c in crosses:
+                for cc in range(cols):
+                    out[r][cc] = cv
+                for rr in range(rows):
+                    out[rr][c] = cv
+            # Mark intersections with 2
+            for r, c in crosses:
+                out[r][c] = 2
+            # Mark diagonals with 3 (only if background)
+            for r, c in crosses:
+                for dr, dc in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < rows and 0 <= nc < cols and out[nr][nc] == bg:
+                        out[nr][nc] = 3
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_flow_to_wall(self, train, test_input):
+        """Grid has a wall (row or col, all one non-zero color). Non-zero cells
+        flow toward the wall, filling the line from their position to next
+        obstacle or the wall."""
+        def find_wall(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Check columns (right then left)
+            if all(grid[r][cols-1] != 0 for r in range(rows)):
+                wc = grid[0][cols-1]
+                if all(grid[r][cols-1] == wc for r in range(rows)):
+                    return ('right', cols-1, wc)
+            if all(grid[r][0] != 0 for r in range(rows)):
+                wc = grid[0][0]
+                if all(grid[r][0] == wc for r in range(rows)):
+                    return ('left', 0, wc)
+            # Check rows (bottom then top)
+            if all(grid[rows-1][c] != 0 for c in range(cols)):
+                wc = grid[rows-1][0]
+                if all(grid[rows-1][c] == wc for c in range(cols)):
+                    return ('down', rows-1, wc)
+            if all(grid[0][c] != 0 for c in range(cols)):
+                wc = grid[0][0]
+                if all(grid[0][c] == wc for c in range(cols)):
+                    return ('up', 0, wc)
+            return None
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            w = find_wall(grid)
+            if w is None:
+                return None
+            direction, wall_idx, wall_color = w
+            out = [list(row) for row in grid]
+            if direction == 'right':
+                for r in range(rows):
+                    cells = sorted([(c, grid[r][c]) for c in range(cols-1) if grid[r][c] != 0], key=lambda x: x[0])
+                    for i, (c, v) in enumerate(cells):
+                        end = cells[i+1][0] if i+1 < len(cells) else cols-1
+                        for cc in range(c, end):
+                            out[r][cc] = v
+            elif direction == 'left':
+                for r in range(rows):
+                    cells = sorted([(c, grid[r][c]) for c in range(1, cols) if grid[r][c] != 0], key=lambda x: -x[0])
+                    for i, (c, v) in enumerate(cells):
+                        end = cells[i+1][0] if i+1 < len(cells) else 0
+                        for cc in range(end+1, c+1):
+                            out[r][cc] = v
+            elif direction == 'down':
+                for c in range(cols):
+                    cells = sorted([(r, grid[r][c]) for r in range(rows-1) if grid[r][c] != 0], key=lambda x: x[0])
+                    for i, (r, v) in enumerate(cells):
+                        end = cells[i+1][0] if i+1 < len(cells) else rows-1
+                        for rr in range(r, end):
+                            out[rr][c] = v
+            elif direction == 'up':
+                for c in range(cols):
+                    cells = sorted([(r, grid[r][c]) for r in range(1, rows) if grid[r][c] != 0], key=lambda x: -x[0])
+                    for i, (r, v) in enumerate(cells):
+                        end = cells[i+1][0] if i+1 < len(cells) else 0
+                        for rr in range(end+1, r+1):
+                            out[rr][c] = v
+            return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
