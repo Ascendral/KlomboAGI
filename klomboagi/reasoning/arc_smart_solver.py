@@ -383,6 +383,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_1frame_by_interior_parity,
             self._try_tile_pattern_extend_recolor,
             self._try_key_template_rotate_fill,
+            self._try_odd_patch_out,
+            self._try_middle_col_only,
         ]
         for s in v2:
             try:
@@ -5851,5 +5853,56 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_odd_patch_out(self, train, test_input):
+        """Grid contains k equal 3x3 patches; find the one with unique binary pattern."""
+        def get_patches(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows == 3 and cols % 3 == 0 and cols > 3:
+                k = cols // 3
+                return [[[grid[r][bc*3 + c] for c in range(3)] for r in range(3)] for bc in range(k)]
+            elif cols == 3 and rows % 3 == 0 and rows > 3:
+                k = rows // 3
+                return [[[grid[br*3 + r][c] for c in range(3)] for r in range(3)] for br in range(k)]
+            return None
+
+        def binary(patch):
+            return tuple(tuple(1 if v != 0 else 0 for v in row) for row in patch)
+
+        def apply_rule(grid):
+            patches = get_patches(grid)
+            if patches is None or len(patches) < 3:
+                return None
+            patterns = [binary(p) for p in patches]
+            from collections import Counter
+            cnt = Counter(patterns)
+            if len(cnt) != 2:
+                return None
+            odd_pat = [p for p, c in cnt.items() if c == 1]
+            if len(odd_pat) != 1:
+                return None
+            idx = patterns.index(odd_pat[0])
+            return patches[idx]
+
+        for ex in train:
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_middle_col_only(self, train, test_input):
+        """Keep only the middle column (cols//2), zero everything else."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            mid = cols // 2
+            return [[grid[r][mid] if c == mid else 0 for c in range(cols)] for r in range(rows)]
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
                 return None
         return apply_rule(test_input)
