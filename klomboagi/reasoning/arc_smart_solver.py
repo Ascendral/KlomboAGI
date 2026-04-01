@@ -451,6 +451,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_gravity_toward_separator,
             self._try_radiating_line_78,
             self._try_stamp_pattern_on_5_regions,
+            self._try_key_grid_recolor,
         ]
         for s in v2:
             try:
@@ -8072,6 +8073,61 @@ class SmartARCSolverV2(SmartARCSolver):
                 for dr in range(ph):
                     for dc in range(pw):
                         out[sr + dr][sc + dc] = pat[(dr, dc)]
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_key_grid_recolor(self, train, test_input):
+        """Grid has a K×L key (non-0 non-1 values) and 1s arranged in a K×L spatial grid.
+        Each spatial cell (i,j) of the 1-grid gets recolored with key_mat[i][j].
+        1s in same row-band i and col-band j form one instance."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            key_cells = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols)
+                         if grid[r][c] not in (0, 1)]
+            if not key_cells:
+                return None
+            kr0 = min(r for r, c, v in key_cells)
+            kr1 = max(r for r, c, v in key_cells)
+            kc0 = min(c for r, c, v in key_cells)
+            kc1 = max(c for r, c, v in key_cells)
+            kh, kw = kr1 - kr0 + 1, kc1 - kc0 + 1
+            key_mat = [[grid[kr0 + dr][kc0 + dc] for dc in range(kw)] for dr in range(kh)]
+            one_rows = sorted(set(r for r in range(rows) for c in range(cols) if grid[r][c] == 1))
+            one_cols = sorted(set(c for r in range(rows) for c in range(cols) if grid[r][c] == 1))
+            def group_consecutive(indices):
+                if not indices:
+                    return []
+                groups = [[indices[0]]]
+                for idx in indices[1:]:
+                    if idx == groups[-1][-1] + 1:
+                        groups[-1].append(idx)
+                    else:
+                        groups.append([idx])
+                return groups
+            row_groups = group_consecutive(one_rows)
+            col_groups = group_consecutive(one_cols)
+            if len(row_groups) != kh or len(col_groups) != kw:
+                return None
+            row_group_of = {}
+            for i, rg in enumerate(row_groups):
+                for r in rg:
+                    row_group_of[r] = i
+            col_group_of = {}
+            for j, cg in enumerate(col_groups):
+                for c in cg:
+                    col_group_of[c] = j
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == 1:
+                        i = row_group_of.get(r)
+                        j = col_group_of.get(c)
+                        if i is None or j is None:
+                            return None
+                        out[r][c] = key_mat[i][j]
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
