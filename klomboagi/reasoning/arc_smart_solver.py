@@ -432,6 +432,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_lower_to_upper_triangle,
             self._try_extract_symmetric_shape,
             self._try_corner_color_quadrant,
+            self._try_mirror_top_rows_to_bottom,
         ]
         for s in v2:
             try:
@@ -7253,6 +7254,32 @@ class SmartARCSolverV2(SmartARCSolver):
                                  tr if r < ih//2 and c >= iw//2 else \
                                  bl if r >= ih//2 and c < iw//2 else br
                         out[r][c] = corner
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_mirror_top_rows_to_bottom(self, train, test_input):
+        """Non-zero rows at the top; output = same grid with those rows reversed at the bottom."""
+        def apply_rule(grid):
+            rows = len(grid)
+            # Find P = number of consecutive non-zero rows at top
+            p = 0
+            for row in grid:
+                if any(v != 0 for v in row):
+                    p += 1
+                else:
+                    break
+            if p == 0 or p >= rows:
+                return None
+            # Check remaining rows are all zero
+            if any(v != 0 for r in range(p, rows) for v in grid[r]):
+                return None
+            # Output: same but bottom p rows = reversed top p rows
+            out = [list(row) for row in grid]
+            for i in range(p):
+                out[rows - p + i] = list(grid[p - 1 - i])
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
