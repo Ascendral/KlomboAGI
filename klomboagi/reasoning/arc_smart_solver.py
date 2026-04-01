@@ -375,6 +375,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_path_value_reversal,
             self._try_connect_pairs_with_8,
             self._try_solid3row_middle_alternate,
+            self._try_5border_swap_interior,
+            self._try_ones_expand_3x3,
         ]
         for s in v2:
             try:
@@ -5459,6 +5461,84 @@ class SmartARCSolverV2(SmartARCSolver):
                 for c in range(min_c, max_c + 1):
                     offset = c - min_c
                     out[mid_r][c] = v if offset % 2 == 0 else 0
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_5border_swap_interior(self, train, test_input):
+        """5-bordered rectangle: swap the two non-zero/non-5 colors inside."""
+        def find_5_border(grid):
+            rows, cols = len(grid), len(grid[0])
+            fives = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 5]
+            if not fives:
+                return None
+            min_r = min(r for r, c in fives); max_r = max(r for r, c in fives)
+            min_c = min(c for r, c in fives); max_c = max(c for r, c in fives)
+            if max_r - min_r < 2 or max_c - min_c < 2:
+                return None
+            perimeter = set()
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 1):
+                    if r == min_r or r == max_r or c == min_c or c == max_c:
+                        perimeter.add((r, c))
+            if set(fives) != perimeter:
+                return None
+            return min_r, max_r, min_c, max_c
+
+        def apply_rule(grid, border):
+            min_r, max_r, min_c, max_c = border
+            interior_colors = set()
+            for r in range(min_r + 1, max_r):
+                for c in range(min_c + 1, max_c):
+                    v = grid[r][c]
+                    if v != 0 and v != 5:
+                        interior_colors.add(v)
+            if len(interior_colors) != 2:
+                return None
+            c1, c2 = list(interior_colors)
+            swap = {c1: c2, c2: c1}
+            out = [row[:] for row in grid]
+            for r in range(min_r + 1, max_r):
+                for c in range(min_c + 1, max_c):
+                    v = grid[r][c]
+                    if v in swap:
+                        out[r][c] = swap[v]
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            border = find_5_border(ex['input'])
+            if border is None:
+                return None
+            result = apply_rule(ex['input'], border)
+            if result is None or result != ex['output']:
+                return None
+        border = find_5_border(test_input)
+        if border is None:
+            return None
+        return apply_rule(test_input, border)
+
+    def _try_ones_expand_3x3(self, train, test_input):
+        """Each 1 expands to 3x3 block of 1s in output (only filling 0s)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            ones = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 1]
+            if not ones:
+                return None
+            out = [row[:] for row in grid]
+            for (br, bc) in ones:
+                for dr in range(-1, 2):
+                    for dc in range(-1, 2):
+                        nr, nc = br + dr, bc + dc
+                        if 0 <= nr < rows and 0 <= nc < cols and out[nr][nc] == 0:
+                            out[nr][nc] = 1
             return out
 
         for ex in train:
