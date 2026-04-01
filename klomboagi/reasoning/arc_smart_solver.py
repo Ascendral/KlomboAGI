@@ -447,6 +447,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_flow_to_wall,
             self._try_row_bars_with_zone_borders,
             self._try_compact_anchor_corners,
+            self._try_zone_recolor_by_identity,
+            self._try_gravity_toward_separator,
         ]
         for s in v2:
             try:
@@ -7804,3 +7806,161 @@ class SmartARCSolverV2(SmartARCSolver):
             if apply_rule(ex['input']) != ex['output']:
                 return None
         return apply_rule(test_input)
+
+    def _try_zone_recolor_by_identity(self, train, test_input):
+        """Grid divided by separator rows/cols (all-same non-0 non-1 value) into zones.
+        Zones with a single non-0 non-1 color are 'identity' zones.
+        Zones with only 1s are 'pattern' zones.
+        For each pattern zone, find identity zone in same row-band or col-band -> replace 1s with that color."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_val = None
+            for r in range(rows):
+                vals = set(grid[r])
+                if len(vals) == 1 and list(vals)[0] not in (0, 1):
+                    sep_val = list(vals)[0]
+                    break
+            if sep_val is None:
+                return None
+            sep_rows = [r for r in range(rows) if all(grid[r][c] == sep_val for c in range(cols))]
+            sep_cols = [c for c in range(cols) if all(grid[r][c] == sep_val for r in range(rows))]
+            def make_bands(sep_list, total):
+                bands = []
+                prev = 0
+                for s in sep_list + [total]:
+                    if s > prev:
+                        bands.append((prev, s))
+                    prev = s + 1
+                return bands
+            row_bands = make_bands(sep_rows, rows)
+            col_bands = make_bands(sep_cols, cols)
+            identity = {}
+            patterns = {}
+            for ri, (r0, r1) in enumerate(row_bands):
+                for ci, (c0, c1) in enumerate(col_bands):
+                    cells = [(grid[r][c], r, c) for r in range(r0, r1) for c in range(c0, c1)]
+                    non_zero = [(v, r, c) for v, r, c in cells if v != 0 and v != sep_val]
+                    ones = [(r, c) for v, r, c in non_zero if v == 1]
+                    non_ones = [(v, r, c) for v, r, c in non_zero if v != 1]
+                    if non_ones and not ones and len(set(v for v, r, c in non_ones)) == 1:
+                        identity[(ri, ci)] = non_ones[0][0]
+                    elif ones and not non_ones:
+                        patterns[(ri, ci)] = ones
+                    elif ones and non_ones:
+                        return None
+            out = [list(row) for row in grid]
+            for (pri, pci), patt_cells in patterns.items():
+                matches = [(ri, ci) for (ri, ci) in identity if ri == pri or ci == pci]
+                if len(matches) != 1:
+                    return None
+                color = identity[matches[0]]
+                for r, c in patt_cells:
+                    out[r][c] = color
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_gravity_toward_separator(self, train, test_input):
+        """Single separator row (all same non-0 non-1 value). Two non-bg, non-sep values.
+        Value A (e.g. 2) falls toward the separator (creating a trail from position to sep).
+        Value B (e.g. 1) falls away from the separator (creating a trail from position to edge)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows)
+                        if len(set(grid[r])) == 1 and list(set(grid[r]))[0] not in (0, 1)]
+            if len(sep_rows) != 1:
+                return None
+            sep = sep_rows[0]
+            sep_val = grid[sep][0]
+            # Find exactly 2 non-bg non-sep values
+            from collections import Counter
+            flat = [v for row in grid for v in row if v != sep_val]
+            cnt = Counter(flat)
+            bg = cnt.most_common(1)[0][0]
+            others = [v for v, _ in cnt.most_common() if v != bg]
+            if len(others) != 2:
+                return None
+            # Determine which falls toward sep vs away
+            # Score: toward_sep means cells appear between position and sep in output
+            # Try both assignments
+            def simulate(toward_val, away_val):
+                out = [[sep_val if r == sep else bg for c in range(cols)] for r in range(rows)]
+                for r in range(rows):
+                    if r == sep:
+                        continue
+                    in_top = r < sep
+                    for c in range(cols):
+                        v = grid[r][c]
+                        if v == toward_val:
+                            if in_top:
+                                for rr in range(r, sep): out[rr][c] = toward_val
+                            else:
+                                for rr in range(sep + 1, r + 1): out[rr][c] = toward_val
+                        elif v == away_val:
+                            if in_top:
+                                for rr in range(0, r + 1): out[rr][c] = away_val
+                            else:
+                                for rr in range(r, rows): out[rr][c] = away_val
+                return out
+            v1, v2 = others[0], others[1]
+            r1 = simulate(v1, v2)
+            r2 = simulate(v2, v1)
+            # Pick whichever matches training (will be cross-validated)
+            return r1 if r1 is not None else r2
+        # Check which assignment works for all training examples
+        def apply_with_assignment(grid, toward_val, away_val):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows)
+                        if len(set(grid[r])) == 1 and list(set(grid[r]))[0] not in (0, 1)]
+            if len(sep_rows) != 1:
+                return None
+            sep = sep_rows[0]
+            sep_val = grid[sep][0]
+            from collections import Counter
+            flat = [v for row in grid for v in row if v != sep_val]
+            cnt = Counter(flat)
+            bg = cnt.most_common(1)[0][0]
+            out = [[sep_val if r == sep else bg for c in range(cols)] for r in range(rows)]
+            for r in range(rows):
+                if r == sep:
+                    continue
+                in_top = r < sep
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v == toward_val:
+                        if in_top:
+                            for rr in range(r, sep): out[rr][c] = toward_val
+                        else:
+                            for rr in range(sep + 1, r + 1): out[rr][c] = toward_val
+                    elif v == away_val:
+                        if in_top:
+                            for rr in range(0, r + 1): out[rr][c] = away_val
+                        else:
+                            for rr in range(r, rows): out[rr][c] = away_val
+            return out
+        # Detect toward/away from first training example
+        grid0 = train[0]['input']
+        from collections import Counter
+        sep_rows_0 = [r for r in range(len(grid0))
+                      if len(set(grid0[r])) == 1 and list(set(grid0[r]))[0] not in (0, 1)]
+        if len(sep_rows_0) != 1:
+            return None
+        sep_val_0 = grid0[sep_rows_0[0]][0]
+        flat0 = [v for row in grid0 for v in row if v != sep_val_0]
+        cnt0 = Counter(flat0)
+        bg0 = cnt0.most_common(1)[0][0]
+        others0 = [v for v, _ in cnt0.most_common() if v != bg0]
+        if len(others0) != 2:
+            return None
+        v1, v2 = others0[0], others0[1]
+        for toward_val, away_val in [(v1, v2), (v2, v1)]:
+            ok = True
+            for ex in train:
+                if apply_with_assignment(ex['input'], toward_val, away_val) != ex['output']:
+                    ok = False
+                    break
+            if ok:
+                return apply_with_assignment(test_input, toward_val, away_val)
+        return None
