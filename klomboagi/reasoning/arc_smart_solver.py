@@ -446,6 +446,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_cross_and_diagonals,
             self._try_flow_to_wall,
             self._try_row_bars_with_zone_borders,
+            self._try_compact_anchor_corners,
         ]
         for s in v2:
             try:
@@ -7735,6 +7736,70 @@ class SmartARCSolverV2(SmartARCSolver):
                         out[r][c] = right_v
                 changed = True
             return out if changed else None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_compact_anchor_corners(self, train, test_input):
+        """Two non-bg colors, each with a 3x3 anchor block in opposite corners.
+        Scattered cells compact toward their anchor:
+        - Each anchor col: count all cells of that color in col -> output depth, justified toward corner
+        - Non-anchor-col cells: map to extra col (adjacent to anchor) at same row if in anchor rows,
+          else at the edge anchor row (last for TL, first for BR)."""
+        def find_anchor(grid, color, rows, cols):
+            corners = [
+                ([0,1,2],[0,1,2],'top','left'),
+                ([0,1,2],[cols-3,cols-2,cols-1],'top','right'),
+                ([rows-3,rows-2,rows-1],[0,1,2],'bottom','left'),
+                ([rows-3,rows-2,rows-1],[cols-3,cols-2,cols-1],'bottom','right'),
+            ]
+            for ar,ac,vpos,hpos in corners:
+                if all(grid[r][c]==color for r in ar for c in ac):
+                    return ar,ac,vpos,hpos
+            return None,None,None,None
+
+        def apply_rule(grid):
+            from collections import Counter
+            rows, cols = len(grid), len(grid[0])
+            if rows < 3 or cols < 3:
+                return None
+            flat = [v for row in grid for v in row]
+            cnt = Counter(flat)
+            bg = cnt.most_common(1)[0][0]
+            colors = [v for v,_ in cnt.most_common() if v != bg]
+            if len(colors) != 2:
+                return None
+            out = [[bg]*cols for _ in range(rows)]
+            for color in colors:
+                ar,ac,vpos,hpos = find_anchor(grid, color, rows, cols)
+                if ar is None:
+                    return None
+                ar_set = set(ar)
+                ac_set = set(ac)
+                is_top = vpos == 'top'
+                is_left = hpos == 'left'
+                for c in ac:
+                    depth = sum(1 for r in range(rows) if grid[r][c] == color)
+                    if is_top:
+                        for r in range(depth): out[r][c] = color
+                    else:
+                        for r in range(rows-depth, rows): out[r][c] = color
+                extra_col = (max(ac)+1) if is_left else (min(ac)-1)
+                if not (0 <= extra_col < cols):
+                    return None
+                clamp_row = max(ar) if is_top else min(ar)
+                non_anc = [(r,c2) for r in range(rows) for c2 in range(cols)
+                           if c2 not in ac_set and grid[r][c2] == color]
+                row_map = {}
+                for r,c2 in non_anc:
+                    tr = r if r in ar_set else clamp_row
+                    row_map[tr] = row_map.get(tr, 0) + 1
+                for tr in row_map:
+                    if 0 <= tr < rows:
+                        out[tr][extra_col] = color
+            return out
+
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
