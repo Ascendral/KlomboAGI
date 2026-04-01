@@ -374,6 +374,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_small_components_to_3,
             self._try_path_value_reversal,
             self._try_connect_pairs_with_8,
+            self._try_solid3row_middle_alternate,
         ]
         for s in v2:
             try:
@@ -5406,5 +5407,64 @@ class SmartARCSolverV2(SmartARCSolver):
             if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
                 return None
             if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_solid3row_middle_alternate(self, train, test_input):
+        """Each solid 3-row rectangular block has its middle row converted to alternating
+        color/0 pattern (starting with color at leftmost column). Top/bottom rows unchanged.
+        Handles: 3bdb4ada"""
+        def find_solid_rects(grid):
+            """Find all solid-color rectangles of exactly 3 rows."""
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            rects = []  # (color, min_r, max_r, min_c, max_c)
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        v = grid[sr][sc]
+                        # BFS for connected region
+                        comp = []
+                        queue = [(sr, sc)]
+                        visited[sr][sc] = True
+                        while queue:
+                            r, c = queue.pop(0)
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc]==v:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                        min_r = min(r for r,c in comp)
+                        max_r = max(r for r,c in comp)
+                        min_c = min(c for r,c in comp)
+                        max_c = max(c for r,c in comp)
+                        # Check if exactly 3 rows
+                        if max_r - min_r != 2:
+                            return None
+                        # Check solid rectangle
+                        expected = set((r, c) for r in range(min_r, max_r+1) for c in range(min_c, max_c+1))
+                        if set(comp) != expected:
+                            return None
+                        rects.append((v, min_r, max_r, min_c, max_c))
+            return rects
+
+        def apply_rule(grid):
+            rects = find_solid_rects(grid)
+            if rects is None or not rects:
+                return None
+            out = [row[:] for row in grid]
+            for v, min_r, max_r, min_c, max_c in rects:
+                mid_r = min_r + 1
+                for c in range(min_c, max_c + 1):
+                    offset = c - min_c
+                    out[mid_r][c] = v if offset % 2 == 0 else 0
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input)
