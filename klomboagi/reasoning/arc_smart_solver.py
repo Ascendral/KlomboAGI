@@ -419,6 +419,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_find_hollow_shape_color,
             self._try_row_color_fill_5,
             self._try_reflect_bottom_to_top,
+            self._try_rect_hollow_out,
+            self._try_max_zero_rect_fill6,
+            self._try_extend_pattern_rows_10,
+            self._try_cross_to_4fold,
         ]
         for s in v2:
             try:
@@ -6797,6 +6801,156 @@ class SmartARCSolverV2(SmartARCSolver):
             out = [list(row) for row in grid]
             for r in range(rows // 2):
                 out[r] = list(grid[rows - 1 - r])
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_rect_hollow_out(self, train, test_input):
+        """Solid filled rectangles: interior cells become 0 (border only stays)."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r, c in comp)
+                        max_r = max(r for r, c in comp)
+                        min_c = min(c for r, c in comp)
+                        max_c = max(c for r, c in comp)
+                        for r, c in comp:
+                            if r != min_r and r != max_r and c != min_c and c != max_c:
+                                out[r][c] = 0
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_max_zero_rect_fill6(self, train, test_input):
+        """Find the largest all-zero rectangle in the grid and fill with 6."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            h = [0] * cols
+            best_area, best = 0, None
+            for r in range(rows):
+                for c in range(cols):
+                    h[c] = h[c] + 1 if grid[r][c] == 0 else 0
+                stack = []
+                for c in range(cols + 1):
+                    height = h[c] if c < cols else 0
+                    start = c
+                    while stack and stack[-1][1] > height:
+                        sc, sh = stack.pop()
+                        w = c - sc
+                        area = sh * w
+                        if area > best_area:
+                            best_area = area
+                            best = (r - sh + 1, sc, r, sc + w - 1)
+                        start = sc
+                    stack.append((start, height))
+            if best is None:
+                return None
+            r1, c1, r2, c2 = best
+            out = [list(row) for row in grid]
+            for r in range(r1, r2 + 1):
+                for c in range(c1, c2 + 1):
+                    out[r][c] = 6
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_extend_pattern_rows_10(self, train, test_input):
+        """Detect repeating row period and extend to 10 rows."""
+        def find_period(grid):
+            n = len(grid)
+            for p in range(1, n + 1):
+                valid = True
+                for i in range(n):
+                    if grid[i] != grid[i % p]:
+                        valid = False
+                        break
+                if valid:
+                    return p
+            return n
+        def apply_rule(grid):
+            rows = len(grid)
+            if rows >= 10:
+                return None
+            p = find_period(grid)
+            cycle = grid[:p]
+            return [list(cycle[i % p]) for i in range(10)]
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_cross_to_4fold(self, train, test_input):
+        """Pattern in one quadrant of a cross-divided grid → reflected to all 4 quadrants."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows) if all(grid[r][c] != 0 and grid[r][c] == grid[r][0] for c in range(cols))]
+            sep_cols = [c for c in range(cols) if all(grid[r][c] != 0 and grid[r][c] == grid[0][c] for r in range(rows))]
+            if not sep_rows or not sep_cols:
+                return None
+            sr, sc = sep_rows[0], sep_cols[0]
+            sep_color = grid[sr][sc]
+            q_ranges = [
+                (list(range(0, sr)), list(range(0, sc))),
+                (list(range(0, sr)), list(range(sc+1, cols))),
+                (list(range(sr+1, rows)), list(range(0, sc))),
+                (list(range(sr+1, rows)), list(range(sc+1, cols))),
+            ]
+            pattern_q = None
+            for qi, (rr, cc) in enumerate(q_ranges):
+                if rr and cc and any(grid[r][c] != 0 for r in rr for c in cc):
+                    pattern_q = qi
+                    break
+            if pattern_q is None:
+                return None
+            rr, cc = q_ranges[pattern_q]
+            h, w = len(rr), len(cc)
+            if h == 0 or w == 0:
+                return None
+            pat = [[sep_color if grid[r][c] != 0 else 0 for c in cc] for r in rr]
+
+            def hflip(p): return [row[::-1] for row in p]
+            def vflip(p): return p[::-1]
+            def rot180(p): return [row[::-1] for row in p[::-1]]
+
+            if pattern_q == 0:
+                tl, tr, bl, br = pat, hflip(pat), vflip(pat), rot180(pat)
+            elif pattern_q == 1:
+                tl, tr, bl, br = hflip(pat), pat, rot180(pat), vflip(pat)
+            elif pattern_q == 2:
+                tl, tr, bl, br = vflip(pat), rot180(pat), pat, hflip(pat)
+            else:
+                tl, tr, bl, br = rot180(pat), vflip(pat), hflip(pat), pat
+
+            out = [[0]*(w*2) for _ in range(h*2)]
+            for i in range(h):
+                for j in range(w):
+                    out[i][j] = tl[i][j]
+                    out[i][w+j] = tr[i][j]
+                    out[h+i][j] = bl[i][j]
+                    out[h+i][w+j] = br[i][j]
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
