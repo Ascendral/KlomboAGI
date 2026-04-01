@@ -433,6 +433,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extract_symmetric_shape,
             self._try_corner_color_quadrant,
             self._try_mirror_top_rows_to_bottom,
+            self._try_color_col_diagonal_and_bottom,
+            self._try_dedup_consecutive_rows_cols,
         ]
         for s in v2:
             try:
@@ -7281,6 +7283,64 @@ class SmartARCSolverV2(SmartARCSolver):
             for i in range(p):
                 out[rows - p + i] = list(grid[p - 1 - i])
             return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_color_col_diagonal_and_bottom(self, train, test_input):
+        """Left column filled with one color, rest zeros. Output: preserve left col,
+        add diagonal of 2s from top-right down-left, fill bottom row with 4s."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Check left col all same non-zero color
+            colors = set(grid[r][0] for r in range(rows))
+            if len(colors) != 1 or 0 in colors:
+                return None
+            color = grid[0][0]
+            # Check rest is all zeros
+            if any(grid[r][c] != 0 for r in range(rows) for c in range(1, cols)):
+                return None
+            out = [list(row) for row in grid]
+            # Diagonal of 2s: from (0, cols-1) going down-left to (rows-2, 1)
+            for i in range(rows - 1):
+                r, c = i, cols - 1 - i
+                if c >= 1:
+                    out[r][c] = 2
+            # Bottom row: col 0 stays color, rest = 4
+            for c in range(1, cols):
+                out[rows-1][c] = 4
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_dedup_consecutive_rows_cols(self, train, test_input):
+        """Collapse consecutive identical rows, then consecutive identical columns."""
+        def dedup_rows(grid):
+            if not grid:
+                return grid
+            out = [grid[0]]
+            for row in grid[1:]:
+                if row != out[-1]:
+                    out.append(row)
+            return out
+        def dedup_cols(grid):
+            if not grid:
+                return grid
+            cols = len(grid[0])
+            keep = [0]
+            for c in range(1, cols):
+                if any(grid[r][c] != grid[r][keep[-1]] for r in range(len(grid))):
+                    keep.append(c)
+            return [[row[c] for c in keep] for row in grid]
+        def apply_rule(grid):
+            g = dedup_rows(grid)
+            g = dedup_cols(g)
+            if g == grid:
+                return None
+            return g
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
