@@ -70,9 +70,18 @@ class KlomboHandler(BaseHTTPRequestHandler):
             # Serve dashboard
             if self.path in ("/", "/index.html"):
                 import os
-                static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-                html_path = os.path.join(static_dir, "index.html")
-                if os.path.exists(html_path):
+                # Try multiple paths: relative to this file, /opt/klomboagi, cwd
+                candidates = [
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "index.html"),
+                    "/opt/klomboagi/klomboagi/static/index.html",
+                    os.path.join(os.getcwd(), "klomboagi", "static", "index.html"),
+                ]
+                html_path = None
+                for c in candidates:
+                    if os.path.exists(c):
+                        html_path = c
+                        break
+                if html_path:
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html")
                     self.end_headers()

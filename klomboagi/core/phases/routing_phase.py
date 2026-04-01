@@ -23,6 +23,25 @@ class RoutingPhase(Phase):
             "known_entities": g.context.entities_mentioned,
         })
 
+        # Check for system actions FIRST (before deep thinking)
+        q_lower = ctx.resolved_message.lower().strip().rstrip("?")
+        system_result = g._try_system_action(q_lower, ctx.resolved_message)
+        if system_result is not None:
+            ctx.response = system_result
+            g.context.update(ctx.intent, ctx.resolved_message)
+            return ctx
+
+        # Check for system observation questions
+        observe_patterns = ("how's the system", "hows the system", "system health",
+                           "any anomalies", "any problems", "what do you see",
+                           "what do you notice", "anything wrong",
+                           "how are things", "how is everything",
+                           "what's happening", "whats happening")
+        if any(p in q_lower for p in observe_patterns):
+            ctx.response = g._system_observation_report()
+            g.context.update(ctx.intent, ctx.resolved_message)
+            return ctx
+
         # Route: deep think for questions, base system for everything else
         if ctx.intent["type"] == "question":
             g.metacognition.record_question("knowledge")
