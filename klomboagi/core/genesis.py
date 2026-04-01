@@ -441,6 +441,10 @@ class Genesis:
         # Load saved state if it exists
         self.load_state()
 
+        # Boot knowledge — seed foundational categories if brain is empty
+        if len(self.base._beliefs) == 0:
+            self._seed_boot_knowledge()
+
     def _init_cognition_loop(self) -> None:
         """Wire the CognitionLoop with a lightweight mock storage."""
         from unittest.mock import MagicMock
@@ -598,19 +602,31 @@ class Genesis:
 
         Falls back to hardcoded opposites for basic cases.
         """
-        def strip_article(s: str) -> str:
+        def normalize(s: str) -> str:
+            s = s.lower().strip()
             for art in ("a ", "an ", "the "):
                 if s.startswith(art):
-                    return s[len(art):]
+                    s = s[len(art):]
+            # Basic depluralize: "mammals" → "mammal", "reptiles" → "reptile"
+            if s.endswith("ies"):
+                s = s[:-3] + "y"  # "puppies" → "puppy"
+            elif s.endswith("es") and not s.endswith("ses"):
+                s = s[:-2]  # "boxes" → "box" but not "horses" → "hors"
+                if not self.base.graph.get(s):
+                    s = s + "e"  # "reptiles" → "reptile" (not "reptil")
+            elif s.endswith("s") and not s.endswith("ss"):
+                candidate = s[:-1]
+                if self.base.graph.get(candidate) or candidate in self.base._beliefs:
+                    s = candidate  # "mammals" → "mammal"
             return s
 
-        old_clean = strip_article(old.lower().strip())
-        new_clean = strip_article(new.lower().strip())
+        old_clean = normalize(old)
+        new_clean = normalize(new)
 
         # Negation
-        if new_clean.startswith("not ") and strip_article(new_clean[4:]) == old_clean:
+        if new_clean.startswith("not ") and normalize(new_clean[4:]) == old_clean:
             return True
-        if old_clean.startswith("not ") and strip_article(old_clean[4:]) == new_clean:
+        if old_clean.startswith("not ") and normalize(old_clean[4:]) == new_clean:
             return True
 
         # Graph-based: check if both predicates share a parent category
@@ -2477,6 +2493,82 @@ class Genesis:
             return True
         except Exception:
             return False
+
+    def _seed_boot_knowledge(self) -> None:
+        """Seed the brain with foundational knowledge on first boot.
+
+        Like a baby's instincts — not learned, but necessary for learning.
+        Categories, basic relations, enough for surprise detection and
+        reasoning to work from the very first conversation.
+        """
+        # Foundational categories — what kinds of things exist
+        categories = {
+            # Animals
+            "dog": "a mammal", "cat": "a mammal", "horse": "a mammal",
+            "whale": "a mammal", "bat": "a mammal",
+            "snake": "a reptile", "lizard": "a reptile", "alligator": "a reptile",
+            "eagle": "a bird", "penguin": "a bird", "sparrow": "a bird",
+            "salmon": "a fish", "shark": "a fish", "trout": "a fish",
+            "mammal": "an animal", "reptile": "an animal", "bird": "an animal",
+            "fish": "an animal", "insect": "an animal",
+            "animal": "a living thing", "plant": "a living thing",
+            # Colors
+            "red": "a color", "blue": "a color", "green": "a color",
+            "yellow": "a color", "orange": "a color", "purple": "a color",
+            "black": "a color", "white": "a color",
+            # Materials
+            "wood": "a material", "metal": "a material", "glass": "a material",
+            "water": "a liquid", "air": "a gas",
+            # Shapes
+            "circle": "a shape", "square": "a shape", "triangle": "a shape",
+            # Basics
+            "earth": "a planet", "sun": "a star", "moon": "a satellite",
+        }
+
+        for subject, predicate in categories.items():
+            statement = f"{subject} is {predicate}"
+            if statement not in self.base._beliefs:
+                self.base._evidence_counter += 1
+                belief = Belief(
+                    statement=statement,
+                    truth=TruthValue.from_single_observation(True),
+                    stamp=EvidenceStamp.new(self.base._evidence_counter),
+                    subject=subject,
+                    predicate=predicate,
+                    source="boot_knowledge",
+                )
+                # Boost confidence for boot knowledge — these are axioms
+                belief.truth.frequency = 0.95
+                belief.truth.confidence = 0.9
+                self.base._beliefs[statement] = belief
+                self.base.memory.beliefs[statement] = belief.to_dict()
+                self.base.graph.add(subject, is_a=[predicate.replace("a ", "").replace("an ", "")])
+
+        # Foundational relations
+        from klomboagi.core.relations import RelationType
+        relations = [
+            ("mammal", RelationType.IS_A, "animal"),
+            ("reptile", RelationType.IS_A, "animal"),
+            ("bird", RelationType.IS_A, "animal"),
+            ("fish", RelationType.IS_A, "animal"),
+            ("insect", RelationType.IS_A, "animal"),
+            ("animal", RelationType.IS_A, "living thing"),
+            ("plant", RelationType.IS_A, "living thing"),
+            ("water", RelationType.REQUIRES, "hydrogen"),
+            ("fire", RelationType.REQUIRES, "oxygen"),
+            ("gravity", RelationType.CAUSES, "falling"),
+            ("heat", RelationType.CAUSES, "expansion"),
+            ("cold", RelationType.CAUSES, "contraction"),
+        ]
+        for source, rel_type, target in relations:
+            self.relations.add(source, rel_type, target, confidence=0.9, domain="boot")
+
+        # Build belief index for fast lookup
+        self.belief_index.build(self.base._beliefs)
+
+        # Save immediately so boot knowledge persists
+        self.base.memory.save(self.base.memory_path)
+        self.save_state()
 
     def status(self) -> str:
         """Full system status."""

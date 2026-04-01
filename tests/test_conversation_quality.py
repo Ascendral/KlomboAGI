@@ -58,7 +58,7 @@ class TestMultiTurnCoherence:
         resp1 = g.hear("What is the sun?")
         resp2 = g.hear("What is water?")
         assert "star" in resp1.lower()
-        assert "hydrogen" in resp2.lower() or "oxygen" in resp2.lower()
+        assert "hydrogen" in resp2.lower() or "oxygen" in resp2.lower() or "liquid" in resp2.lower()
 
 
 class TestTeachingQuality:
