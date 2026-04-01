@@ -377,6 +377,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_solid3row_middle_alternate,
             self._try_5border_swap_interior,
             self._try_ones_expand_3x3,
+            self._try_stripe_mode_fill,
         ]
         for s in v2:
             try:
@@ -5548,3 +5549,45 @@ class SmartARCSolverV2(SmartARCSolver):
             if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input)
+
+    def _try_stripe_mode_fill(self, train, test_input):
+        """Vertical or horizontal stripes: each col/row gets its most frequent value."""
+        from collections import Counter
+
+        def col_mode_grid(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [row[:] for row in grid]
+            for c in range(cols):
+                vals = [grid[r][c] for r in range(rows)]
+                counts = Counter(vals)
+                top = counts.most_common(2)
+                if len(top) > 1 and top[0][1] == top[1][1]:
+                    return None
+                mode = top[0][0]
+                for r in range(rows):
+                    out[r][c] = mode
+            return out
+
+        def row_mode_grid(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = []
+            for r in range(rows):
+                counts = Counter(grid[r])
+                top = counts.most_common(2)
+                if len(top) > 1 and top[0][1] == top[1][1]:
+                    return None
+                out.append([top[0][0]] * cols)
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            col_r = col_mode_grid(ex['input'])
+            row_r = row_mode_grid(ex['input'])
+            if col_r != ex['output'] and row_r != ex['output']:
+                return None
+        # Apply to test: prefer column mode, fall back to row mode
+        result = col_mode_grid(test_input)
+        if result is not None:
+            return result
+        return row_mode_grid(test_input)
