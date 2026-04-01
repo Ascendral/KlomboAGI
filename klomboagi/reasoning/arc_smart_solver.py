@@ -387,6 +387,12 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_middle_col_only,
             self._try_bar_bottom_half_to_8,
             self._try_color_stripe_list,
+            self._try_mirror_horizontal_append,
+            self._try_mirror_vertical_append,
+            self._try_zoom_outer_double,
+            self._try_lr_symmetric_color,
+            self._try_grid_diagonal_indicator,
+            self._try_count_ones_fill_order,
         ]
         for s in v2:
             try:
@@ -5978,6 +5984,119 @@ class SmartARCSolverV2(SmartARCSolver):
                 return [[c] for c in colors_seen]
 
         for ex in train:
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_mirror_horizontal_append(self, train, test_input):
+        """Append the LR-mirror of the grid to the right (double width)."""
+        def apply_rule(grid):
+            return [row + row[::-1] for row in grid]
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']):
+                return None
+            if len(ex['output'][0]) != len(ex['input'][0]) * 2:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_mirror_vertical_append(self, train, test_input):
+        """Append the UD-mirror of the grid below (double height)."""
+        def apply_rule(grid):
+            return list(grid) + list(grid[::-1])
+
+        for ex in train:
+            if len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            if len(ex['output']) != len(ex['input']) * 2:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_zoom_outer_double(self, train, test_input):
+        """3x3 → 5x5: outer rows/cols doubled, center stays 1x."""
+        def apply_rule(grid):
+            if len(grid) != 3 or len(grid[0]) != 3:
+                return None
+            row_map = [0, 0, 1, 2, 2]
+            col_map = [0, 0, 1, 2, 2]
+            return [[grid[row_map[r]][col_map[c]] for c in range(5)] for r in range(5)]
+
+        for ex in train:
+            if len(ex['input']) != 3 or len(ex['input'][0]) != 3:
+                return None
+            if len(ex['output']) != 5 or len(ex['output'][0]) != 5:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_lr_symmetric_color(self, train, test_input):
+        """3x3 binary patterns: LR-symmetric → color 1, else → color 7."""
+        def apply_rule(grid):
+            if len(grid) != 3 or len(grid[0]) != 3:
+                return None
+            binary = [[1 if v != 0 else 0 for v in row] for row in grid]
+            lr_sym = all(binary[r][0] == binary[r][2] for r in range(3))
+            return [[1]] if lr_sym else [[7]]
+
+        for ex in train:
+            if len(ex['input']) != 3 or len(ex['input'][0]) != 3:
+                return None
+            if ex['output'] not in [[[1]], [[7]]]:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_grid_diagonal_indicator(self, train, test_input):
+        """3x3 → 3x3: homogeneous → top-row 5s; bottom-row uniform → main diag; else anti-diag."""
+        def apply_rule(grid):
+            if len(grid) != 3 or len(grid[0]) != 3:
+                return None
+            out = [[0]*3 for _ in range(3)]
+            flat = [grid[r][c] for r in range(3) for c in range(3)]
+            if len(set(flat)) == 1:
+                out[0] = [5, 5, 5]
+            elif len(set(grid[2])) == 1:
+                for i in range(3): out[i][i] = 5
+            else:
+                for i in range(3): out[i][2-i] = 5
+            return out
+
+        for ex in train:
+            if len(ex['input']) != 3 or len(ex['input'][0]) != 3:
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_count_ones_fill_order(self, train, test_input):
+        """3x3 grid: count 1s, fill that many cells in fixed order (top row, then (1,1), ...) with 2."""
+        FILL_ORDER = [(0,0),(0,1),(0,2),(1,1),(1,0),(1,2),(2,1),(2,0),(2,2)]
+
+        def apply_rule(grid):
+            if len(grid) != 3 or len(grid[0]) != 3:
+                return None
+            n = sum(grid[r][c] != 0 for r in range(3) for c in range(3))
+            if n > 9: return None
+            out = [[0]*3 for _ in range(3)]
+            for r, c in FILL_ORDER[:n]:
+                out[r][c] = 2
+            return out
+
+        for ex in train:
+            if len(ex['input']) != 3 or len(ex['input'][0]) != 3:
+                return None
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
                 return None
