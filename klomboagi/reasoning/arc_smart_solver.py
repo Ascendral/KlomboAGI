@@ -441,6 +441,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_or_left_right_half,
             self._try_extract_diamond_5x5,
             self._try_unique_quadrant,
+            self._try_fill_endpoints_with_midpoint5,
+            self._try_recolor_8_blobs_by_palette,
         ]
         for s in v2:
             try:
@@ -7478,6 +7480,93 @@ class SmartARCSolverV2(SmartARCSolver):
                 if all(others[0] == o for o in others) and q[i] != others[0]:
                     return q[i]
             return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_recolor_8_blobs_by_palette(self, train, test_input):
+        """Grid has colored 'palette' blob and multiple 8-blobs with same shape.
+        Replace each 8-blob with palette colors (by relative position); clear palette."""
+        def get_8_blobs(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = set()
+            blobs = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == 8 and (r, c) not in visited:
+                        blob = []
+                        stack = [(r, c)]
+                        while stack:
+                            cr, cc = stack.pop()
+                            if (cr, cc) in visited or not (0 <= cr < rows and 0 <= cc < cols):
+                                continue
+                            if grid[cr][cc] != 8:
+                                continue
+                            visited.add((cr, cc))
+                            blob.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                stack.append((cr+dr, cc+dc))
+                        blobs.append(blob)
+            return blobs
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            palette_cells = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols)
+                             if grid[r][c] != 0 and grid[r][c] != 8]
+            if not palette_cells:
+                return None
+            eight_blobs = get_8_blobs(grid)
+            if not eight_blobs:
+                return None
+            min_r = min(r for r, c, v in palette_cells)
+            min_c = min(c for r, c, v in palette_cells)
+            palette_shape = {(r - min_r, c - min_c): v for r, c, v in palette_cells}
+            out = [list(row) for row in grid]
+            for r, c, v in palette_cells:
+                out[r][c] = 0
+            for blob in eight_blobs:
+                br = min(r for r, c in blob)
+                bc = min(c for r, c in blob)
+                blob_offsets = {(r - br, c - bc) for r, c in blob}
+                if blob_offsets != set(palette_shape.keys()):
+                    return None
+                for r, c in blob:
+                    out[r][c] = palette_shape[(r - br, c - bc)]
+            return out
+
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_fill_endpoints_with_midpoint5(self, train, test_input):
+        """Rows with non-zero values only at col 0 and col -1.
+        Fill: left half with left val, middle col with 5, right half with right val."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            if cols % 2 == 0:
+                return None  # need odd cols for clear midpoint
+            mid = cols // 2
+            out = [list(row) for row in grid]
+            changed = False
+            for r in range(rows):
+                row = grid[r]
+                left_v = row[0]
+                right_v = row[-1]
+                if left_v == 0 or right_v == 0:
+                    continue
+                if any(row[c] != 0 for c in range(1, cols - 1)):
+                    continue
+                for c in range(cols):
+                    if c < mid:
+                        out[r][c] = left_v
+                    elif c == mid:
+                        out[r][c] = 5
+                    else:
+                        out[r][c] = right_v
+                changed = True
+            return out if changed else None
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
