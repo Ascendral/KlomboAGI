@@ -431,6 +431,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_border_8,
             self._try_lower_to_upper_triangle,
             self._try_extract_symmetric_shape,
+            self._try_corner_color_quadrant,
         ]
         for s in v2:
             try:
@@ -7211,6 +7212,48 @@ class SmartARCSolverV2(SmartARCSolver):
             if len(sym_shapes) != 1:
                 return None
             return sym_shapes[0][1]
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_corner_color_quadrant(self, train, test_input):
+        """Grid with 1-filled border rows/cols forming a +. 4 corner cells have colors.
+        Interior cells are 8 (active) or 0. Output: active cells colored by which quadrant
+        corner they belong to; inactive cells = 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find separator rows and cols (all 1s)
+            sep_rows = [r for r in range(rows) if all(grid[r][c] == 1 for c in range(cols))]
+            sep_cols = [c for c in range(cols) if all(grid[r][c] == 1 for r in range(rows))]
+            if len(sep_rows) != 2 or len(sep_cols) != 2:
+                return None
+            r1, r2 = sep_rows[0], sep_rows[1]
+            c1, c2 = sep_cols[0], sep_cols[1]
+            # Corners must be exactly at grid edges outside separators
+            if r1 != 1 or r2 != rows-2 or c1 != 1 or c2 != cols-2:
+                return None
+            tl = grid[0][0]
+            tr = grid[0][cols-1]
+            bl = grid[rows-1][0]
+            br = grid[rows-1][cols-1]
+            if any(v in (0, 1) for v in (tl, tr, bl, br)):
+                return None
+            # Extract interior
+            interior = [grid[r][c1+1:c2] for r in range(r1+1, r2)]
+            ih, iw = len(interior), len(interior[0]) if interior else 0
+            if ih == 0 or iw == 0:
+                return None
+            out = [[0]*iw for _ in range(ih)]
+            for r in range(ih):
+                for c in range(iw):
+                    v = interior[r][c]
+                    if v != 0:
+                        corner = tl if r < ih//2 and c < iw//2 else \
+                                 tr if r < ih//2 and c >= iw//2 else \
+                                 bl if r >= ih//2 and c < iw//2 else br
+                        out[r][c] = corner
+            return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
