@@ -449,6 +449,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_compact_anchor_corners,
             self._try_zone_recolor_by_identity,
             self._try_gravity_toward_separator,
+            self._try_radiating_line_78,
+            self._try_stamp_pattern_on_5_regions,
         ]
         for s in v2:
             try:
@@ -7964,3 +7966,114 @@ class SmartARCSolverV2(SmartARCSolver):
             if ok:
                 return apply_with_assignment(test_input, toward_val, away_val)
         return None
+
+    def _try_radiating_line_78(self, train, test_input):
+        """A contiguous line of 7s (vertical or horizontal). Output: radiating pattern
+        where at each position along the line, a spread of alternating 7/8 fans out
+        perpendicularly. Spread = (line_length - 1 - index_from_start)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            non_zero = [(grid[r][c], r, c) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            vals = set(v for v,r,c in non_zero)
+            if vals != {7}:
+                return None
+            seven_cells = [(r,c) for v,r,c in non_zero]
+            if not seven_cells:
+                return None
+            rs = sorted(set(r for r,c in seven_cells))
+            cs = sorted(set(c for r,c in seven_cells))
+            out = [[0]*cols for _ in range(rows)]
+            # Try vertical line
+            if len(cs) == 1:
+                c = cs[0]
+                if sorted(r for r,c2 in seven_cells) != list(range(min(rs), max(rs)+1)):
+                    return None
+                top_r, bot_r = min(rs), max(rs)
+                length = bot_r - top_r + 1
+                for idx, r in enumerate(range(top_r, bot_r+1)):
+                    spread = length - 1 - idx
+                    for c2 in range(cols):
+                        offset = c2 - c
+                        if abs(offset) <= spread:
+                            out[r][c2] = 7 if offset % 2 == 0 else 8
+                return out
+            # Try horizontal line
+            if len(rs) == 1:
+                r = rs[0]
+                if sorted(c for r2,c in seven_cells) != list(range(min(cs), max(cs)+1)):
+                    return None
+                left_c, right_c = min(cs), max(cs)
+                length = right_c - left_c + 1
+                for idx, c in enumerate(range(left_c, right_c+1)):
+                    spread = length - 1 - idx
+                    for r2 in range(rows):
+                        offset = r2 - r
+                        if abs(offset) <= spread:
+                            out[r2][c] = 7 if offset % 2 == 0 else 8
+                return out
+            return None
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_stamp_pattern_on_5_regions(self, train, test_input):
+        """Grid has a non-zero/non-5 pattern block and one or more rectangular 5-regions.
+        Copy the pattern (aligned by bounding box) into each 5-region. 5-regions same size as pattern."""
+        def get_bounding_box(cells):
+            rs = [r for r,c in cells]
+            cs = [c for r,c in cells]
+            return min(rs), max(rs), min(cs), max(cs)
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find pattern cells (non-0, non-5)
+            pattern_cells = [(r, c) for r in range(rows) for c in range(cols)
+                             if grid[r][c] != 0 and grid[r][c] != 5]
+            # Find 5-regions
+            five_cells = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 5]
+            if not pattern_cells or not five_cells:
+                return None
+            # Get pattern bounding box
+            pr0, pr1, pc0, pc1 = get_bounding_box(pattern_cells)
+            ph, pw = pr1 - pr0 + 1, pc1 - pc0 + 1
+            # Build pattern relative values (including zeros inside bounding box)
+            pat = {}
+            for dr in range(ph):
+                for dc in range(pw):
+                    pat[(dr, dc)] = grid[pr0 + dr][pc0 + dc]
+            # Find 5-rectangles (connected rectangular groups of 5s with same size as pattern)
+            visited = set()
+            five_rects = []
+            for r0, c0 in five_cells:
+                if (r0, c0) in visited:
+                    continue
+                # Try to form rectangle starting here
+                r1 = r0
+                while r1 + 1 < rows and grid[r1 + 1][c0] == 5:
+                    r1 += 1
+                c1 = c0
+                while c1 + 1 < cols and grid[r0][c1 + 1] == 5:
+                    c1 += 1
+                h, w = r1 - r0 + 1, c1 - c0 + 1
+                if h != ph or w != pw:
+                    return None
+                # Verify all cells in rect are 5
+                if not all(grid[r][c] == 5 for r in range(r0, r1+1) for c in range(c0, c1+1)):
+                    return None
+                for r in range(r0, r1+1):
+                    for c in range(c0, c1+1):
+                        visited.add((r, c))
+                five_rects.append((r0, c0))
+            if not five_rects:
+                return None
+            out = [list(row) for row in grid]
+            for sr, sc in five_rects:
+                for dr in range(ph):
+                    for dc in range(pw):
+                        out[sr + dr][sc + dc] = pat[(dr, dc)]
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
