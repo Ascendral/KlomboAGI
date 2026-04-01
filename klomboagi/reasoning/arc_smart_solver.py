@@ -457,6 +457,14 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_stamp_pattern_on_5_regions,
             self._try_key_grid_recolor,
             self._try_complete_symmetric_pattern,
+            self._try_nested_rect_concentric_fill,
+            self._try_project_color_to_border,
+            self._try_flood_fill_between_pairs,
+            self._try_border_extraction,
+            self._try_majority_color_per_row_col,
+            self._try_object_bbox_self_fill,
+            self._try_reflect_objects_across_axis,
+            self._try_sort_colors_to_regions,
         ]
         for s in v2:
             try:
@@ -8195,3 +8203,715 @@ class SmartARCSolverV2(SmartARCSolver):
             if apply_rule(ex['input']) != ex['output']:
                 return None
         return apply_rule(test_input)
+    def _try_nested_rect_concentric_fill(self, train, test_input):
+        """Concentric ring coloring for solid rectangles: learn ring-depth → color
+        mapping from training. Each ring layer (border=0, next=1, ...) gets a
+        specific color. Generalizes _try_rect_concentric_rings to learned colors.
+        Handles tasks like 694f12f3."""
+        from collections import deque, Counter
+
+        def find_solid_rects(grid, bg):
+            """Find all solid-color rectangular components != bg."""
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False] * cols for _ in range(rows)]
+            rects = []
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] == bg or visited[sr][sc]:
+                        continue
+                    color = grid[sr][sc]
+                    q = deque([(sr, sc)])
+                    comp = []
+                    while q:
+                        r, c = q.popleft()
+                        if visited[r][c]:
+                            continue
+                        visited[r][c] = True
+                        comp.append((r, c))
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                q.append((nr, nc))
+                    r0 = min(r for r, _ in comp)
+                    r1 = max(r for r, _ in comp)
+                    c0 = min(c for _, c in comp)
+                    c1 = max(c for _, c in comp)
+                    if len(comp) == (r1 - r0 + 1) * (c1 - c0 + 1):
+                        rects.append((color, r0, r1, c0, c1))
+            return rects
+
+        def ring_depth(r, c, r0, r1, c0, c1):
+            """Chebyshev distance from border of rectangle."""
+            return min(r - r0, r1 - r, c - c0, c1 - c)
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        # Learn ring-depth → color mapping from training
+        ring_map = None  # {depth: color}
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+            bg = get_bg(inp)
+            rects = find_solid_rects(inp, bg)
+            if not rects:
+                return None
+            local_map = {}
+            for color, r0, r1, c0, c1 in rects:
+                max_d = min(r1 - r0, c1 - c0) // 2
+                for r in range(r0, r1 + 1):
+                    for c in range(c0, c1 + 1):
+                        d = ring_depth(r, c, r0, r1, c0, c1)
+                        out_color = out[r][c]
+                        if d in local_map:
+                            if local_map[d] != out_color:
+                                return None
+                        else:
+                            local_map[d] = out_color
+            if ring_map is None:
+                ring_map = local_map
+            else:
+                for d, col in local_map.items():
+                    if d in ring_map and ring_map[d] != col:
+                        return None
+                    ring_map[d] = col
+
+        if not ring_map or len(ring_map) < 2:
+            return None
+
+        def apply_rule(grid):
+            bg = get_bg(grid)
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            rects = find_solid_rects(grid, bg)
+            for color, r0, r1, c0, c1 in rects:
+                for r in range(r0, r1 + 1):
+                    for c in range(c0, c1 + 1):
+                        d = ring_depth(r, c, r0, r1, c0, c1)
+                        if d in ring_map:
+                            out[r][c] = ring_map[d]
+                        else:
+                            # Extrapolate: use max known depth color
+                            max_known = max(ring_map.keys())
+                            out[r][c] = ring_map[max_known]
+            return out
+
+        for ex in train:
+            if apply_rule(ex["input"]) != ex["output"]:
+                return None
+        result = apply_rule(test_input)
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+
+# ─── STRATEGY 2: Object Projection to Border ──────────────────────────────
+# Pattern: Non-bg cells project their color to the grid border in all 4
+# cardinal directions (ray-casting to edges).
+
+    def _try_project_color_to_border(self, train, test_input):
+        """Non-background colored cells project their color outward to the grid
+        borders along rows and columns (like shadows/rays). The original cell
+        stays. Handles tasks like 689c358e."""
+        from collections import Counter
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def get_nonbg_cells(grid, bg):
+            cells = []
+            for r in range(len(grid)):
+                for c in range(len(grid[0])):
+                    if grid[r][c] != bg:
+                        cells.append((r, c, grid[r][c]))
+            return cells
+
+        # Learn which directions to project: up, down, left, right
+        # Try all 16 subsets of {up, down, left, right} to find which matches
+        directions_all = [
+            ("up", -1, 0), ("down", 1, 0), ("left", 0, -1), ("right", 0, 1)
+        ]
+
+        def try_projection(grid, bg, dir_set, overwrite_nonbg=False):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            cells = get_nonbg_cells(grid, bg)
+            for r, c, color in cells:
+                for name, dr, dc in dir_set:
+                    nr, nc = r + dr, c + dc
+                    while 0 <= nr < rows and 0 <= nc < cols:
+                        if out[nr][nc] == bg or overwrite_nonbg:
+                            out[nr][nc] = color
+                        elif out[nr][nc] != color:
+                            break  # stop at other non-bg
+                        nr += dr
+                        nc += dc
+            return out
+
+        best_dirs = None
+        best_overwrite = None
+        for mask in range(1, 16):
+            dirs = [directions_all[i] for i in range(4) if mask & (1 << i)]
+            for overwrite in [False, True]:
+                match = True
+                for ex in train:
+                    bg = get_bg(ex["input"])
+                    if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                        match = False
+                        break
+                    if try_projection(ex["input"], bg, dirs, overwrite) != ex["output"]:
+                        match = False
+                        break
+                if match:
+                    best_dirs = dirs
+                    best_overwrite = overwrite
+                    break
+            if best_dirs is not None:
+                break
+
+        if best_dirs is None:
+            return None
+
+        bg = get_bg(test_input)
+        result = try_projection(test_input, bg, best_dirs, best_overwrite)
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+
+# ─── STRATEGY 3: Flood Fill Between Same-Color Pairs ──────────────────────
+# Pattern: Two cells of the same non-bg color in the same row or column.
+# Fill the gap between them with a learned fill color.
+
+    def _try_flood_fill_between_pairs(self, train, test_input):
+        """Find pairs of same-color cells aligned on same row or column.
+        Fill the gap between them with a fill color learned from training.
+        Different from _try_connect_same_rowcol_pairs: learns per-color fill mapping
+        and handles diagonal pairs and multiple colors."""
+        from collections import Counter
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def find_aligned_pairs(grid, bg):
+            """Find all pairs of same non-bg color on same row or col."""
+            rows, cols = len(grid), len(grid[0])
+            pairs = []
+            # Row pairs
+            for r in range(rows):
+                by_color = {}
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        by_color.setdefault(v, []).append(c)
+                for color, positions in by_color.items():
+                    positions.sort()
+                    for i in range(len(positions) - 1):
+                        c1, c2 = positions[i], positions[i + 1]
+                        # Check gap is all bg
+                        if all(grid[r][c] == bg for c in range(c1 + 1, c2)):
+                            pairs.append(("row", r, c1, c2, color))
+            # Col pairs
+            for c in range(cols):
+                by_color = {}
+                for r in range(rows):
+                    v = grid[r][c]
+                    if v != bg:
+                        by_color.setdefault(v, []).append(r)
+                for color, positions in by_color.items():
+                    positions.sort()
+                    for i in range(len(positions) - 1):
+                        r1, r2 = positions[i], positions[i + 1]
+                        if all(grid[r][c] == bg for r in range(r1 + 1, r2)):
+                            pairs.append(("col", c, r1, r2, color))
+            return pairs
+
+        # Learn fill_color from training
+        fill_color = None
+        for ex in train:
+            inp, out = ex["input"], ex["output"]
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+            bg = get_bg(inp)
+            rows, cols = len(inp), len(inp[0])
+            for r in range(rows):
+                for c in range(cols):
+                    if inp[r][c] == bg and out[r][c] != bg:
+                        fc = out[r][c]
+                        if fill_color is None:
+                            fill_color = fc
+                        elif fill_color != fc:
+                            # Maybe fill color = same as pair color
+                            fill_color = "same"
+
+        if fill_color is None:
+            return None
+
+        def apply_rule(grid, fill_c):
+            bg = get_bg(grid)
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            pairs = find_aligned_pairs(grid, bg)
+            for p in pairs:
+                if p[0] == "row":
+                    _, r, c1, c2, color = p
+                    fc = color if fill_c == "same" else fill_c
+                    for c in range(c1 + 1, c2):
+                        out[r][c] = fc
+                else:
+                    _, c, r1, r2, color = p
+                    fc = color if fill_c == "same" else fill_c
+                    for r in range(r1 + 1, r2):
+                        out[r][c] = fc
+            return out
+
+        for ex in train:
+            if apply_rule(ex["input"], fill_color) != ex["output"]:
+                return None
+
+        result = apply_rule(test_input, fill_color)
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+
+# ─── STRATEGY 4: Border Extraction (keep only border, erase interior) ─────
+# Pattern: Extract border pixels of each connected component, remove interiors.
+
+    def _try_border_extraction(self, train, test_input):
+        """Extract only the border pixels of each non-bg connected component.
+        Interior cells (all 4-neighbors are same color) become background.
+        Inverse of fill operations."""
+        from collections import Counter, deque
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def extract_borders(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == bg:
+                        continue
+                    color = grid[r][c]
+                    # Check if all 4-neighbors are same color (interior)
+                    is_interior = True
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = r + dr, c + dc
+                        if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
+                            is_interior = False
+                            break
+                        if grid[nr][nc] != color:
+                            is_interior = False
+                            break
+                    if is_interior:
+                        out[r][c] = bg
+            return out
+
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+            bg = get_bg(ex["input"])
+            if extract_borders(ex["input"], bg) != ex["output"]:
+                return None
+            # Make sure it actually changes something
+            if [list(row) for row in ex["input"]] == ex["output"]:
+                return None
+
+        bg = get_bg(test_input)
+        result = extract_borders(test_input, bg)
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+
+# ─── STRATEGY 5: Majority Color Per Row/Column ────────────────────────────
+# Pattern: Each row (or column) gets uniformly filled with its majority
+# non-background color.
+
+    def _try_majority_color_per_row_col(self, train, test_input):
+        """Each row or column becomes uniformly filled with its majority
+        non-background color. Learns whether it's row-wise or column-wise
+        from training."""
+        from collections import Counter
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def fill_by_majority_row(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                non_bg = [grid[r][c] for c in range(cols) if grid[r][c] != bg]
+                if not non_bg:
+                    continue
+                majority = Counter(non_bg).most_common(1)[0][0]
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        out[r][c] = majority
+            return out
+
+        def fill_by_majority_col(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for c in range(cols):
+                non_bg = [grid[r][c] for r in range(rows) if grid[r][c] != bg]
+                if not non_bg:
+                    continue
+                majority = Counter(non_bg).most_common(1)[0][0]
+                for r in range(rows):
+                    if grid[r][c] != bg:
+                        out[r][c] = majority
+            return out
+
+        def fill_all_row(grid, bg):
+            """Fill entire row with majority non-bg color (including bg cells)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                non_bg = [grid[r][c] for c in range(cols) if grid[r][c] != bg]
+                if not non_bg:
+                    continue
+                majority = Counter(non_bg).most_common(1)[0][0]
+                for c in range(cols):
+                    out[r][c] = majority
+            return out
+
+        def fill_all_col(grid, bg):
+            """Fill entire column with majority non-bg color (including bg cells)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for c in range(cols):
+                non_bg = [grid[r][c] for r in range(rows) if grid[r][c] != bg]
+                if not non_bg:
+                    continue
+                majority = Counter(non_bg).most_common(1)[0][0]
+                for r in range(rows):
+                    out[r][c] = majority
+            return out
+
+        # Try all 4 variants
+        for apply_fn in [fill_by_majority_row, fill_by_majority_col,
+                         fill_all_row, fill_all_col]:
+            match = True
+            for ex in train:
+                if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                    match = False
+                    break
+                bg = get_bg(ex["input"])
+                if apply_fn(ex["input"], bg) != ex["output"]:
+                    match = False
+                    break
+                if [list(row) for row in ex["input"]] == ex["output"]:
+                    match = False
+                    break
+            if match:
+                bg = get_bg(test_input)
+                result = apply_fn(test_input, bg)
+                if result != [list(row) for row in test_input]:
+                    return result
+        return None
+
+
+# ─── STRATEGY 6: Object Bounding Box Solid Fill ──────────────────────────
+# Pattern: Each connected non-bg object gets its bounding box completely
+# filled with the object's own color (eliminating holes/irregular shapes).
+# Different from _try_fill_shape_bounding_box which fills bg cells with a
+# DIFFERENT fill color.
+
+    def _try_object_bbox_self_fill(self, train, test_input):
+        """Each connected non-bg component gets its bounding box filled entirely
+        with the component's own color, converting irregular shapes into solid
+        rectangles. Unlike _try_fill_shape_bounding_box, uses same color as object."""
+        from collections import Counter, deque
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def apply_rule(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False] * cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] == bg or visited[sr][sc]:
+                        continue
+                    color = grid[sr][sc]
+                    q = deque([(sr, sc)])
+                    comp = []
+                    while q:
+                        r, c = q.popleft()
+                        if visited[r][c]:
+                            continue
+                        visited[r][c] = True
+                        comp.append((r, c))
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                q.append((nr, nc))
+                    r0 = min(r for r, _ in comp)
+                    r1 = max(r for r, _ in comp)
+                    c0 = min(c for _, c in comp)
+                    c1 = max(c for _, c in comp)
+                    for r in range(r0, r1 + 1):
+                        for c in range(c0, c1 + 1):
+                            out[r][c] = color
+            return out
+
+        for ex in train:
+            if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                return None
+            bg = get_bg(ex["input"])
+            if apply_rule(ex["input"], bg) != ex["output"]:
+                return None
+            if [list(row) for row in ex["input"]] == ex["output"]:
+                return None
+
+        bg = get_bg(test_input)
+        result = apply_rule(test_input, bg)
+        if result == [list(row) for row in test_input]:
+            return None
+        return result
+
+
+# ─── STRATEGY 7: Mirror/Reflect Objects Across Grid Axis ──────────────────
+# Pattern: Non-bg objects are reflected across the horizontal or vertical
+# midline of the grid. The original stays and the reflection is added.
+
+    def _try_reflect_objects_across_axis(self, train, test_input):
+        """Non-bg objects are reflected/mirrored across the grid's horizontal
+        or vertical midline. Both original and reflection are present in output.
+        Handles horizontal, vertical, and both-axis reflections."""
+        from collections import Counter
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def reflect_h(grid, bg):
+            """Reflect non-bg cells across horizontal midline (top-bottom)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        mr = rows - 1 - r
+                        if out[mr][c] == bg:
+                            out[mr][c] = grid[r][c]
+            return out
+
+        def reflect_v(grid, bg):
+            """Reflect non-bg cells across vertical midline (left-right)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        mc = cols - 1 - c
+                        if out[r][mc] == bg:
+                            out[r][mc] = grid[r][c]
+            return out
+
+        def reflect_both(grid, bg):
+            """Reflect across both axes."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        v = grid[r][c]
+                        mr, mc = rows - 1 - r, cols - 1 - c
+                        if out[mr][c] == bg:
+                            out[mr][c] = v
+                        if out[r][mc] == bg:
+                            out[r][mc] = v
+                        if out[mr][mc] == bg:
+                            out[mr][mc] = v
+            return out
+
+        def reflect_h_overwrite(grid, bg):
+            """Reflect non-bg cells across horizontal midline (overwrite)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        mr = rows - 1 - r
+                        out[mr][c] = grid[r][c]
+            return out
+
+        def reflect_v_overwrite(grid, bg):
+            """Reflect non-bg cells across vertical midline (overwrite)."""
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != bg:
+                        mc = cols - 1 - c
+                        out[r][mc] = grid[r][c]
+            return out
+
+        for apply_fn in [reflect_h, reflect_v, reflect_both,
+                         reflect_h_overwrite, reflect_v_overwrite]:
+            match = True
+            for ex in train:
+                if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                    match = False
+                    break
+                bg = get_bg(ex["input"])
+                if apply_fn(ex["input"], bg) != ex["output"]:
+                    match = False
+                    break
+                if [list(row) for row in ex["input"]] == ex["output"]:
+                    match = False
+                    break
+            if match:
+                bg = get_bg(test_input)
+                result = apply_fn(test_input, bg)
+                if result != [list(row) for row in test_input]:
+                    return result
+        return None
+
+
+# ─── STRATEGY 8: Color Region Sorting (scatter → organized regions) ───────
+# Pattern: Grid has scattered colored cells. Output organizes them by
+# sorting colors into regions — e.g., by distance from center, by quadrant,
+# or by row/column position.
+
+    def _try_sort_colors_to_regions(self, train, test_input):
+        """Scattered colored cells get sorted/organized: each color occupies a
+        contiguous band (rows or columns) in the output. The bands are ordered
+        by the color's average position in the input.
+        Handles tasks like 5751f35e."""
+        from collections import Counter
+
+        def get_bg(grid):
+            return Counter(v for row in grid for v in row).most_common(1)[0][0]
+
+        def sort_by_row_band(grid, bg):
+            """Each non-bg color occupies contiguous rows, ordered by avg row."""
+            rows, cols = len(grid), len(grid[0])
+            # Collect color → positions
+            color_pos = {}
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        color_pos.setdefault(v, []).append((r, c))
+            if not color_pos:
+                return None
+
+            # Sort colors by average row position
+            color_avg = [(sum(r for r, c in pos) / len(pos), color)
+                         for color, pos in color_pos.items()]
+            color_avg.sort()
+
+            # Count cells per color
+            total_cells = sum(len(pos) for pos in color_pos.values())
+            if total_cells != rows * cols - sum(1 for r in range(rows) for c in range(cols) if grid[r][c] == bg):
+                pass  # OK, just non-bg cells
+
+            # Assign rows proportionally
+            out = [[bg] * cols for _ in range(rows)]
+            row_idx = 0
+            for _, color in color_avg:
+                count = len(color_pos[color])
+                rows_needed = max(1, round(count / cols))
+                for r in range(row_idx, min(row_idx + rows_needed, rows)):
+                    for c in range(cols):
+                        out[r][c] = color
+                row_idx += rows_needed
+            return out
+
+        def sort_by_col_band(grid, bg):
+            """Each non-bg color occupies contiguous columns, ordered by avg col."""
+            rows, cols = len(grid), len(grid[0])
+            color_pos = {}
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        color_pos.setdefault(v, []).append((r, c))
+            if not color_pos:
+                return None
+
+            color_avg = [(sum(c for r, c in pos) / len(pos), color)
+                         for color, pos in color_pos.items()]
+            color_avg.sort()
+
+            out = [[bg] * cols for _ in range(rows)]
+            col_idx = 0
+            for _, color in color_avg:
+                count = len(color_pos[color])
+                cols_needed = max(1, round(count / rows))
+                for c in range(col_idx, min(col_idx + cols_needed, cols)):
+                    for r in range(rows):
+                        out[r][c] = color
+                col_idx += cols_needed
+            return out
+
+        def sort_concentric(grid, bg):
+            """Colors arranged in concentric rectangles from outside in,
+            ordered by average distance from center."""
+            rows, cols = len(grid), len(grid[0])
+            cr, cc = (rows - 1) / 2.0, (cols - 1) / 2.0
+
+            color_pos = {}
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        color_pos.setdefault(v, []).append((r, c))
+            if not color_pos:
+                return None
+
+            # Sort by avg chebyshev distance from center (outermost first)
+            def avg_dist(positions):
+                return sum(max(abs(r - cr), abs(c - cc)) for r, c in positions) / len(positions)
+
+            color_dist = [(avg_dist(pos), color) for color, pos in color_pos.items()]
+            color_dist.sort(reverse=True)  # outermost first
+            colors_ordered = [c for _, c in color_dist]
+
+            out = [[bg] * cols for _ in range(rows)]
+            max_rings = min(rows, cols) // 2 + 1
+            ring = 0
+            ci = 0
+            for d in range(max_rings):
+                if ci >= len(colors_ordered):
+                    break
+                color = colors_ordered[ci]
+                for r in range(rows):
+                    for c in range(cols):
+                        depth = min(r, rows - 1 - r, c, cols - 1 - c)
+                        if depth == d:
+                            out[r][c] = color
+                ci += 1
+            # Fill remaining interior
+            for r in range(rows):
+                for c in range(cols):
+                    if out[r][c] == bg and ci > 0:
+                        out[r][c] = colors_ordered[-1]
+            return out
+
+        for apply_fn in [sort_by_row_band, sort_by_col_band, sort_concentric]:
+            match = True
+            for ex in train:
+                if len(ex["input"]) != len(ex["output"]) or len(ex["input"][0]) != len(ex["output"][0]):
+                    match = False
+                    break
+                bg = get_bg(ex["input"])
+                result = apply_fn(ex["input"], bg)
+                if result is None or result != ex["output"]:
+                    match = False
+                    break
+                if [list(row) for row in ex["input"]] == ex["output"]:
+                    match = False
+                    break
+            if match:
+                bg = get_bg(test_input)
+                result = apply_fn(test_input, bg)
+                if result is not None and result != [list(row) for row in test_input]:
+                    return result
+        return None
