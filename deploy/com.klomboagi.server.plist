@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.klomboagi.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>klomboagi</string>
+        <string>serve</string>
+        <string>--port</string>
+        <string>3141</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/opt/klomboagi</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/opt/klomboagi/logs/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/klomboagi/logs/stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/opt/klomboagi</string>
+        <key>KLOMBOAGI_HOME</key>
+        <string>/opt/klomboagi/data</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityBackgroundIO</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

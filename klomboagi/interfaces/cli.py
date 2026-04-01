@@ -23,6 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--watch", type=int, default=0, help="Seconds to wait between cycles (enables continuous mode)")
     sub.add_parser("doctor")
 
+    serve_parser = sub.add_parser("serve", help="Start HTTP server (the OS mode)")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Bind address")
+    serve_parser.add_argument("--port", type=int, default=3141, help="Port number")
+
     daemon_parser = sub.add_parser("daemon")
     daemon_sub = daemon_parser.add_subparsers(dest="daemon_command", required=True)
     daemon_sub.add_parser("start")
@@ -93,13 +97,30 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         payload = run_doctor()
+    elif args.command == "serve":
+        from klomboagi.core.genesis import Genesis
+        from klomboagi.server import run_server
+        print("=" * 60)
+        print("  KlomboAGI — Cognitive OS")
+        print("=" * 60)
+        print()
+        genesis = Genesis()
+        hw = genesis.scan_hardware()
+        print(f"  Machine: {hw.cpu.model}")
+        print(f"  RAM:     {hw.ram.total_gb:.0f} GB ({hw.ram.available_gb:.0f} GB free)")
+        print(f"  GPU:     {hw.gpu.model} ({hw.gpu.cores} cores)")
+        print()
+        run_server(genesis, host=args.host, port=args.port)
+        payload = {"status": "stopped"}
     elif args.command == "daemon":
         storage = StorageManager.bootstrap()
+        from klomboagi.core.genesis import Genesis
+        genesis = Genesis()
         daemon = KlomboAGIDaemon(storage)
         if args.daemon_command == "start":
             print("KlomboAGI Daemon starting... Press Ctrl+C to stop.")
             try:
-                daemon.start()
+                daemon.start(genesis=genesis)
             except KeyboardInterrupt:
                 daemon.stop()
             payload = {"status": "stopped"}
