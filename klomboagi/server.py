@@ -328,6 +328,13 @@ def run_server(genesis: "Genesis | None" = None, host: str = "0.0.0.0",
     from klomboagi.senses.system_control import SystemControl
     server.system_control = SystemControl()
 
+    # Self-improvement loop
+    if genesis:
+        from klomboagi.core.self_improvement_loop import SelfImprovementLoop
+        improver = SelfImprovementLoop(genesis, interval=600.0)
+        improver.start()
+        server.improver = improver
+
     if background:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -346,6 +353,15 @@ def run_server(genesis: "Genesis | None" = None, host: str = "0.0.0.0",
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down...")
+        # Save conversation session before exit
+        if genesis and genesis.total_turns > 0:
+            genesis.conversation_memory.end_session(
+                facts_learned=len(genesis.base._beliefs),
+                surprises=genesis.total_surprises,
+                corrections=0,
+                turns=genesis.total_turns,
+            )
+            genesis.save_state()
         observer.stop()
         if server.curiosity_loop:
             server.curiosity_loop.stop()
