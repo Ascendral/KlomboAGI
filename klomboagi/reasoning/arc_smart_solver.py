@@ -300,6 +300,26 @@ class SmartARCSolverV2(SmartARCSolver):
         if synth_result is not None:
             return synth_result
 
+        # ── Phase 2b: Object-level compositional solver ──────────────────────
+        try:
+            from klomboagi.reasoning.arc_object_solver import CompositionalObjectSolver
+            obj_solver = CompositionalObjectSolver()
+            obj_result = obj_solver.solve(train, test_input)
+            if obj_result is not None:
+                return obj_result
+        except Exception:
+            pass
+
+        # ── Phase 2c: Reasoning-driven solver ────────────────────────────────
+        try:
+            from klomboagi.reasoning.arc_reasoner import ARCReasoner
+            reasoner = ARCReasoner()
+            reason_result = reasoner.solve(train, test_input)
+            if reason_result is not None:
+                return reason_result
+        except Exception:
+            pass
+
         # ── Phase 3: V2 hand-coded strategies (cross-validated) ───────────────
         v2 = [
             self._try_slide_object_to_anchor,
