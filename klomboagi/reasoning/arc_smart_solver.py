@@ -426,6 +426,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_cell_grid_count_nonbg,
             self._try_sep_col_both_zero_to_8,
             self._try_shape_cross_pattern,
+            self._try_original_then_vflip,
+            self._try_dedup_horiz_tile,
         ]
         for s in v2:
             try:
@@ -7087,6 +7089,46 @@ class SmartARCSolverV2(SmartARCSolver):
                 for i in range(H):
                     out[W+H+(W-1-j)][W+i] = shape[i][j]
             return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_original_then_vflip(self, train, test_input):
+        """Output = input rows followed by input rows in reverse (original + vflip appended below)."""
+        def apply_rule(grid):
+            return list(grid) + list(reversed(grid))
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_dedup_horiz_tile(self, train, test_input):
+        """Input tiles with a period along cols OR rows; output is one period unit."""
+        def find_col_period(grid):
+            rows, cols = len(grid), len(grid[0])
+            for p in range(1, cols):
+                if cols % p != 0:
+                    continue
+                if all(grid[r][c] == grid[r][c % p] for r in range(rows) for c in range(cols)):
+                    return p
+            return None
+        def find_row_period(grid):
+            rows, cols = len(grid), len(grid[0])
+            for p in range(1, rows):
+                if rows % p != 0:
+                    continue
+                if all(grid[r][c] == grid[r % p][c] for r in range(rows) for c in range(cols)):
+                    return p
+            return None
+        def apply_rule(grid):
+            pc = find_col_period(grid)
+            if pc is not None and pc < len(grid[0]):
+                return [row[:pc] for row in grid]
+            pr = find_row_period(grid)
+            if pr is not None and pr < len(grid):
+                return grid[:pr]
+            return None
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
                 return None
