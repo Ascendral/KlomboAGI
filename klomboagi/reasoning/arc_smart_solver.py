@@ -423,6 +423,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_max_zero_rect_fill6,
             self._try_extend_pattern_rows_10,
             self._try_cross_to_4fold,
+            self._try_cell_grid_count_nonbg,
+            self._try_sep_col_both_zero_to_8,
+            self._try_shape_cross_pattern,
         ]
         for s in v2:
             try:
@@ -6951,6 +6954,138 @@ class SmartARCSolverV2(SmartARCSolver):
                     out[i][w+j] = tr[i][j]
                     out[h+i][j] = bl[i][j]
                     out[h+i][w+j] = br[i][j]
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_cell_grid_count_nonbg(self, train, test_input):
+        """Grid of 2x2 color blocks separated by 0-rows/cols. Count non-background colors (bg=most
+        common). Output sorted column vector [[c1],[c2],[c3]] descending by count."""
+        from collections import Counter
+        def extract_cells(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows) if all(grid[r][c] == 0 for c in range(cols))]
+            sep_cols = [c for c in range(cols) if all(grid[r][c] == 0 for r in range(rows))]
+            if not sep_rows or not sep_cols:
+                return None
+            # data rows and cols are between separators
+            data_rows = [r for r in range(rows) if r not in sep_rows]
+            data_cols = [c for c in range(cols) if c not in sep_cols]
+            if not data_rows or not data_cols:
+                return None
+            # Extract representative cell color for each grid cell (take [0][0] of each block)
+            # First determine row groups (contiguous data rows) and col groups
+            row_groups = []
+            grp = []
+            for r in data_rows:
+                if not grp or r == grp[-1]+1:
+                    grp.append(r)
+                else:
+                    row_groups.append(grp)
+                    grp = [r]
+            if grp:
+                row_groups.append(grp)
+            col_groups = []
+            grp = []
+            for c in data_cols:
+                if not grp or c == grp[-1]+1:
+                    grp.append(c)
+                else:
+                    col_groups.append(grp)
+                    grp = [c]
+            if grp:
+                col_groups.append(grp)
+            cells = []
+            for rg in row_groups:
+                for cg in col_groups:
+                    color = grid[rg[0]][cg[0]]
+                    if not all(grid[r][c] == color for r in rg for c in cg):
+                        return None
+                    cells.append(color)
+            return cells
+        def apply_rule(grid):
+            cells = extract_cells(grid)
+            if cells is None:
+                return None
+            cnt = Counter(cells)
+            bg = cnt.most_common(1)[0][0]
+            non_bg = {c: n for c, n in cnt.items() if c != bg}
+            if not non_bg:
+                return None
+            sorted_colors = sorted(non_bg.keys(), key=lambda c: -non_bg[c])
+            return [[c] for c in sorted_colors]
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_sep_col_both_zero_to_8(self, train, test_input):
+        """Grid divided by a separator column (all same non-zero value). Left and right halves
+        same size. Output 8 where both sides are 0, else 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find separator column
+            sep_c = None
+            for c in range(cols):
+                col_vals = [grid[r][c] for r in range(rows)]
+                if len(set(col_vals)) == 1 and col_vals[0] != 0:
+                    sep_c = c
+                    break
+            if sep_c is None:
+                return None
+            left_w = sep_c
+            right_w = cols - sep_c - 1
+            if left_w != right_w or left_w == 0:
+                return None
+            out = []
+            for r in range(rows):
+                row = []
+                for c in range(left_w):
+                    lv = grid[r][c]
+                    rv = grid[r][sep_c + 1 + c]
+                    row.append(8 if lv == 0 and rv == 0 else 0)
+                out.append(row)
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_shape_cross_pattern(self, train, test_input):
+        """Single non-zero shape → cross/pinwheel: original left, hflip right,
+        transpose top, vflip(transpose) bottom. Output size (2W+H)x(2W+H)."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find bounding box
+            min_r = min((r for r in range(rows) if any(grid[r][c] != 0 for c in range(cols))), default=None)
+            max_r = max((r for r in range(rows) if any(grid[r][c] != 0 for c in range(cols))), default=None)
+            min_c = min((c for c in range(cols) if any(grid[r][c] != 0 for r in range(rows))), default=None)
+            max_c = max((c for c in range(cols) if any(grid[r][c] != 0 for r in range(rows))), default=None)
+            if min_r is None:
+                return None
+            H = max_r - min_r + 1
+            W = max_c - min_c + 1
+            shape = [grid[r][min_c:max_c+1] for r in range(min_r, max_r+1)]
+            sz = 2 * W + H
+            out = [[0] * sz for _ in range(sz)]
+            # Left: original at [W:W+H, 0:W]
+            for i in range(H):
+                for j in range(W):
+                    out[W+i][j] = shape[i][j]
+            # Right: hflip at [W:W+H, W+H:2W+H]
+            for i in range(H):
+                for j in range(W):
+                    out[W+i][W+H+j] = shape[i][W-1-j]
+            # Transpose T: cols of shape become rows, placed at [0:W, W:W+H]
+            for j in range(W):
+                for i in range(H):
+                    out[j][W+i] = shape[i][j]
+            # VFlip(T) at [W+H:2W+H, W:W+H]
+            for j in range(W):
+                for i in range(H):
+                    out[W+H+(W-1-j)][W+i] = shape[i][j]
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
