@@ -18,17 +18,53 @@ import urllib.error
 def chat(port: int = 3141) -> None:
     base = f"http://localhost:{port}"
 
-    # Check server is alive
-    try:
-        r = urllib.request.urlopen(f"{base}/health", timeout=3)
-        data = json.loads(r.read())
-        if data.get("status") != "alive":
-            print("KlomboAGI is not responding.")
-            sys.exit(1)
-    except Exception:
-        print(f"Can't reach KlomboAGI on port {port}.")
-        print("Start it with: python3 -m klomboagi serve")
+    # Check server is alive — retry a few times (launchd may still be starting)
+    alive = False
+    for attempt in range(10):
+        try:
+            r = urllib.request.urlopen(f"{base}/health", timeout=2)
+            data = json.loads(r.read())
+            if data.get("status") == "alive":
+                alive = True
+                break
+        except Exception:
+            pass
+        if attempt == 0:
+            print("  Waiting for KlomboAGI to start...", end="", flush=True)
+        else:
+            print(".", end="", flush=True)
+        import time
+        time.sleep(1)
+
+    if not alive:
+        print(f"\n  Can't reach KlomboAGI on port {port}. Starting it now...")
+        # Auto-start the server in background
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, "-m", "klomboagi", "serve", "--port", str(port)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # Wait for it
+        for _ in range(15):
+            try:
+                r = urllib.request.urlopen(f"{base}/health", timeout=2)
+                data = json.loads(r.read())
+                if data.get("status") == "alive":
+                    alive = True
+                    break
+            except Exception:
+                pass
+            import time
+            time.sleep(1)
+            print(".", end="", flush=True)
+
+    if not alive:
+        print("\n  Failed to start KlomboAGI.")
         sys.exit(1)
+
+    if attempt > 0 or not alive:
+        print()  # newline after dots
 
     # Get hardware info for greeting
     try:

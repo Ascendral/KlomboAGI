@@ -165,7 +165,16 @@ echo -e "\n${YELLOW}Starting KlomboAGI...${NC}"
 launchctl unload "$PLIST_DST" 2>/dev/null || true
 launchctl load "$PLIST_DST"
 
-sleep 2
+# Wait for server to start (Genesis brain takes a few seconds to load)
+echo -n "  Waiting"
+for i in $(seq 1 15); do
+    if curl -s http://localhost:3141/health 2>/dev/null | grep -q "alive"; then
+        break
+    fi
+    echo -n "."
+    sleep 1
+done
+echo
 
 # Check if it's running
 if curl -s http://localhost:3141/health | grep -q "alive" 2>/dev/null; then
