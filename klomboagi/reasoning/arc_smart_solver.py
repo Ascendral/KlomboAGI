@@ -407,6 +407,11 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_bbox_holes_7,
             self._try_grid_split_unique_quadrant,
             self._try_swap_colors_per_shape,
+            self._try_nor_pattern_match,
+            self._try_rect_concentric_rings,
+            self._try_gravity_sink_1_through_5,
+            self._try_unique_cell_box,
+            self._try_band_zero_extend,
         ]
         for s in v2:
             try:
@@ -6488,6 +6493,165 @@ class SmartARCSolverV2(SmartARCSolver):
                         c1, c2 = tuple(colors)
                         for r, c in comp:
                             out[r][c] = c2 if grid[r][c] == c1 else c1
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_nor_pattern_match(self, train, test_input):
+        """Two patterns stacked with separator row; output 3 where both are 0, else 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_rows = [r for r in range(rows) if len(set(grid[r])) == 1 and grid[r][0] != 0]
+            if not sep_rows:
+                return None
+            sep_r = sep_rows[0]
+            top = grid[:sep_r]
+            bot = grid[sep_r+1:]
+            if len(top) != len(bot) or len(top) == 0:
+                return None
+            out = [[0]*cols for _ in range(len(top))]
+            for r in range(len(top)):
+                for c in range(cols):
+                    if top[r][c] == 0 and bot[r][c] == 0:
+                        out[r][c] = 3
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_rect_concentric_rings(self, train, test_input):
+        """Solid rectangles of non-zero cells: corners=1, edges=4, interior=2."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r, c in comp)
+                        max_r = max(r for r, c in comp)
+                        min_c = min(c for r, c in comp)
+                        max_c = max(c for r, c in comp)
+                        for r, c in comp:
+                            on_r = (r == min_r or r == max_r)
+                            on_c = (c == min_c or c == max_c)
+                            if on_r and on_c:
+                                out[r][c] = 1
+                            elif on_r or on_c:
+                                out[r][c] = 4
+                            else:
+                                out[r][c] = 2
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_gravity_sink_1_through_5(self, train, test_input):
+        """Column [1, 5, ..., 5]: 1 gravity-sinks to bottom of 5-stack, original 1 pos becomes 0."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            for c in range(cols):
+                col = [grid[r][c] for r in range(rows)]
+                for r in range(rows):
+                    if col[r] == 1:
+                        end = r
+                        while end + 1 < rows and col[end + 1] == 5:
+                            end += 1
+                        if end > r:
+                            out[r][c] = 0
+                            for rr in range(r + 1, end):
+                                out[rr][c] = 5
+                            out[end][c] = 1
+                        break
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_unique_cell_box(self, train, test_input):
+        """Value appearing exactly once: surround with 3x3 box of 2s (center keeps value)."""
+        from collections import Counter
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            flat = [grid[r][c] for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if not flat:
+                return None
+            cnt = Counter(flat)
+            unique_vals = [v for v, n in cnt.items() if n == 1]
+            if len(unique_vals) != 1:
+                return None
+            uv = unique_vals[0]
+            pos = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == uv]
+            r0, c0 = pos[0]
+            out = [[0]*cols for _ in range(rows)]
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    nr, nc = r0+dr, c0+dc
+                    if 0 <= nr < rows and 0 <= nc < cols:
+                        out[nr][nc] = 2
+            out[r0][c0] = uv
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_band_zero_extend(self, train, test_input):
+        """In each colored band, a 0 hole extends as a full line perpendicular to band orientation."""
+        from collections import deque
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            out = [list(row) for row in grid]
+            visited = [[False]*cols for _ in range(rows)]
+            for sr in range(rows):
+                for sc in range(cols):
+                    if grid[sr][sc] != 0 and not visited[sr][sc]:
+                        color = grid[sr][sc]
+                        q = deque([(sr, sc)])
+                        comp = []
+                        while q:
+                            r, c = q.popleft()
+                            if visited[r][c]: continue
+                            visited[r][c] = True
+                            comp.append((r, c))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = r+dr, c+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    q.append((nr, nc))
+                        min_r = min(r for r, c in comp)
+                        max_r = max(r for r, c in comp)
+                        min_c = min(c for r, c in comp)
+                        max_c = max(c for r, c in comp)
+                        h = max_r - min_r + 1
+                        w = max_c - min_c + 1
+                        for r in range(min_r, max_r+1):
+                            for c in range(min_c, max_c+1):
+                                if grid[r][c] == 0:
+                                    if w >= h:
+                                        for rr in range(min_r, max_r+1):
+                                            out[rr][c] = 0
+                                    else:
+                                        for cc in range(min_c, max_c+1):
+                                            out[r][cc] = 0
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
