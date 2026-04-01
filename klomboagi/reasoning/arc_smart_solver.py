@@ -382,6 +382,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_concentric_ring_rotation,
             self._try_fill_1frame_by_interior_parity,
             self._try_tile_pattern_extend_recolor,
+            self._try_key_template_rotate_fill,
         ]
         for s in v2:
             try:
@@ -5792,5 +5793,63 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_key_template_rotate_fill(self, train, test_input):
+        """Key (non-8 colored cells) rotated 90°CCW fills 8-template blocks."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Separate key cells (non-zero, non-8) from template (8-cells)
+            key_cells = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols)
+                         if grid[r][c] != 0 and grid[r][c] != 8]
+            template_cells = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 8]
+            if not key_cells or not template_cells:
+                return None
+            # Key bounding box
+            kr_min = min(r for r, c, v in key_cells); kr_max = max(r for r, c, v in key_cells)
+            kc_min = min(c for r, c, v in key_cells); kc_max = max(c for r, c, v in key_cells)
+            N = max(kr_max - kr_min + 1, kc_max - kc_min + 1)
+            if kr_max - kr_min + 1 != N or kc_max - kc_min + 1 != N:
+                return None
+            # Extract N×N key matrix
+            key_matrix = [[grid[kr_min + r][kc_min + c] for c in range(N)] for r in range(N)]
+            # Template bounding box
+            tr_min = min(r for r, c in template_cells); tr_max = max(r for r, c in template_cells)
+            tc_min = min(c for r, c in template_cells); tc_max = max(c for r, c in template_cells)
+            if (tr_max - tr_min + 1) % N != 0 or (tc_max - tc_min + 1) % N != 0:
+                return None
+            S_r = (tr_max - tr_min + 1) // N
+            S_c = (tc_max - tc_min + 1) // N
+            if S_r != S_c:
+                return None
+            S = S_r
+            # Verify template: each S×S sub-block is all-8 or all-0
+            for br in range(N):
+                for bc in range(N):
+                    block_vals = set(grid[tr_min + br*S + dr][tc_min + bc*S + dc]
+                                     for dr in range(S) for dc in range(S))
+                    if len(block_vals) != 1 or (block_vals.pop() not in (0, 8)):
+                        return None
+            # Fill template blocks using 90°CCW rotation: block(r,c) ← key[N-1-c][r]
+            out = [row[:] for row in grid]
+            for br in range(N):
+                for bc in range(N):
+                    color = key_matrix[N - 1 - bc][br]
+                    if color == 0:
+                        continue
+                    # Check this block should be 8 in input
+                    if grid[tr_min + br*S][tc_min + bc*S] != 8:
+                        return None
+                    for dr in range(S):
+                        for dc in range(S):
+                            out[tr_min + br*S + dr][tc_min + bc*S + dc] = color
+            return out
+
+        for ex in train:
+            if len(ex['input']) != len(ex['output']) or len(ex['input'][0]) != len(ex['output'][0]):
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
                 return None
         return apply_rule(test_input)
