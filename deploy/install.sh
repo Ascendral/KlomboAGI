@@ -64,12 +64,18 @@ echo -e "\n${YELLOW}Installing to ${INSTALL_DIR}...${NC}"
 sudo mkdir -p "$INSTALL_DIR"
 sudo chown "$(whoami)" "$INSTALL_DIR"
 
-# Copy source
-rsync -a --exclude '__pycache__' --exclude '.git' --exclude '*.pyc' \
+# Stop running service before updating
+launchctl unload "$PLIST_DST" 2>/dev/null || true
+sleep 1
+
+# Copy source (preserve data and logs from previous installs)
+rsync -a --delete \
+    --exclude '__pycache__' --exclude '.git' --exclude '*.pyc' \
     --exclude '.pytest_cache' --exclude '*.egg-info' --exclude 'venv' \
+    --exclude 'data' --exclude 'logs' \
     "$REPO_DIR/" "$INSTALL_DIR/"
 
-# Create directories
+# Create directories (preserved across updates)
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
 
