@@ -381,6 +381,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_largest_solid_rect_only,
             self._try_concentric_ring_rotation,
             self._try_fill_1frame_by_interior_parity,
+            self._try_tile_pattern_extend_recolor,
         ]
         for s in v2:
             try:
@@ -5758,5 +5759,38 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_tile_pattern_extend_recolor(self, train, test_input):
+        """Tile repeating row pattern to output_rows=input_rows+3, replace color 1 with 2."""
+        def find_period(grid):
+            rows = len(grid)
+            for p in range(1, rows + 1):
+                if all(grid[i] == grid[i % p] for i in range(rows)):
+                    return p
+            return rows
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            period = find_period(grid)
+            out_rows = rows + 3
+            out = []
+            for i in range(out_rows):
+                src_row = grid[i % period]
+                out.append([2 if v == 1 else v for v in src_row])
+            return out
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input']) + 3:
+                return None
+            if len(ex['output'][0]) != len(ex['input'][0]):
+                return None
+            inp_colors = set(v for row in ex['input'] for v in row if v != 0)
+            out_colors = set(v for row in ex['output'] for v in row if v != 0)
+            if inp_colors != {1} or out_colors != {2}:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
                 return None
         return apply_rule(test_input)
