@@ -452,6 +452,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_radiating_line_78,
             self._try_stamp_pattern_on_5_regions,
             self._try_key_grid_recolor,
+            self._try_complete_symmetric_pattern,
         ]
         for s in v2:
             try:
@@ -8128,6 +8129,63 @@ class SmartARCSolverV2(SmartARCSolver):
                         if i is None or j is None:
                             return None
                         out[r][c] = key_mat[i][j]
+            return out
+        for ex in train:
+            if apply_rule(ex['input']) != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_complete_symmetric_pattern(self, train, test_input):
+        """Grid has two non-bg colors: one forms a solid rectangular block,
+        the other is a scattered pattern with left-right symmetry.
+        The block covers part of the pattern. Remove the block and complete
+        the symmetric pattern by reflecting visible cells across the detected axis."""
+        def apply_rule(grid):
+            from collections import Counter
+            rows, cols = len(grid), len(grid[0])
+            flat = [v for row in grid for v in row]
+            cnt = Counter(flat)
+            bg = cnt.most_common(1)[0][0]
+            colors = [v for v, _ in cnt.most_common() if v != bg]
+            if len(colors) != 2:
+                return None
+            block_val = pat_val = None
+            br0 = br1 = bc0 = bc1 = None
+            for cv in colors:
+                cells = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == cv]
+                r0 = min(r for r, c in cells)
+                r1 = max(r for r, c in cells)
+                c0 = min(c for r, c in cells)
+                c1 = max(c for r, c in cells)
+                if all(grid[r][c] == cv for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)):
+                    block_val = cv
+                    br0, br1, bc0, bc1 = r0, r1, c0, c1
+                    pat_val = [v for v in colors if v != cv][0]
+                    break
+            if block_val is None:
+                return None
+            block_rows = set(range(br0, br1 + 1))
+            # Find axis from non-block rows with pattern
+            axis_vals = []
+            for r in range(rows):
+                if r in block_rows:
+                    continue
+                pcols = [c for c in range(cols) if grid[r][c] == pat_val]
+                if not pcols:
+                    continue
+                axis_vals.append(sum(pcols) / len(pcols))
+            if not axis_vals:
+                return None
+            axis = sum(axis_vals) / len(axis_vals)
+            axis = round(axis * 2) / 2
+            out = [list(row) for row in grid]
+            for r in range(br0, br1 + 1):
+                for c in range(bc0, bc1 + 1):
+                    rc = round(2 * axis - c)
+                    if 0 <= rc < cols and grid[r][rc] == pat_val:
+                        out[r][c] = pat_val
+                    else:
+                        out[r][c] = bg
             return out
         for ex in train:
             if apply_rule(ex['input']) != ex['output']:
