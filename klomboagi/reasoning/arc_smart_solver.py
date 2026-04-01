@@ -393,6 +393,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_lr_symmetric_color,
             self._try_grid_diagonal_indicator,
             self._try_count_ones_fill_order,
+            self._try_nonzero_to_checkerblock,
+            self._try_four_quadrant_rotations,
+            self._try_row_rev_row_tile,
+            self._try_border_pad_extend,
         ]
         for s in v2:
             try:
@@ -6099,5 +6103,98 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             result = apply_rule(ex['input'])
             if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_nonzero_to_checkerblock(self, train, test_input):
+        """Each non-zero cell expands to 2x2 [[1,2],[2,1]] block; zeros stay 2x2 zeros."""
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find the non-zero indicator value
+            nz_vals = set(grid[r][c] for r in range(rows) for c in range(cols) if grid[r][c] != 0)
+            if len(nz_vals) != 1:
+                return None
+            out = [[0]*(cols*2) for _ in range(rows*2)]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        out[r*2][c*2]=1; out[r*2][c*2+1]=2
+                        out[r*2+1][c*2]=2; out[r*2+1][c*2+1]=1
+            return out
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input'])*2 or len(ex['output'][0]) != len(ex['input'][0])*2:
+                return None
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_four_quadrant_rotations(self, train, test_input):
+        """Output = 4 quadrants: input, rot90CW, rot90CCW, rot180."""
+        def rot90cw(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[rows-1-c][r] for c in range(cols)] for r in range(rows)]
+
+        def rot90ccw(grid):
+            rows, cols = len(grid), len(grid[0])
+            return [[grid[c][cols-1-r] for c in range(cols)] for r in range(rows)]
+
+        def rot180(grid):
+            return [row[::-1] for row in grid[::-1]]
+
+        def apply_rule(grid):
+            rows, cols = len(grid), len(grid[0])
+            tl = grid
+            tr = rot90cw(grid)
+            bl = rot90ccw(grid)
+            br = rot180(grid)
+            out = []
+            for r in range(rows):
+                out.append(tl[r] + tr[r])
+            for r in range(rows):
+                out.append(bl[r] + br[r])
+            return out
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input'])*2 or len(ex['output'][0]) != len(ex['input'][0])*2:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_row_rev_row_tile(self, train, test_input):
+        """Each row → rev(row) + row + rev(row) + row (4x width)."""
+        def apply_rule(grid):
+            out = []
+            for row in grid:
+                rev = row[::-1]
+                out.append(rev + list(row) + rev + list(row))
+            return out
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input']) or len(ex['output'][0]) != len(ex['input'][0])*4:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_border_pad_extend(self, train, test_input):
+        """M×N → (M+2)×(N+2): top/bottom zero-pad, each row repeated with edge-value sides."""
+        def apply_rule(grid):
+            rows = len(grid)
+            out = [[0] + list(grid[0]) + [0]]
+            for r in range(rows):
+                out.append([grid[r][0]] + list(grid[r]) + [grid[r][-1]])
+            out.append([0] + list(grid[-1]) + [0])
+            return out
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input'])+2 or len(ex['output'][0]) != len(ex['input'][0])+2:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
                 return None
         return apply_rule(test_input)
