@@ -397,6 +397,10 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_four_quadrant_rotations,
             self._try_row_rev_row_tile,
             self._try_border_pad_extend,
+            self._try_diagonal_reveal,
+            self._try_swap_ends_keep_mid,
+            self._try_row_tile_mirror_tile,
+            self._try_rev_row_block_mirror_tile,
         ]
         for s in v2:
             try:
@@ -6193,6 +6197,78 @@ class SmartARCSolverV2(SmartARCSolver):
 
         for ex in train:
             if len(ex['output']) != len(ex['input'])+2 or len(ex['output'][0]) != len(ex['input'][0])+2:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_diagonal_reveal(self, train, test_input):
+        """1×N row: tile it diagonally from bottom-left to top-right. Output size = N×k where k=non-zero count."""
+        def apply_rule(grid):
+            if len(grid) != 1:
+                return None
+            row = grid[0]
+            N = len(row)
+            k = sum(1 for v in row if v != 0)
+            if k == 0:
+                return None
+            S = N * k  # output size
+            out = [[0]*S for _ in range(S)]
+            for r in range(S):
+                start = (S - 1 - r)
+                for j in range(N):
+                    c = start + j
+                    if 0 <= c < S:
+                        out[r][c] = row[j]
+            return out
+
+        for ex in train:
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_swap_ends_keep_mid(self, train, test_input):
+        """5×1 column: swap elements (0,1), keep (2), swap (3,4)."""
+        def apply_rule(grid):
+            if len(grid) != 5 or len(grid[0]) != 1:
+                return None
+            vals = [grid[i][0] for i in range(5)]
+            out_vals = [vals[1], vals[0], vals[2], vals[4], vals[3]]
+            return [[v] for v in out_vals]
+
+        for ex in train:
+            result = apply_rule(ex['input'])
+            if result is None or result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_row_tile_mirror_tile(self, train, test_input):
+        """R×C → 3R×3C: [original_rows, reversed_rows, original_rows], each row tiled ×3 in cols."""
+        def apply_rule(grid):
+            R, C = len(grid), len(grid[0])
+            rev_rows = [row[::-1] for row in grid]
+            all_rows = list(grid) + rev_rows + list(grid)
+            return [row * 3 for row in all_rows]
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input'])*3 or len(ex['output'][0]) != len(ex['input'][0])*3:
+                return None
+            result = apply_rule(ex['input'])
+            if result != ex['output']:
+                return None
+        return apply_rule(test_input)
+
+    def _try_rev_row_block_mirror_tile(self, train, test_input):
+        """R×C → 3R×2C: nat_block=rev(row)+row, output = rev_block + nat_block + rev_block."""
+        def apply_rule(grid):
+            nat = [row[::-1] + list(row) for row in grid]
+            rev = nat[::-1]
+            return rev + nat + rev
+
+        for ex in train:
+            if len(ex['output']) != len(ex['input'])*3 or len(ex['output'][0]) != len(ex['input'][0])*2:
                 return None
             result = apply_rule(ex['input'])
             if result != ex['output']:
