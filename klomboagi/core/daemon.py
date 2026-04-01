@@ -76,18 +76,30 @@ class KlomboAGIDaemon:
         self._last_health_check = 0.0
 
         self.on_execute_job: callable | None = None  # type: ignore[type-arg]
+        self._genesis = None
 
-    def start(self) -> None:
-        """Start the daemon loop. Blocks until stop() is called."""
+    def start(self, genesis=None) -> None:
+        """Start the daemon loop. Blocks until stop() is called.
+
+        Args:
+            genesis: Optional Genesis brain instance. If provided, the daemon
+                runs cognition cycles on missions and reports hardware status.
+        """
         if self.state != "stopped":
             raise RuntimeError(f"Daemon is already {self.state}")
 
+        self._genesis = genesis
         self.state = "starting"
         self._running = True
         self._write_pid()
         self._load_queue()
 
-        self.storage.event_log.append("daemon.started", {"pid": os.getpid()})
+        # Boot sequence — scan hardware, log startup
+        boot_info = {"pid": os.getpid()}
+        if genesis is not None:
+            hw = genesis.scan_hardware()
+            boot_info["hardware"] = hw.summary()
+        self.storage.event_log.append("daemon.started", boot_info)
         self.state = "running"
 
         self._setup_signals()
@@ -201,7 +213,17 @@ class KlomboAGIDaemon:
             self._save_queue()
 
     def _health_tick(self) -> None:
-        self.storage.event_log.append("daemon.health_check", {"state": self.state})
+        # Refresh hardware state during health checks
+        if self._genesis is not None:
+            hw = self._genesis.refresh_hardware()
+            self.storage.event_log.append("daemon.health_check", {
+                "state": self.state,
+                "cpu_usage": hw.cpu.usage_percent,
+                "ram_usage": hw.ram.usage_percent,
+                "ram_available_gb": round(hw.ram.available_gb, 1),
+            })
+        else:
+            self.storage.event_log.append("daemon.health_check", {"state": self.state})
 
     def _apply_backoff(self) -> None:
         elapsed = time.time() - self._last_activity

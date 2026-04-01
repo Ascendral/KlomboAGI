@@ -208,6 +208,11 @@ class Genesis:
         if storage is not None:
             self._init_autonomous(storage)
 
+        # Hardware Sense — know what machine we're running on
+        from klomboagi.senses.hardware import HardwareSense
+        self.hardware = HardwareSense()
+        self._hardware_state = None  # populated on first scan or boot
+
         # CognitionLoop — the full 10-phase reasoning engine
         self._init_cognition_loop()
 
@@ -781,6 +786,15 @@ class Genesis:
                         "are you an llm", "are you a chatbot", "are you like chatgpt",
                         "what makes you different"):
             return self.archetype.respond_to_difference()
+
+        # Hardware: questions about the machine
+        hardware_patterns = ("what machine", "what hardware", "what computer",
+                            "what am i running on", "what are you running on",
+                            "system info", "system status", "hardware status",
+                            "cpu", "ram", "gpu", "how much memory")
+        if any(p in q_lower for p in hardware_patterns):
+            hw = self.scan_hardware()
+            return hw.summary()
 
         # Personal/opinion questions — "favorite color?", "what do you prefer?"
         opinion_words = ("favorite", "favourite", "prefer", "like better",
@@ -2477,7 +2491,26 @@ class Genesis:
             for rtype, count in sorted(r_stats["by_type"].items(), key=lambda x: -x[1]):
                 lines.append(f"    {rtype:15s} {count}")
 
+        # Hardware
+        hw = self.scan_hardware()
+        lines.append(f"\nHardware:")
+        lines.append(f"  {hw.cpu.model}")
+        lines.append(f"  RAM: {hw.ram.available_gb:.1f}/{hw.ram.total_gb:.1f} GB ({hw.ram.usage_percent:.0f}% used)")
+        lines.append(f"  GPU: {hw.gpu.model} ({hw.gpu.cores} cores)")
+        lines.append(f"  Displays: {len(hw.displays)}")
+
         return "\n".join(lines)
+
+    def scan_hardware(self):
+        """Scan and cache hardware state."""
+        if self._hardware_state is None:
+            self._hardware_state = self.hardware.scan()
+        return self._hardware_state
+
+    def refresh_hardware(self):
+        """Force a fresh hardware scan."""
+        self._hardware_state = self.hardware.scan()
+        return self._hardware_state
 
     # ── Mission Execution (Bridge to RuntimeLoop) ──
 
