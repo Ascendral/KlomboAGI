@@ -488,6 +488,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_separator_grid_dimensions,
             self._try_quadrant_color_map,
             self._try_assemble_around_fives,
+            self._try_blobs_sorted_by_size,
         ]
         for s in v2:
             try:
@@ -9055,6 +9056,27 @@ class SmartARCSolverV2(SmartARCSolver):
                                 if 0 <= or_ < 3 and 0 <= oc < 3:
                                     result[or_][oc] = v
             return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_blobs_sorted_by_size (f8ff0b80) ---
+    def _try_blobs_sorted_by_size(self, train, test_input):
+        """Count cells per non-0 color, sort by count descending, output as column."""
+        def solve(grid):
+            from collections import Counter
+            counts = Counter()
+            for row in grid:
+                for v in row:
+                    if v != 0:
+                        counts[v] += 1
+            if not counts:
+                return None
+            ranked = sorted(counts.items(), key=lambda x: -x[1])
+            return [[c] for c, _ in ranked]
 
         for ex in train:
             r = solve(ex['input'])
