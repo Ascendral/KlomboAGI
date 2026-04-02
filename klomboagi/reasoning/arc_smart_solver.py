@@ -494,6 +494,9 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_diagonal_color_markers,
             self._try_move_toward_target,
             self._try_midpoint_plus,
+            self._try_color_swap_mapping,
+            self._try_shift_grid_down_one,
+            self._try_and_halves_sep,
         ]
         for s in v2:
             try:
@@ -9376,3 +9379,100 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, dot_color, plus_color)
+
+    # --- _try_color_swap_mapping (0d3d703e) ---
+    def _try_color_swap_mapping(self, train, test_input):
+        """Each input color maps to a fixed output color (learned from training)."""
+        # Learn mapping from training
+        mapping = {}
+        for ex in train:
+            inp, out = ex['input'], ex['output']
+            if len(inp) != len(out) or len(inp[0]) != len(out[0]):
+                return None
+            for r in range(len(inp)):
+                for c in range(len(inp[0])):
+                    iv, ov = inp[r][c], out[r][c]
+                    if iv in mapping:
+                        if mapping[iv] != ov:
+                            return None
+                    else:
+                        mapping[iv] = ov
+        if not mapping:
+            return None
+        # Must be a non-identity mapping
+        if all(k == v for k, v in mapping.items()):
+            return None
+        # Apply to test
+        rows, cols = len(test_input), len(test_input[0])
+        result = []
+        for r in range(rows):
+            row = []
+            for c in range(cols):
+                v = test_input[r][c]
+                if v not in mapping:
+                    return None
+                row.append(mapping[v])
+            result.append(row)
+        # Verify on training
+        for ex in train:
+            inp = ex['input']
+            predicted = [[mapping[inp[r][c]] for c in range(len(inp[0]))] for r in range(len(inp))]
+            if predicted != ex['output']:
+                return None
+        return result
+
+    # --- _try_shift_grid_down_one (25ff71a9) ---
+    def _try_shift_grid_down_one(self, train, test_input):
+        """Shift entire grid down by 1 row, top row becomes all zeros."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [[0]*cols] + [list(grid[r]) for r in range(rows-1)]
+            return result
+        for ex in train:
+            if solve(ex['input']) != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_and_halves_sep (0520fde7) ---
+    def _try_and_halves_sep(self, train, test_input):
+        """Grid split by separator column. Output = AND of left and right halves (1&1 -> marker)."""
+        def solve(grid, sep_col, marker):
+            rows = len(grid)
+            left = [grid[r][:sep_col] for r in range(rows)]
+            right = [grid[r][sep_col+1:] for r in range(rows)]
+            if len(left[0]) != len(right[0]):
+                return None
+            w = len(left[0])
+            result = [[0]*w for _ in range(rows)]
+            for r in range(rows):
+                for c in range(w):
+                    if left[r][c] != 0 and right[r][c] != 0:
+                        result[r][c] = marker
+            return result
+
+        # Find separator column (all same non-zero value)
+        inp0 = train[0]['input']
+        rows, cols = len(inp0), len(inp0[0])
+        sep_col = None
+        for c in range(cols):
+            vals = set(inp0[r][c] for r in range(rows))
+            if len(vals) == 1 and 0 not in vals:
+                sep_col = c
+                break
+        if sep_col is None:
+            return None
+        # Find marker color from output
+        out0 = train[0]['output']
+        marker = None
+        for r in range(len(out0)):
+            for c in range(len(out0[0])):
+                if out0[r][c] != 0:
+                    marker = out0[r][c]
+                    break
+            if marker: break
+        if marker is None:
+            marker = 2  # default
+        for ex in train:
+            if solve(ex['input'], sep_col, marker) != ex['output']:
+                return None
+        return solve(test_input, sep_col, marker)
