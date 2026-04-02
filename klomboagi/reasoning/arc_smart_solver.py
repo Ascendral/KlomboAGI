@@ -489,6 +489,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_quadrant_color_map,
             self._try_assemble_around_fives,
             self._try_blobs_sorted_by_size,
+            self._try_extract_uniform_cells_from_sep_grid,
         ]
         for s in v2:
             try:
@@ -9077,6 +9078,82 @@ class SmartARCSolverV2(SmartARCSolver):
                 return None
             ranked = sorted(counts.items(), key=lambda x: -x[1])
             return [[c] for c, _ in ranked]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_extract_uniform_cells_from_sep_grid (458e3a53) ---
+    def _try_extract_uniform_cells_from_sep_grid(self, train, test_input):
+        """Sep grid; some cells are uniform single-color, rest are noisy. Extract uniform sub-grid."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_color = None
+            for color in set(v for row in grid for v in row):
+                fr = [r for r in range(rows) if all(grid[r][c] == color for c in range(cols))]
+                fc = [c for c in range(cols) if all(grid[r][c] == color for r in range(rows))]
+                if fr and fc:
+                    sep_color = color; break
+            if sep_color is None:
+                return None
+            fr_set = set(r for r in range(rows) if all(grid[r][c] == sep_color for c in range(cols)))
+            fc_set = set(c for c in range(cols) if all(grid[r][c] == sep_color for r in range(rows)))
+            # Build row/col bands
+            rbands, cbands = [], []
+            start = None
+            for r in range(rows):
+                if r not in fr_set:
+                    if start is None: start = r
+                else:
+                    if start is not None: rbands.append((start, r-1)); start = None
+            if start is not None: rbands.append((start, rows-1))
+            start = None
+            for c in range(cols):
+                if c not in fc_set:
+                    if start is None: start = c
+                else:
+                    if start is not None: cbands.append((start, c-1)); start = None
+            if start is not None: cbands.append((start, cols-1))
+            if len(rbands) < 2 or len(cbands) < 2:
+                return None
+            # For each cell, check if it's uniform (single non-sep color)
+            cell_grid = []
+            for ri, (r0, r1) in enumerate(rbands):
+                row = []
+                for ci, (c0, c1) in enumerate(cbands):
+                    colors = set()
+                    for r in range(r0, r1+1):
+                        for c in range(c0, c1+1):
+                            if grid[r][c] != sep_color:
+                                colors.add(grid[r][c])
+                    if len(colors) == 1:
+                        row.append((True, colors.pop()))
+                    else:
+                        row.append((False, None))
+                cell_grid.append(row)
+            # Find bounding box of uniform cells
+            uniform_cells = [(ri, ci, v) for ri, row in enumerate(cell_grid)
+                           for ci, (u, v) in enumerate(row) if u]
+            if not uniform_cells:
+                return None
+            min_ri = min(ri for ri,ci,v in uniform_cells)
+            max_ri = max(ri for ri,ci,v in uniform_cells)
+            min_ci = min(ci for ri,ci,v in uniform_cells)
+            max_ci = max(ci for ri,ci,v in uniform_cells)
+            # Extract the sub-grid
+            result = []
+            for ri in range(min_ri, max_ri+1):
+                row = []
+                for ci in range(min_ci, max_ci+1):
+                    u, v = cell_grid[ri][ci]
+                    if u:
+                        row.append(v)
+                    else:
+                        return None  # gap in uniform block
+                result.append(row)
+            return result
 
         for ex in train:
             r = solve(ex['input'])
