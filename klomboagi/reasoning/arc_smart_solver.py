@@ -500,6 +500,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_zone_extract_single_value,
             self._try_compress_border_to_3x3,
             self._try_select_block_most_minority,
+            self._try_checkerboard_from_rows,
+            self._try_color_bands_in_order,
         ]
         for s in v2:
             try:
@@ -9605,3 +9607,85 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, minority_color)
+
+    # --- _try_checkerboard_from_rows (e9afcf9a) ---
+    def _try_checkerboard_from_rows(self, train, test_input):
+        """Input has uniform rows of different colors. Output = checkerboard of those colors."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Check each row is uniform
+            row_colors = []
+            for r in range(rows):
+                vals = set(grid[r])
+                if len(vals) != 1:
+                    return None
+                row_colors.append(grid[r][0])
+            # Need at least 2 different colors
+            if len(set(row_colors)) < 2:
+                return None
+            # Build checkerboard
+            result = [[0]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    # Offset by column
+                    idx = (r + c) % len(row_colors)
+                    result[r][c] = row_colors[idx]
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_color_bands_in_order (4be741c5) ---
+    def _try_color_bands_in_order(self, train, test_input):
+        """Grid has color bands (top-to-bottom or left-to-right). Output = colors in spatial order."""
+        def solve_tb(grid):
+            """Try top-to-bottom band detection."""
+            rows, cols = len(grid), len(grid[0])
+            # For each row, find the dominant color
+            from collections import Counter
+            colors_in_order = []
+            for r in range(rows):
+                freq = Counter(grid[r])
+                dom = freq.most_common(1)[0][0]
+                if not colors_in_order or colors_in_order[-1] != dom:
+                    colors_in_order.append(dom)
+            if len(colors_in_order) < 2:
+                return None
+            return [[c] for c in colors_in_order]
+
+        def solve_lr(grid):
+            """Try left-to-right band detection."""
+            rows, cols = len(grid), len(grid[0])
+            from collections import Counter
+            colors_in_order = []
+            for c in range(cols):
+                col_vals = [grid[r][c] for r in range(rows)]
+                freq = Counter(col_vals)
+                dom = freq.most_common(1)[0][0]
+                if not colors_in_order or colors_in_order[-1] != dom:
+                    colors_in_order.append(dom)
+            if len(colors_in_order) < 2:
+                return None
+            return [colors_in_order]
+
+        # Try top-to-bottom first
+        ok = True
+        for ex in train:
+            r = solve_tb(ex['input'])
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve_tb(test_input)
+
+        # Try left-to-right
+        ok = True
+        for ex in train:
+            r = solve_lr(ex['input'])
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve_lr(test_input)
+        return None
