@@ -499,6 +499,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_and_halves_sep,
             self._try_zone_extract_single_value,
             self._try_compress_border_to_3x3,
+            self._try_select_block_most_minority,
         ]
         for s in v2:
             try:
@@ -9543,3 +9544,64 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_select_block_most_minority (ae4f1146) ---
+    def _try_select_block_most_minority(self, train, test_input):
+        """Multiple NxM blocks of 2 colors on 0-bg. Select the block with the most of the rarer color."""
+        def find_blocks(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            blocks = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and not visited[r][c]:
+                        queue = [(r, c)]
+                        visited[r][c] = True
+                        cells = []
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            cells.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc]!=0:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                        min_r = min(r for r,c in cells)
+                        min_c = min(c for r,c in cells)
+                        max_r = max(r for r,c in cells)
+                        max_c = max(c for r,c in cells)
+                        h, w = max_r-min_r+1, max_c-min_c+1
+                        if h*w == len(cells):  # solid rectangle
+                            block = [[grid[min_r+dr][min_c+dc] for dc in range(w)] for dr in range(h)]
+                            blocks.append(block)
+            return blocks
+
+        def solve(grid, minority_color):
+            blocks = find_blocks(grid)
+            if len(blocks) < 2:
+                return None
+            # All blocks same size
+            h, w = len(blocks[0]), len(blocks[0][0])
+            if not all(len(b)==h and len(b[0])==w for b in blocks):
+                return None
+            # Select block with most minority_color cells
+            best = max(blocks, key=lambda b: sum(1 for row in b for v in row if v == minority_color))
+            return best
+
+        # Learn minority color: the one that appears less overall in non-zero cells
+        from collections import Counter
+        all_nonzero = Counter()
+        for ex in train:
+            for row in ex['input']:
+                for v in row:
+                    if v != 0:
+                        all_nonzero[v] += 1
+        if len(all_nonzero) != 2:
+            return None
+        minority_color = all_nonzero.most_common()[-1][0]
+
+        for ex in train:
+            r = solve(ex['input'], minority_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, minority_color)
