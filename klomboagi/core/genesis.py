@@ -223,10 +223,14 @@ class Genesis:
         self.hardware = HardwareSense()
         self._hardware_state = None  # populated on first scan or boot
 
+        # Core Reasoner — the REAL reasoning engine (Prolog-style inference)
+        from klomboagi.reasoning.core_reasoner import CoreReasoner
+        self.core_reasoner = CoreReasoner()
+
         # CognitionLoop — the full 10-phase reasoning engine
         self._init_cognition_loop()
 
-        # Reasoning engine — for direct fact derivation
+        # Reasoning engine — for direct fact derivation (legacy)
         self.reasoning_engine = ReasoningEngine()
 
         # Relation store — multi-directional reasoning
@@ -2523,31 +2527,85 @@ class Genesis:
     def _seed_boot_knowledge(self) -> None:
         """Seed the brain with foundational knowledge on first boot.
 
-        Like a baby's instincts — not learned, but necessary for learning.
-        Categories, basic relations, enough for surprise detection and
-        reasoning to work from the very first conversation.
+        Feeds BOTH the legacy belief store (for backward compat) AND the
+        CoreReasoner (for actual inference). The CoreReasoner is the real
+        engine; the belief store is for display/retrieval.
         """
-        # Foundational categories — what kinds of things exist
+        from klomboagi.reasoning.core_reasoner import Rel
+
+        # ---- Feed the CoreReasoner with structured facts ----
+        # Only add if reasoner is empty (avoid duplication on restart)
+        if self.core_reasoner.total_facts == 0:
+            # Taxonomy
+            self.core_reasoner.tell_many([
+                ("dog", Rel.IS_A, "mammal"), ("cat", Rel.IS_A, "mammal"),
+                ("horse", Rel.IS_A, "mammal"), ("whale", Rel.IS_A, "mammal"),
+                ("bat", Rel.IS_A, "mammal"),
+                ("snake", Rel.IS_A, "reptile"), ("lizard", Rel.IS_A, "reptile"),
+                ("alligator", Rel.IS_A, "reptile"),
+                ("eagle", Rel.IS_A, "bird"), ("penguin", Rel.IS_A, "bird"),
+                ("sparrow", Rel.IS_A, "bird"),
+                ("salmon", Rel.IS_A, "fish"), ("shark", Rel.IS_A, "fish"),
+                ("mammal", Rel.IS_A, "animal"), ("reptile", Rel.IS_A, "animal"),
+                ("bird", Rel.IS_A, "animal"), ("fish", Rel.IS_A, "animal"),
+                ("insect", Rel.IS_A, "animal"),
+                ("animal", Rel.IS_A, "living thing"),
+                ("plant", Rel.IS_A, "living thing"),
+            ], confidence=0.95, source="boot")
+
+            # Properties
+            self.core_reasoner.tell_many([
+                ("mammal", Rel.HAS_PROP, "warm-blooded"),
+                ("mammal", Rel.HAS_PROP, "has fur"),
+                ("reptile", Rel.HAS_PROP, "cold-blooded"),
+                ("reptile", Rel.HAS_PROP, "has scales"),
+                ("bird", Rel.HAS_PROP, "has feathers"),
+                ("bird", Rel.CAN, "fly"),
+                ("fish", Rel.HAS_PROP, "has gills"),
+                ("fish", Rel.CAN, "swim"),
+                ("whale", Rel.CAN, "swim"),
+                ("whale", Rel.LOCATED, "ocean"),
+                ("shark", Rel.LOCATED, "ocean"),
+            ], confidence=0.9, source="boot")
+
+            # Causal knowledge
+            self.core_reasoner.tell_many([
+                ("gravity", Rel.CAUSES, "falling"),
+                ("heat", Rel.CAUSES, "expansion"),
+                ("cold", Rel.CAUSES, "contraction"),
+                ("fire", Rel.REQUIRES, "oxygen"),
+                ("fire", Rel.REQUIRES, "fuel"),
+                ("rain", Rel.CAUSES, "wet ground"),
+                ("exercise", Rel.CAUSES, "fatigue"),
+            ], confidence=0.9, source="boot")
+
+            # Numeric facts (real measurements)
+            self.core_reasoner.tell_numeric("whale", "length", 25, "meters", 0.8, "boot")
+            self.core_reasoner.tell_numeric("whale", "weight", 140000, "kg", 0.8, "boot")
+            self.core_reasoner.tell_numeric("car", "length", 4.5, "meters", 0.9, "boot")
+            self.core_reasoner.tell_numeric("car", "weight", 1500, "kg", 0.9, "boot")
+            self.core_reasoner.tell_numeric("human", "height", 1.7, "meters", 0.8, "boot")
+            self.core_reasoner.tell_numeric("human", "weight", 70, "kg", 0.8, "boot")
+            self.core_reasoner.tell_numeric("earth", "radius", 6371, "km", 0.99, "boot")
+            self.core_reasoner.tell_numeric("moon", "radius", 1737, "km", 0.99, "boot")
+
+            # Run forward chaining to derive all possible conclusions
+            derived = self.core_reasoner.forward_chain()
+
+        # ---- Also feed legacy belief store for backward compat ----
         categories = {
-            # Animals
             "dog": "a mammal", "cat": "a mammal", "horse": "a mammal",
             "whale": "a mammal", "bat": "a mammal",
             "snake": "a reptile", "lizard": "a reptile", "alligator": "a reptile",
             "eagle": "a bird", "penguin": "a bird", "sparrow": "a bird",
-            "salmon": "a fish", "shark": "a fish", "trout": "a fish",
+            "salmon": "a fish", "shark": "a fish",
             "mammal": "an animal", "reptile": "an animal", "bird": "an animal",
             "fish": "an animal", "insect": "an animal",
             "animal": "a living thing", "plant": "a living thing",
-            # Colors
             "red": "a color", "blue": "a color", "green": "a color",
-            "yellow": "a color", "orange": "a color", "purple": "a color",
-            "black": "a color", "white": "a color",
-            # Materials
-            "wood": "a material", "metal": "a material", "glass": "a material",
+            "yellow": "a color", "black": "a color", "white": "a color",
             "water": "a liquid", "air": "a gas",
-            # Shapes
             "circle": "a shape", "square": "a shape", "triangle": "a shape",
-            # Basics
             "earth": "a planet", "sun": "a star", "moon": "a satellite",
         }
 
@@ -2559,46 +2617,30 @@ class Genesis:
                     statement=statement,
                     truth=TruthValue.from_single_observation(True),
                     stamp=EvidenceStamp.new(self.base._evidence_counter),
-                    subject=subject,
-                    predicate=predicate,
-                    source="boot_knowledge",
+                    subject=subject, predicate=predicate, source="boot_knowledge",
                 )
-                # Boost confidence for boot knowledge — these are axioms
                 belief.truth.frequency = 0.95
                 belief.truth.confidence = 0.9
                 self.base._beliefs[statement] = belief
                 self.base.memory.beliefs[statement] = belief.to_dict()
                 self.base.graph.add(subject, is_a=[predicate.replace("a ", "").replace("an ", "")])
 
-        # Foundational relations
         from klomboagi.core.relations import RelationType
-        relations = [
+        for source, rel_type, target in [
             ("mammal", RelationType.IS_A, "animal"),
             ("reptile", RelationType.IS_A, "animal"),
             ("bird", RelationType.IS_A, "animal"),
             ("fish", RelationType.IS_A, "animal"),
-            ("insect", RelationType.IS_A, "animal"),
             ("animal", RelationType.IS_A, "living thing"),
-            ("plant", RelationType.IS_A, "living thing"),
-            ("water", RelationType.REQUIRES, "hydrogen"),
-            ("fire", RelationType.REQUIRES, "oxygen"),
             ("gravity", RelationType.CAUSES, "falling"),
             ("heat", RelationType.CAUSES, "expansion"),
             ("cold", RelationType.CAUSES, "contraction"),
-        ]
-        for source, rel_type, target in relations:
+        ]:
             self.relations.add(source, rel_type, target, confidence=0.9, domain="boot")
 
-        # Build belief index for fast lookup
         self.belief_index.build(self.base._beliefs)
-
-        # Run global inference on boot knowledge — derive transitive chains
-        # "dog is mammal" + "mammal is animal" → "dog is animal"
-        derived = self.inference_engine.run(max_derivations=200)
-        if derived:
-            self.belief_index.build(self.base._beliefs)
-
-        # Save immediately so boot knowledge + derivations persist
+        self.inference_engine.run(max_derivations=200)
+        self.belief_index.build(self.base._beliefs)
         self.base.memory.save(self.base.memory_path)
         self.save_state()
 
@@ -2659,6 +2701,122 @@ class Genesis:
         """Force a fresh hardware scan."""
         self._hardware_state = self.hardware.scan()
         return self._hardware_state
+
+    # ── Core Reasoning Interface ──
+
+    def _ask_core_reasoner(self, question: str) -> str | None:
+        """Route a question through the CoreReasoner.
+
+        Parses natural language into structured queries, runs inference,
+        returns the answer. Returns None if the question can't be parsed
+        or the reasoner has nothing useful.
+        """
+        import re
+        from klomboagi.reasoning.core_reasoner import Rel
+
+        q = question.lower().strip().rstrip("?").strip()
+
+        # "what is X" / "what are X"
+        m = re.match(r"what (?:is|are) (?:a |an |the )?(.+)", q)
+        if m:
+            subject = m.group(1).strip()
+            result = self.core_reasoner.ask(subject, Rel.IS_A, "?")
+            if result.known:
+                return result.explain()
+
+        # "is X a Y" / "is a X a Y"
+        m = re.match(r"is (?:a |an |the )?(\w+) (?:a |an |the )?(.+)", q)
+        if m:
+            subject, obj = m.group(1).strip(), m.group(2).strip()
+            result = self.core_reasoner.ask(subject, Rel.IS_A, obj)
+            if result.known:
+                return result.explain()
+
+        # "can X Y" / "can a X Y"
+        m = re.match(r"can (?:a |an |the )?(\w+) (.+)", q)
+        if m:
+            subject, action = m.group(1).strip(), m.group(2).strip()
+            result = self.core_reasoner.ask(subject, Rel.CAN, action)
+            if result.known:
+                return result.explain()
+
+        # "does X cause Y"
+        m = re.match(r"does (?:a |an |the )?(.+?) cause (.+)", q)
+        if m:
+            subject, obj = m.group(1).strip(), m.group(2).strip()
+            result = self.core_reasoner.ask(subject, Rel.CAUSES, obj)
+            if result.known:
+                return result.explain()
+
+        # "what causes X"
+        m = re.match(r"what causes (.+)", q)
+        if m:
+            obj = m.group(1).strip()
+            # Reverse query: find all X where X causes obj
+            all_facts = self.core_reasoner.facts | self.core_reasoner.derived
+            causes = [f.subject for f in all_facts
+                      if f.relation == Rel.CAUSES and f.obj == obj]
+            if causes:
+                return f"{obj} is caused by: {', '.join(causes)}"
+
+        # "what does X cause"
+        m = re.match(r"what does (?:a |an |the )?(.+?) cause", q)
+        if m:
+            subject = m.group(1).strip()
+            result = self.core_reasoner.ask(subject, Rel.CAUSES, "?")
+            if result.known:
+                return result.explain()
+
+        # "is X bigger/heavier/longer than Y"
+        m = re.match(r"is (?:a |an |the )?(.+?) (bigger|heavier|longer|taller|larger|smaller|lighter|shorter) than (?:a |an |the )?(.+)", q)
+        if m:
+            a, comp, b = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            prop_map = {
+                "bigger": "weight", "larger": "weight", "smaller": "weight", "lighter": "weight",
+                "heavier": "weight",
+                "longer": "length", "shorter": "length",
+                "taller": "height",
+            }
+            prop = prop_map.get(comp, "weight")
+            result = self.core_reasoner.ask_compare(a, b, prop)
+            return result.answer
+
+        # "where is X" / "where does X live"
+        m = re.match(r"where (?:is|does|do) (?:a |an |the )?(.+?)(?:\s+live)?$", q)
+        if m:
+            subject = m.group(1).strip()
+            result = self.core_reasoner.ask(subject, Rel.LOCATED, "?")
+            if result.known:
+                return result.explain()
+
+        # "what properties does X have"
+        m = re.match(r"what (?:properties|traits|features) does (?:a |an |the )?(.+?) have", q)
+        if m:
+            subject = m.group(1).strip()
+            result = self.core_reasoner.ask(subject, Rel.HAS_PROP, "?")
+            if result.known:
+                return result.explain()
+
+        return None  # Can't parse -- fall through to legacy
+
+    def _teach_core_reasoner(self, subject: str, predicate: str) -> None:
+        """When a user teaches a fact, also feed it to the CoreReasoner."""
+        from klomboagi.reasoning.core_reasoner import Rel
+        subject = subject.lower().strip()
+        predicate = predicate.lower().strip()
+
+        # Try to determine the relation type from the predicate
+        for prefix, rel in [("a ", Rel.IS_A), ("an ", Rel.IS_A)]:
+            if predicate.startswith(prefix):
+                self.core_reasoner.tell(subject, rel, predicate[len(prefix):],
+                                        confidence=0.8, source="taught")
+                self.core_reasoner.forward_chain(max_iterations=3)
+                return
+
+        # Default: store as property
+        self.core_reasoner.tell(subject, Rel.HAS_PROP, predicate,
+                                confidence=0.7, source="taught")
+        self.core_reasoner.forward_chain(max_iterations=3)
 
     # ── System Awareness ──
 

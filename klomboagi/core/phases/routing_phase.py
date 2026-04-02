@@ -43,6 +43,14 @@ class RoutingPhase(Phase):
             g.context.update(ctx.intent, ctx.resolved_message)
             return ctx
 
+        # Try CoreReasoner FIRST for questions -- real inference, not string matching
+        if ctx.intent["type"] == "question" and hasattr(g, 'core_reasoner'):
+            reasoner_answer = g._ask_core_reasoner(q_lower)
+            if reasoner_answer is not None:
+                ctx.response = reasoner_answer
+                g.context.update(ctx.intent, ctx.resolved_message)
+                return ctx
+
         # Route: deep think for questions, base system for everything else
         if ctx.intent["type"] == "question":
             g.metacognition.record_question("knowledge")
@@ -62,6 +70,12 @@ class RoutingPhase(Phase):
         else:
             ctx.response = g.base.hear(ctx.resolved_message)
             g._extract_relations(ctx.resolved_message)
+            # Feed teaches into CoreReasoner
+            if ctx.intent.get("type") == "teach" and hasattr(g, '_teach_core_reasoner'):
+                subject = ctx.intent.get("subject", "")
+                predicate = ctx.intent.get("predicate", "")
+                if subject and predicate:
+                    g._teach_core_reasoner(subject, predicate)
 
         # Update dialog context
         g.context.update(ctx.intent, ctx.resolved_message)
