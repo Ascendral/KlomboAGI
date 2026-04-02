@@ -492,6 +492,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extract_uniform_cells_from_sep_grid,
             self._try_pyramid_inner_diagonal_extend,
             self._try_diagonal_color_markers,
+            self._try_move_toward_target,
         ]
         for s in v2:
             try:
@@ -9284,3 +9285,51 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, marker, colors_map)
+
+    # --- _try_move_toward_target (dc433765) ---
+    def _try_move_toward_target(self, train, test_input):
+        """Two colored dots on bg. One (mobile) moves one step toward the other (stationary)."""
+        def solve(grid, mobile_color, static_color):
+            rows, cols = len(grid), len(grid[0])
+            mobile = static = None
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == mobile_color:
+                        mobile = (r, c)
+                    elif grid[r][c] == static_color:
+                        static = (r, c)
+            if mobile is None or static is None:
+                return None
+            mr, mc = mobile
+            sr, sc = static
+            # Move one step toward static
+            dr = (1 if sr > mr else -1 if sr < mr else 0)
+            dc = (1 if sc > mc else -1 if sc < mc else 0)
+            nr, nc = mr + dr, mc + dc
+            result = [[0]*cols for _ in range(rows)]
+            result[nr][nc] = mobile_color
+            result[sr][sc] = static_color
+            return result
+
+        # Learn which color is mobile and which is static
+        # Try both orderings
+        for ex in train:
+            inp = ex['input']
+            colors = set(v for row in inp for v in row) - {0}
+            if len(colors) != 2:
+                return None
+        
+        colors = list(set(v for row in train[0]['input'] for v in row) - {0})
+        if len(colors) != 2:
+            return None
+
+        for mobile_color, static_color in [(colors[0], colors[1]), (colors[1], colors[0])]:
+            ok = True
+            for ex in train:
+                r = solve(ex['input'], mobile_color, static_color)
+                if r != ex['output']:
+                    ok = False
+                    break
+            if ok:
+                return solve(test_input, mobile_color, static_color)
+        return None
