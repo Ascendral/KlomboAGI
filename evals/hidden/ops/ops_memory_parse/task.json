@@ -1,1 +1,0 @@
-{"id":"ops_memory_parse","domain":"ops","description":"Parse this memory info and return total, used, and free in GB","inputs":{"meminfo":"MemTotal: 16384000 kB\nMemFree: 4096000 kB\nMemAvailable: 8192000 kB"},"expected":{"total_gb":16.4,"free_gb":4.1,"available_gb":8.2},"scorer":"exact_match"}

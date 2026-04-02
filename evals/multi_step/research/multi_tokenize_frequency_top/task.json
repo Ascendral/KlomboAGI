@@ -1,1 +1,0 @@
-{"id":"multi_tokenize_frequency_top","domain":"research","description":"Tokenize this text into words, compute frequency, return top 3","steps":[{"action":"tokenize"},{"action":"frequency"},{"action":"top_n","n":3}],"inputs":{"text":"the cat sat on the mat the cat ate the rat"},"expected":["the","cat","sat"],"scorer":"exact_match"}

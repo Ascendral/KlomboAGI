@@ -1,1 +1,0 @@
-{"id":"data_find_outliers","domain":"data","description":"Identify statistical outliers in monthly sales data (more than 2 standard deviations from mean)","inputs":{"data":{"Jan":100,"Feb":110,"Mar":95,"Apr":105,"May":500,"Jun":98,"Jul":102,"Aug":97,"Sep":103,"Oct":99,"Nov":101,"Dec":300}},"expected":["May"],"scorer":"exact_match"}

@@ -1,1 +1,0 @@
-{"id":"unseen_word_length_avg","domain":"research","description":"Compute the average word length in this text rounded to 1 decimal","inputs":{"text":"the cat sat on the mat"},"expected":2.8,"scorer":"exact_match"}
