@@ -498,6 +498,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_shift_grid_down_one,
             self._try_and_halves_sep,
             self._try_zone_extract_single_value,
+            self._try_compress_border_to_3x3,
         ]
         for s in v2:
             try:
@@ -9513,3 +9514,32 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, out_rows, out_cols)
+
+    # --- _try_compress_border_to_3x3 (bc1d5164) ---
+    def _try_compress_border_to_3x3(self, train, test_input):
+        """Compress grid to 3x3 by grouping rows/cols into 3 zones. OR within each zone."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows < 3 or cols < 3:
+                return None
+            # Find the non-zero value
+            nz = set(v for row in grid for v in row if v != 0)
+            if len(nz) != 1:
+                return None
+            val = nz.pop()
+            # Zone mapping: row 0 -> 0, rows 1..rows-2 -> 1, row rows-1 -> 2
+            # Col 0 -> 0, cols 1..cols-2 -> 1, col cols-1 -> 2
+            result = [[0]*3 for _ in range(3)]
+            for r in range(rows):
+                zr = 0 if r == 0 else (2 if r == rows-1 else 1)
+                for c in range(cols):
+                    zc = 0 if c == 0 else (2 if c == cols-1 else 1)
+                    if grid[r][c] == val:
+                        result[zr][zc] = val
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
