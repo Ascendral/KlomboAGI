@@ -233,6 +233,10 @@ class CoreReasoner:
 
                     new_fact = Fact(s, r, o, conf, "derived")
 
+                    # Don't add if blocked (explicitly denied)
+                    if self._is_blocked(s, r, o):
+                        continue
+
                     # Don't add if already known (with equal or higher confidence)
                     if not self._already_known(new_fact, all_facts | set(new_facts)):
                         new_facts.append(new_fact)
@@ -559,6 +563,189 @@ class CoreReasoner:
         for r in self.rules:
             lines.append(f"  {r}")
         return "\n".join(lines)
+
+    # ---- Negation / Exceptions ----
+
+    def deny(self, subject: str, relation: Rel, obj: str,
+             confidence: float = 1.0, source: str = "taught") -> Fact:
+        """Explicitly deny a fact. Overrides inherited conclusions.
+
+        Example: deny("penguin", CAN, "fly") blocks the inherited
+        "penguin can fly" from "bird can fly".
+        """
+        subject = subject.lower().strip()
+        obj = obj.lower().strip()
+
+        # Remove any derived fact that matches
+        to_remove = set()
+        for f in self.derived:
+            if f.subject == subject and f.relation == relation and f.obj == obj:
+                to_remove.add(f)
+        self.derived -= to_remove
+
+        # Also remove from given facts if present
+        to_remove_given = set()
+        for f in self.facts:
+            if f.subject == subject and f.relation == relation and f.obj == obj:
+                to_remove_given.add(f)
+        self.facts -= to_remove_given
+
+        # Store the negation as a fact (using OPPOSITE as a marker)
+        neg_fact = Fact(subject, Rel.OPPOSITE, f"not_{relation.value}_{obj}",
+                        confidence, source)
+        self.facts.add(neg_fact)
+
+        # Add to blocked set so forward chaining won't re-derive it
+        if not hasattr(self, '_blocked'):
+            self._blocked = set()
+        self._blocked.add((subject, relation, obj))
+
+        return neg_fact
+
+    def _is_blocked(self, subject: str, relation: Rel, obj: str) -> bool:
+        """Check if a fact has been explicitly denied."""
+        if not hasattr(self, '_blocked'):
+            self._blocked = set()
+        return (subject, relation, obj) in self._blocked
+
+    # ---- Learning from Text ----
+
+    def learn_from_text(self, text: str) -> list[Fact]:
+        """Extract structured facts from natural language text.
+
+        Not an LLM. Uses pattern matching to find "X is a Y",
+        "X causes Y", "X can Y", etc. Then feeds them into the
+        knowledge base and runs forward chaining.
+
+        Returns list of new facts learned.
+        """
+        import re
+        text = text.lower()
+        new_facts = []
+
+        def _normalize(s: str) -> str:
+            """Strip articles, depluralize."""
+            s = s.strip()
+            for art in ("a ", "an ", "the "):
+                if s.startswith(art):
+                    s = s[len(art):]
+            s = s.strip()
+            # Basic depluralize
+            if s.endswith("ies") and len(s) > 4:
+                s = s[:-3] + "y"
+            elif s.endswith("es") and len(s) > 3 and not s.endswith("ses"):
+                s = s[:-2]
+                if not s.endswith("e") and len(s) > 2:
+                    s = s + "e"
+            elif s.endswith("s") and not s.endswith("ss") and len(s) > 3:
+                s = s[:-1]
+            return s.strip()
+
+        # "X is a/an Y" patterns
+        for m in re.finditer(r'(\b\w[\w\s]{0,20}?)\s+(?:is|are)\s+(?:a|an)\s+(\w[\w\s]{0,20}?)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1 and s != o:
+                f = self.tell(s, Rel.IS_A, o, 0.7, "learned")
+                new_facts.append(f)
+
+        # "X is Y" (property, not is-a)
+        for m in re.finditer(r'(\b\w+)\s+(?:is|are)\s+([\w-]+)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 2 and s != o:
+                if not any(f.subject == s and f.relation == Rel.IS_A for f in new_facts):
+                    f = self.tell(s, Rel.HAS_PROP, o, 0.6, "learned")
+                    new_facts.append(f)
+
+        # "X causes Y" / "X leads to Y" / "X results in Y"
+        for m in re.finditer(r'(\b\w[\w\s]{0,15}?)\s+(?:causes?|leads?\s+to|results?\s+in)\s+(\w[\w\s]{0,15}?)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1:
+                f = self.tell(s, Rel.CAUSES, o, 0.6, "learned")
+                new_facts.append(f)
+
+        # "X requires Y" / "X needs Y"
+        for m in re.finditer(r'(\b\w[\w\s]{0,15}?)\s+(?:requires?|needs?)\s+(\w[\w\s]{0,15}?)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1:
+                f = self.tell(s, Rel.REQUIRES, o, 0.6, "learned")
+                new_facts.append(f)
+
+        # "X can Y" / "X is able to Y"
+        for m in re.finditer(r'(\b\w+)\s+(?:can|is\s+able\s+to)\s+(\w[\w\s]{0,15}?)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1:
+                f = self.tell(s, Rel.CAN, o, 0.6, "learned")
+                new_facts.append(f)
+
+        # "X cannot Y" / "X can't Y"
+        for m in re.finditer(r"(\b\w+)\s+(?:cannot|can't|can\s+not)\s+(\w[\w\s]{0,15}?)(?:\.|,|;|$)", text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1:
+                self.deny(s, Rel.CAN, o, 0.8, "learned")
+
+        # "X is part of Y" / "X belongs to Y"
+        for m in re.finditer(r'(\b\w[\w\s]{0,15}?)\s+(?:is\s+part\s+of|belongs?\s+to)\s+(\w[\w\s]{0,15}?)(?:\.|,|;|$)', text):
+            s, o = _normalize(m.group(1)), _normalize(m.group(2))
+            if len(s) > 1 and len(o) > 1:
+                f = self.tell(s, Rel.PART_OF, o, 0.6, "learned")
+                new_facts.append(f)
+
+        # Numeric: "X is/weighs/measures N units"
+        for m in re.finditer(r'(\b\w+)\s+(?:is|weighs?|measures?|has\s+a\s+\w+\s+of)\s+(?:about\s+)?(\d+(?:\.\d+)?)\s*(\w+)', text):
+            s = _normalize(m.group(1))
+            val = float(m.group(2))
+            unit = m.group(3).strip()
+            # Guess the property from the unit
+            unit_to_prop = {
+                "meters": "length", "m": "length", "km": "length", "feet": "length",
+                "kg": "weight", "pounds": "weight", "tons": "weight", "lbs": "weight",
+                "celsius": "temperature", "fahrenheit": "temperature",
+                "years": "age", "days": "age",
+            }
+            prop = unit_to_prop.get(unit, "measurement")
+            self.tell_numeric(s, prop, val, unit, 0.6, "learned")
+
+        if new_facts:
+            self.forward_chain(max_iterations=3)
+
+        return new_facts
+
+    # ---- Self-Questioning ----
+
+    def find_gaps(self) -> list[str]:
+        """Identify things the reasoner is curious about.
+
+        Looks for:
+        - Concepts mentioned but not defined (no is_a)
+        - Properties without values
+        - Causal chains that end abruptly
+        - Things we inherited but can't verify
+        """
+        gaps = []
+        all_facts = self.facts | self.derived
+
+        # Concepts that appear as objects but have no facts as subject
+        known_subjects = {f.subject for f in all_facts}
+        known_objects = {f.obj for f in all_facts if f.relation != Rel.OPPOSITE}
+        undefined = known_objects - known_subjects
+        for concept in undefined:
+            if len(concept) > 2 and not concept.startswith("not_"):
+                gaps.append(f"What is {concept}?")
+
+        # Subjects with only is_a but no properties
+        for subject in known_subjects:
+            has_isa = any(f.subject == subject and f.relation == Rel.IS_A for f in all_facts)
+            has_prop = any(f.subject == subject and f.relation == Rel.HAS_PROP for f in all_facts)
+            has_numeric = any(nf.subject == subject for nf in self.numeric_facts)
+            if has_isa and not has_prop and not has_numeric:
+                gaps.append(f"What properties does {subject} have?")
+
+        # Low confidence derived facts we should verify
+        for f in self.derived:
+            if f.confidence < 0.5:
+                gaps.append(f"Is it really true that {f.subject} {f.relation.value} {f.obj}?")
+
+        return gaps[:20]
 
     @property
     def total_facts(self) -> int:

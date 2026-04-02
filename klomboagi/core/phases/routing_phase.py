@@ -51,6 +51,27 @@ class RoutingPhase(Phase):
                 g.context.update(ctx.intent, ctx.resolved_message)
                 return ctx
 
+            # Reasoner doesn't know -- try to LEARN, then ask again
+            query_terms = [w for w in q_lower.split()
+                          if w not in ("what", "is", "a", "an", "the", "does", "do",
+                                       "can", "how", "where", "why", "are", "has", "have")
+                          and len(w) > 2]
+            if query_terms:
+                topic = " ".join(query_terms[:3])
+                try:
+                    raw = g.base.searcher.search(topic)
+                    if raw and "Could not find" not in raw:
+                        new_facts = g.core_reasoner.learn_from_text(raw)
+                        if new_facts:
+                            # Try the question again with new knowledge
+                            reasoner_answer = g._ask_core_reasoner(q_lower)
+                            if reasoner_answer is not None:
+                                ctx.response = f"I just learned about {topic}.\n\n{reasoner_answer}"
+                                g.context.update(ctx.intent, ctx.resolved_message)
+                                return ctx
+                except Exception:
+                    pass
+
         # Route: deep think for questions, base system for everything else
         if ctx.intent["type"] == "question":
             g.metacognition.record_question("knowledge")

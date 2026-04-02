@@ -81,42 +81,57 @@ class CuriosityLoop:
                 time.sleep(60)  # Back off on error
 
     def _pick_topic(self) -> str | None:
-        """Pick the most interesting topic from curiosity gaps."""
+        """Pick the most interesting topic from reasoning gaps."""
         g = self.genesis
 
-        # Priority 1: unresolved curiosity gaps
+        # Priority 1: CoreReasoner gaps (real inference gaps)
+        if hasattr(g, 'core_reasoner'):
+            gaps = g.core_reasoner.find_gaps()
+            for gap_q in gaps:
+                # Extract the concept from "What is X?" style questions
+                import re
+                m = re.search(r"what (?:is|properties does) (\w[\w\s]*?)(?:\?|$)", gap_q.lower())
+                if m:
+                    topic = m.group(1).strip()
+                    if topic not in self._explored_topics and len(topic) > 2:
+                        return topic
+
+        # Priority 2: unresolved curiosity gaps from conversation
         for gap in g.base.curiosity.gaps:
             if not gap.resolved and gap.concept not in self._explored_topics:
                 return gap.concept
 
-        # Priority 2: concepts we know little about (few beliefs)
-        if g.base.memory.concepts:
-            thin = []
-            for concept, data in g.base.memory.concepts.items():
-                facts = data.get("facts", [])
-                if 0 < len(facts) < 3 and concept not in self._explored_topics:
-                    thin.append(concept)
-            if thin:
-                return thin[0]
-
-        # Priority 3: relations with low confidence
-        for rel in g.relations._relations[:20]:
-            if hasattr(rel, 'confidence') and rel.confidence < 0.5:
-                topic = getattr(rel, 'source', None) or getattr(rel, 'target', None)
-                if topic and topic not in self._explored_topics:
-                    return topic
+        # Priority 3: low-confidence derived facts to verify
+        if hasattr(g, 'core_reasoner'):
+            for f in g.core_reasoner.derived:
+                if f.confidence < 0.5 and f.subject not in self._explored_topics:
+                    return f.subject
 
         return None
 
     def _explore(self, topic: str) -> None:
-        """Explore a topic — read and learn about it."""
+        """Explore a topic — search, extract facts, feed to CoreReasoner."""
         try:
-            result = self.genesis._active_learn(topic)
+            g = self.genesis
+            # Search for information
+            raw = g.base.searcher.search(topic)
+            if not raw or "Could not find" in raw:
+                self._explored_topics.append(topic)
+                return
+
+            # Feed raw text to CoreReasoner's learn_from_text
+            new_facts = []
+            if hasattr(g, 'core_reasoner'):
+                new_facts = g.core_reasoner.learn_from_text(raw)
+
+            # Also feed to legacy system for backward compat
+            g._active_learn(topic)
+
             self._explorations += 1
             self._explored_topics.append(topic)
 
             if self.on_explore:
-                self.on_explore(topic, result)
+                self.on_explore(topic, f"Learned {len(new_facts)} structured facts about {topic}")
 
         except Exception:
-            self._explored_topics.append(topic)  # Don't retry failed topics
+            self._explored_topics.append(topic)
