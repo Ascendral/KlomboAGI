@@ -487,6 +487,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_sort_colors_to_regions,
             self._try_separator_grid_dimensions,
             self._try_quadrant_color_map,
+            self._try_assemble_around_fives,
         ]
         for s in v2:
             try:
@@ -9023,6 +9024,36 @@ class SmartARCSolverV2(SmartARCSolver):
                 qr = 0 if avg_r < mid_r else 1
                 qc = 0 if avg_c < mid_c else 1
                 result[qr][qc] = color
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_assemble_around_fives (137eaa0f) ---
+    def _try_assemble_around_fives(self, train, test_input):
+        """Scattered colored groups each adjacent to a 5. Assemble into 3x3 around center 5."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            fives = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 5]
+            if not fives:
+                return None
+            result = [[0]*3 for _ in range(3)]
+            result[1][1] = 5
+            for fr, fc in fives:
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        if dr == 0 and dc == 0:
+                            continue
+                        nr, nc = fr + dr, fc + dc
+                        if 0 <= nr < rows and 0 <= nc < cols:
+                            v = grid[nr][nc]
+                            if v != 0 and v != 5:
+                                or_, oc = 1 + dr, 1 + dc
+                                if 0 <= or_ < 3 and 0 <= oc < 3:
+                                    result[or_][oc] = v
             return result
 
         for ex in train:
