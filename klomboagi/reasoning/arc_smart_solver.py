@@ -485,6 +485,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_object_bbox_self_fill,
             self._try_reflect_objects_across_axis,
             self._try_sort_colors_to_regions,
+            self._try_separator_grid_dimensions,
+            self._try_quadrant_color_map,
         ]
         for s in v2:
             try:
@@ -8935,3 +8937,96 @@ class SmartARCSolverV2(SmartARCSolver):
                 if result is not None and result != [list(row) for row in test_input]:
                     return result
         return None
+
+    # --- _try_separator_grid_dimensions (1190e5a7) ---
+    def _try_separator_grid_dimensions(self, train, test_input):
+        """Grid divided by separator rows/cols. Output = cell-grid dims filled with bg."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            sep_color = None
+            for color in set(v for row in grid for v in row):
+                full_rows = [r for r in range(rows) if all(grid[r][c] == color for c in range(cols))]
+                full_cols = [c for c in range(cols) if all(grid[r][c] == color for r in range(rows))]
+                if full_rows and full_cols:
+                    sep_color = color
+                    break
+            if sep_color is None:
+                return None
+            full_rows = [r for r in range(rows) if all(grid[r][c] == sep_color for c in range(cols))]
+            full_cols = [c for c in range(cols) if all(grid[r][c] == sep_color for r in range(rows))]
+            full_rows_set, full_cols_set = set(full_rows), set(full_cols)
+            bg_color = None
+            for r in range(rows):
+                if r in full_rows_set: continue
+                for c in range(cols):
+                    if c in full_cols_set: continue
+                    if grid[r][c] != sep_color:
+                        bg_color = grid[r][c]; break
+                if bg_color is not None: break
+            if bg_color is None:
+                return None
+            # Check all non-separator cells are bg_color
+            for r in range(rows):
+                if r in full_rows_set: continue
+                for c in range(cols):
+                    if c in full_cols_set: continue
+                    if grid[r][c] != bg_color:
+                        return None
+            row_bands = col_bands = 0
+            in_b = False
+            for r in range(rows):
+                if r not in full_rows_set:
+                    if not in_b: row_bands += 1; in_b = True
+                else: in_b = False
+            in_b = False
+            for c in range(cols):
+                if c not in full_cols_set:
+                    if not in_b: col_bands += 1; in_b = True
+                else: in_b = False
+            if row_bands < 1 or col_bands < 1:
+                return None
+            return [[bg_color] * col_bands for _ in range(row_bands)]
+
+        # Verify on all training examples
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_quadrant_color_map (19bb5feb) ---
+    def _try_quadrant_color_map(self, train, test_input):
+        """8-rectangle with colored patches inside. Output = 2x2 grid of patch colors by quadrant."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            eight_cells = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 8]
+            if len(eight_cells) < 4:
+                return None
+            min_r = min(r for r, c in eight_cells)
+            max_r = max(r for r, c in eight_cells)
+            min_c = min(c for r, c in eight_cells)
+            max_c = max(c for r, c in eight_cells)
+            patches = {}
+            for r in range(min_r, max_r + 1):
+                for c in range(min_c, max_c + 1):
+                    v = grid[r][c]
+                    if v != 8 and v != 0:
+                        patches.setdefault(v, []).append((r, c))
+            if not patches:
+                return None
+            mid_r = (min_r + max_r) / 2.0
+            mid_c = (min_c + max_c) / 2.0
+            result = [[0, 0], [0, 0]]
+            for color, cells in patches.items():
+                avg_r = sum(r for r, c in cells) / len(cells)
+                avg_c = sum(c for r, c in cells) / len(cells)
+                qr = 0 if avg_r < mid_r else 1
+                qc = 0 if avg_c < mid_c else 1
+                result[qr][qc] = color
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
