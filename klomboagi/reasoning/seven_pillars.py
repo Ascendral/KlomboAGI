@@ -369,25 +369,28 @@ def build_causal_model(reasoner: CoreReasoner, effect: str) -> CausalChain | Non
     effect = effect.lower().strip()
     all_facts = reasoner.facts | reasoner.derived
 
-    # Backward trace: find what causes the effect
+    # Backward trace: find the single best path from root cause to effect
     def trace_back(target: str, visited: set) -> list[tuple[str, str]]:
         if target in visited:
             return []
         visited.add(target)
 
-        causes = [(f.subject, f.obj) for f in all_facts
-                  if f.relation == Rel.CAUSES and f.obj == target]
-        if not causes:
+        # Find direct causes of target
+        direct_causes = []
+        for f in all_facts:
+            if f.relation == Rel.CAUSES and f.obj == target:
+                direct_causes.append((f.subject, f.confidence))
+
+        if not direct_causes:
             return []
 
-        chain = []
-        for cause, eff in causes:
-            chain.append((cause, eff))
-            # Recurse to find deeper causes
-            deeper = trace_back(cause, visited)
-            chain = deeper + chain
+        # Pick the highest-confidence cause
+        direct_causes.sort(key=lambda x: -x[1])
+        best_cause = direct_causes[0][0]
 
-        return chain
+        # Recurse deeper
+        deeper = trace_back(best_cause, visited)
+        return deeper + [(best_cause, target)]
 
     chain = trace_back(effect, set())
     if not chain:
@@ -396,13 +399,12 @@ def build_causal_model(reasoner: CoreReasoner, effect: str) -> CausalChain | Non
     root = chain[0][0]
     confidence = 1.0
     for cause, eff in chain:
-        # Find the fact confidence
         for f in all_facts:
             if f.subject == cause and f.relation == Rel.CAUSES and f.obj == eff:
                 confidence *= f.confidence
                 break
 
-    # Identify intervention points (what requires what in the chain)
+    # Identify intervention points
     interventions = []
     for cause, eff in chain:
         reqs = [f.obj for f in all_facts
@@ -420,11 +422,14 @@ def build_causal_model(reasoner: CoreReasoner, effect: str) -> CausalChain | Non
 
 
 def predict_effects(reasoner: CoreReasoner, cause: str) -> list[tuple[str, float]]:
-    """Forward predict: if cause happens, what effects follow?"""
+    """Forward predict: if cause happens, what effects follow?
+
+    Returns ordered list of (effect, confidence) without duplicates.
+    """
     cause = cause.lower().strip()
     all_facts = reasoner.facts | reasoner.derived
 
-    effects = []
+    effects = {}  # effect -> best confidence
     visited = set()
 
     def trace_forward(source: str, accumulated_conf: float):
@@ -435,11 +440,13 @@ def predict_effects(reasoner: CoreReasoner, cause: str) -> list[tuple[str, float
         for f in all_facts:
             if f.subject == source and f.relation == Rel.CAUSES:
                 conf = accumulated_conf * f.confidence
-                effects.append((f.obj, round(conf, 3)))
+                # Keep highest confidence path to each effect
+                if f.obj not in effects or conf > effects[f.obj]:
+                    effects[f.obj] = round(conf, 3)
                 trace_forward(f.obj, conf)
 
     trace_forward(cause, 1.0)
-    return effects
+    return sorted(effects.items(), key=lambda x: -x[1])
 
 
 # ---- 7. SELF-EVALUATE ----
@@ -471,22 +478,46 @@ def self_evaluate(reasoner: CoreReasoner, claim: str) -> Evaluation:
     alternatives = []
 
     # Parse the claim into subject-relation-object
-    m = re.match(r'(\w[\w\s]*?)\s+(is_a|has_prop|causes|can|located|requires)\s+(\w[\w\s]*)', claim.lower())
-    if not m:
-        # Try natural language
-        m = re.match(r'(\w[\w\s]*?)\s+(?:is\s+a|is\s+an)\s+(\w[\w\s]*)', claim.lower())
+    claim_lower = claim.lower().strip()
+    subject, rel, obj = None, None, None
+
+    # Try structured form first: "X is_a Y"
+    m = re.match(r'(\w[\w\s]*?)\s+(is_a|has_prop|causes|can|located|requires)\s+(\w[\w\s]*)', claim_lower)
+    if m:
+        subject = m.group(1).strip()
+        rel_map = {r.value: r for r in Rel}
+        rel = rel_map.get(m.group(2).strip(), Rel.IS_A)
+        obj = m.group(3).strip()
+
+    # Try natural language: "X is a/an Y"
+    if subject is None:
+        m = re.match(r'(\w[\w\s]*?)\s+(?:is\s+a|is\s+an|is)\s+(\w[\w\s]*)', claim_lower)
         if m:
             subject, obj = m.group(1).strip(), m.group(2).strip()
             rel = Rel.IS_A
-        else:
-            return Evaluation(claim, False, [], [], 0.0,
-                             ["Could not parse claim"], [])
-    else:
-        subject = m.group(1).strip()
-        rel_str = m.group(2).strip()
-        obj = m.group(3).strip()
-        rel_map = {r.value: r for r in Rel}
-        rel = rel_map.get(rel_str, Rel.IS_A)
+
+    # Try "X can Y"
+    if subject is None:
+        m = re.match(r'(\w+)\s+can\s+(\w[\w\s]*)', claim_lower)
+        if m:
+            subject, obj = m.group(1).strip(), m.group(2).strip()
+            rel = Rel.CAN
+
+    # Try "X causes Y"
+    if subject is None:
+        m = re.match(r'(\w[\w\s]*?)\s+causes?\s+(\w[\w\s]*)', claim_lower)
+        if m:
+            subject, obj = m.group(1).strip(), m.group(2).strip()
+            rel = Rel.CAUSES
+
+    if subject is None:
+        return Evaluation(claim, False, [], [], 0.0,
+                         ["Could not parse claim"], [])
+
+    # Check if this fact was explicitly denied
+    if reasoner._is_blocked(subject, rel, obj):
+        return Evaluation(claim, False, [], [],
+                         0.0, ["Explicitly denied"], [])
 
     # Check direct support
     for f in all_facts:
@@ -494,21 +525,29 @@ def self_evaluate(reasoner: CoreReasoner, claim: str) -> Evaluation:
             supporting.append(str(f))
         # Check contradiction (same subject+relation, different object in same category)
         if f.subject == subject and f.relation == rel and f.obj != obj:
-            # Is f.obj in the same category as obj?
+            # NOT a contradiction if:
+            # - f.obj is a parent/child of obj (refinement, not conflict)
+            # - obj is a parent/child of f.obj
+            is_parent = any(g.subject == f.obj and g.relation == Rel.IS_A and g.obj == obj for g in all_facts)
+            is_child = any(g.subject == obj and g.relation == Rel.IS_A and g.obj == f.obj for g in all_facts)
+            if is_parent or is_child:
+                continue  # refinement, not contradiction
+
             obj_cats = {g.obj for g in all_facts if g.subject == obj and g.relation == Rel.IS_A}
             f_cats = {g.obj for g in all_facts if g.subject == f.obj and g.relation == Rel.IS_A}
-            if obj_cats & f_cats:  # shared parent = potential contradiction
+            if obj_cats & f_cats:  # shared parent, not parent-child = real conflict
                 contradicting.append(str(f))
             else:
                 alternatives.append(f"{subject} {rel.value} {f.obj}")
 
-    # Check for inherited support
+    # Check for inherited support (only if not blocked)
     if not supporting and rel in (Rel.HAS_PROP, Rel.CAN):
-        parents = [f.obj for f in all_facts if f.subject == subject and f.relation == Rel.IS_A]
-        for parent in parents:
-            for f in all_facts:
-                if f.subject == parent and f.relation == rel and f.obj == obj:
-                    supporting.append(f"Inherited via {parent}: {f}")
+        if not reasoner._is_blocked(subject, rel, obj):
+            parents = [f.obj for f in all_facts if f.subject == subject and f.relation == Rel.IS_A]
+            for parent in parents:
+                for f in all_facts:
+                    if f.subject == parent and f.relation == rel and f.obj == obj:
+                        supporting.append(f"Inherited via {parent}: {f}")
 
     # Assess weaknesses
     if not supporting:
