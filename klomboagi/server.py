@@ -230,6 +230,26 @@ class KlomboHandler(BaseHTTPRequestHandler):
                 response = genesis._active_learn(topic)
                 self._send_json({"response": response})
 
+            elif self.path == "/v2/hear":
+                # New Brain -- real inference, no scaffolding
+                brain = self.server.brain
+                if not brain:
+                    self._send_json({"error": "Brain v2 not initialized"}, 503)
+                    return
+                message = body.get("message", "")
+                if not message:
+                    self._send_json({"error": "Missing 'message' field"}, 400)
+                    return
+                start = time.time()
+                response = brain.hear(message)
+                elapsed = time.time() - start
+                self._send_json({
+                    "response": response,
+                    "elapsed_ms": round(elapsed * 1000, 1),
+                    "turn": brain.turns,
+                    "facts": brain.reasoner.total_facts,
+                })
+
             elif self.path == "/exec":
                 ctrl = self.server.system_control
                 if not ctrl:
@@ -295,6 +315,7 @@ class KlomboServer(HTTPServer):
         self.observer = None
         self.curiosity_loop = None
         self.system_control = None
+        self.brain = None
         self.peers: dict[str, dict] = {}
         super().__init__((host, port), KlomboHandler)
 
@@ -327,6 +348,10 @@ def run_server(genesis: "Genesis | None" = None, host: str = "0.0.0.0",
     # System control
     from klomboagi.senses.system_control import SystemControl
     server.system_control = SystemControl()
+
+    # Brain v2 -- the real reasoning engine
+    from klomboagi.core.brain import Brain
+    server.brain = Brain()
 
     # Self-improvement loop
     if genesis:
