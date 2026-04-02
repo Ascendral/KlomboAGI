@@ -491,6 +491,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_blobs_sorted_by_size,
             self._try_extract_uniform_cells_from_sep_grid,
             self._try_pyramid_inner_diagonal_extend,
+            self._try_diagonal_color_markers,
         ]
         for s in v2:
             try:
@@ -9231,3 +9232,55 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_diagonal_color_markers (a9f96cdd) ---
+    def _try_diagonal_color_markers(self, train, test_input):
+        """Single marker cell replaced by colored diagonal neighbors (TL=c1, TR=c2, BL=c3, BR=c4)."""
+        def solve(grid, marker, colors_map):
+            rows, cols = len(grid), len(grid[0])
+            result = [[0]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == marker:
+                        for (dr, dc), color in colors_map.items():
+                            nr, nc = r+dr, c+dc
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                result[nr][nc] = color
+            return result
+
+        # Learn the marker and color map from training
+        # Find the single non-0 value in each input
+        marker = None
+        colors_map = {}
+        for ex in train:
+            inp, out = ex['input'], ex['output']
+            rows, cols = len(inp), len(inp[0])
+            # Find marker
+            marker_cells = [(r,c,inp[r][c]) for r in range(rows) for c in range(cols) if inp[r][c] != 0]
+            if len(marker_cells) != 1:
+                return None
+            mr, mc, mv = marker_cells[0]
+            if marker is None:
+                marker = mv
+            elif marker != mv:
+                return None
+            # Find output colors at diagonals
+            for dr, dc in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                nr, nc = mr+dr, mc+dc
+                if 0 <= nr < rows and 0 <= nc < cols and out[nr][nc] != 0:
+                    key = (dr, dc)
+                    if key in colors_map:
+                        if colors_map[key] != out[nr][nc]:
+                            return None
+                    else:
+                        colors_map[key] = out[nr][nc]
+
+        if marker is None or not colors_map:
+            return None
+
+        # Verify on all training
+        for ex in train:
+            r = solve(ex['input'], marker, colors_map)
+            if r != ex['output']:
+                return None
+        return solve(test_input, marker, colors_map)
