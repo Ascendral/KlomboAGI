@@ -502,6 +502,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_select_block_most_minority,
             self._try_checkerboard_from_rows,
             self._try_color_bands_in_order,
+            self._try_rotate_line_at_pivot,
         ]
         for s in v2:
             try:
@@ -9689,3 +9690,55 @@ class SmartARCSolverV2(SmartARCSolver):
         if ok:
             return solve_lr(test_input)
         return None
+
+    # --- _try_rotate_line_at_pivot (c074846d) ---
+    def _try_rotate_line_at_pivot(self, train, test_input):
+        """Line of color A extends from pivot 5. Recolor A→3, draw new A-line perpendicular (90° CW)."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find pivot (5)
+            pivot = None
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == 5:
+                        pivot = (r, c)
+                        break
+                if pivot: break
+            if pivot is None:
+                return None
+            pr, pc = pivot
+            # Find line of 2s extending from pivot
+            line_dir = None
+            line_len = 0
+            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                n = 0
+                r, c = pr+dr, pc+dc
+                while 0 <= r < rows and 0 <= c < cols and grid[r][c] == 2:
+                    n += 1
+                    r += dr
+                    c += dc
+                if n > 0:
+                    line_dir = (dr, dc)
+                    line_len = n
+                    break
+            if line_dir is None or line_len == 0:
+                return None
+            # Rotate 90° clockwise: (dr,dc) -> (dc,-dr)
+            new_dr, new_dc = line_dir[1], -line_dir[0]
+            result = [list(row) for row in grid]
+            # Recolor original 2s to 3
+            dr, dc = line_dir
+            for i in range(1, line_len+1):
+                result[pr+dr*i][pc+dc*i] = 3
+            # Draw new line of 2s in perpendicular direction
+            for i in range(1, line_len+1):
+                nr, nc = pr+new_dr*i, pc+new_dc*i
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = 2
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
