@@ -493,6 +493,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_pyramid_inner_diagonal_extend,
             self._try_diagonal_color_markers,
             self._try_move_toward_target,
+            self._try_midpoint_plus,
         ]
         for s in v2:
             try:
@@ -9333,3 +9334,45 @@ class SmartARCSolverV2(SmartARCSolver):
             if ok:
                 return solve(test_input, mobile_color, static_color)
         return None
+
+    # --- _try_midpoint_plus (e9614598) ---
+    def _try_midpoint_plus(self, train, test_input):
+        """Two dots of same color. Draw a plus/cross of color 3 at their midpoint."""
+        def solve(grid, dot_color, plus_color):
+            rows, cols = len(grid), len(grid[0])
+            dots = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == dot_color]
+            if len(dots) != 2:
+                return None
+            (r1,c1), (r2,c2) = dots
+            # Midpoint must be integer
+            if (r1+r2) % 2 != 0 or (c1+c2) % 2 != 0:
+                return None
+            mr, mc = (r1+r2)//2, (c1+c2)//2
+            result = [list(row) for row in grid]
+            # Draw plus at midpoint
+            result[mr][mc] = plus_color
+            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                nr, nc = mr+dr, mc+dc
+                if 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = plus_color
+            return result
+
+        # Learn colors from first training example
+        inp0, out0 = train[0]['input'], train[0]['output']
+        rows0, cols0 = len(inp0), len(inp0[0])
+        # Find dot color (non-zero in input)
+        dot_colors = set(inp0[r][c] for r in range(rows0) for c in range(cols0) if inp0[r][c] != 0)
+        if len(dot_colors) != 1:
+            return None
+        dot_color = dot_colors.pop()
+        # Find plus color (new color in output)
+        plus_colors = set(out0[r][c] for r in range(rows0) for c in range(cols0) if out0[r][c] != 0) - {dot_color}
+        if len(plus_colors) != 1:
+            return None
+        plus_color = plus_colors.pop()
+
+        for ex in train:
+            r = solve(ex['input'], dot_color, plus_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, dot_color, plus_color)
