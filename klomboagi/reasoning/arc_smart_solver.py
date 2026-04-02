@@ -497,6 +497,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_color_swap_mapping,
             self._try_shift_grid_down_one,
             self._try_and_halves_sep,
+            self._try_zone_extract_single_value,
         ]
         for s in v2:
             try:
@@ -9476,3 +9477,39 @@ class SmartARCSolverV2(SmartARCSolver):
             if solve(ex['input'], sep_col, marker) != ex['output']:
                 return None
         return solve(test_input, sep_col, marker)
+
+    # --- _try_zone_extract_single_value (5783df64) ---
+    def _try_zone_extract_single_value(self, train, test_input):
+        """Grid divided into equal zones, each with exactly 1 non-zero value. Extract to compact grid."""
+        def solve(grid, out_rows, out_cols):
+            rows, cols = len(grid), len(grid[0])
+            if rows % out_rows != 0 or cols % out_cols != 0:
+                return None
+            zr = rows // out_rows
+            zc = cols // out_cols
+            result = [[0]*out_cols for _ in range(out_rows)]
+            for ri in range(out_rows):
+                for ci in range(out_cols):
+                    val = 0
+                    for r in range(ri*zr, (ri+1)*zr):
+                        for c in range(ci*zc, (ci+1)*zc):
+                            if grid[r][c] != 0:
+                                if val != 0:
+                                    return None  # more than 1 non-zero
+                                val = grid[r][c]
+                    result[ri][ci] = val
+            return result
+
+        # Determine output dimensions from training
+        out0 = train[0]['output']
+        out_rows, out_cols = len(out0), len(out0[0])
+        # Check all outputs have same dims
+        for ex in train:
+            o = ex['output']
+            if len(o) != out_rows or len(o[0]) != out_cols:
+                return None
+        for ex in train:
+            r = solve(ex['input'], out_rows, out_cols)
+            if r != ex['output']:
+                return None
+        return solve(test_input, out_rows, out_cols)
