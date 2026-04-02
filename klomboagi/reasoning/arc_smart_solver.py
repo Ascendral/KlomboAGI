@@ -490,6 +490,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_assemble_around_fives,
             self._try_blobs_sorted_by_size,
             self._try_extract_uniform_cells_from_sep_grid,
+            self._try_pyramid_inner_diagonal_extend,
         ]
         for s in v2:
             try:
@@ -9153,6 +9154,76 @@ class SmartARCSolverV2(SmartARCSolver):
                     else:
                         return None  # gap in uniform block
                 result.append(row)
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_pyramid_inner_diagonal_extend (b8cdaf2b) ---
+    def _try_pyramid_inner_diagonal_extend(self, train, test_input):
+        """Pyramid shape at bottom with inner/outer colors. Inner extends diagonally above."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [list(row) for row in grid]
+            # Find bottom non-zero row
+            bot = None
+            for r in range(rows-1, -1, -1):
+                if any(grid[r][c] != 0 for c in range(cols)):
+                    bot = r
+                    break
+            if bot is None:
+                return None
+            # Bottom row should have 2 colors
+            bot_colors = set(grid[bot][c] for c in range(cols) if grid[bot][c] != 0)
+            if len(bot_colors) != 2:
+                return None
+            # Find inner and outer: inner is surrounded by outer
+            bot_vals = [grid[bot][c] for c in range(cols)]
+            # Find the non-zero spans
+            outer = None
+            inner = None
+            for c in range(cols):
+                if bot_vals[c] != 0:
+                    outer = bot_vals[c]
+                    break
+            for c in range(cols):
+                if bot_vals[c] != 0 and bot_vals[c] != outer:
+                    inner = bot_vals[c]
+                    break
+            if outer is None or inner is None:
+                return None
+            # Find inner region bounds in bottom row
+            inner_cols = [c for c in range(cols) if bot_vals[c] == inner]
+            if not inner_cols:
+                return None
+            left_inner = min(inner_cols)
+            right_inner = max(inner_cols)
+            # Find top of pyramid (consecutive non-zero rows going up from bot)
+            top = bot
+            for r in range(bot-1, -1, -1):
+                if any(grid[r][c] != 0 for c in range(cols)):
+                    top = r
+                else:
+                    break
+            # Extend inner color diagonally above the pyramid
+            for i in range(1, rows):
+                r = top - i
+                if r < 0:
+                    break
+                lc = left_inner - i
+                rc = right_inner + i
+                placed = False
+                if 0 <= lc < cols:
+                    result[r][lc] = inner
+                    placed = True
+                if 0 <= rc < cols:
+                    result[r][rc] = inner
+                    placed = True
+                if not placed:
+                    break
             return result
 
         for ex in train:
