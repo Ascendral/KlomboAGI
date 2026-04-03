@@ -510,6 +510,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_largest_rect_color_2x2,
             self._try_triangular_number_repeat,
             self._try_reflect_shape_by_pointer,
+            self._try_extend_tips_diagonally,
         ]
         for s in v2:
             try:
@@ -10057,6 +10058,53 @@ class SmartARCSolverV2(SmartARCSolver):
                 # Verify this worked on training by returning and checking
                 return result
             return None
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_extend_tips_diagonally (7ddcd7ec) ---
+    def _try_extend_tips_diagonally(self, train, test_input):
+        """Shape on 0-bg. Tip cells (1 diagonal neighbor) extend diagonally outward to grid edge."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            color_cells = set()
+            color = None
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0:
+                        color_cells.add((r, c))
+                        color = grid[r][c]
+            if not color_cells or color is None:
+                return None
+            # Check single color
+            if any(grid[r][c] != color for r, c in color_cells):
+                return None
+            result = [list(row) for row in grid]
+            # Find tips: cells with exactly 1 neighbor in shape (8-connected)
+            for r, c in color_cells:
+                neighbors = []
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        if dr == 0 and dc == 0:
+                            continue
+                        if (r+dr, c+dc) in color_cells:
+                            neighbors.append((dr, dc))
+                if len(neighbors) == 1:
+                    # This is a tip. Direction = opposite of neighbor (outward)
+                    ndr, ndc = neighbors[0]
+                    ext_dr, ext_dc = -ndr, -ndc
+                    # Extend diagonally (must be diagonal)
+                    if ext_dr == 0 or ext_dc == 0:
+                        continue  # not diagonal
+                    nr, nc = r + ext_dr, c + ext_dc
+                    while 0 <= nr < rows and 0 <= nc < cols:
+                        result[nr][nc] = color
+                        nr += ext_dr
+                        nc += ext_dc
+            return result
 
         for ex in train:
             r = solve(ex['input'])
