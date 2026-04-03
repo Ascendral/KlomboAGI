@@ -505,6 +505,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_rotate_line_at_pivot,
             self._try_tile_along_uniform_edge,
             self._try_rotate_180_around_pivot_color,
+            self._try_xor_halves,
         ]
         for s in v2:
             try:
@@ -9830,4 +9831,65 @@ class SmartARCSolverV2(SmartARCSolver):
                     ok = False; break
             if ok:
                 return solve(test_input, pivot_color)
+        return None
+
+    # --- _try_xor_halves (31d5ba1a) ---
+    def _try_xor_halves(self, train, test_input):
+        """Grid split into top/bottom or left/right halves. Output = XOR: marker where exactly one is non-zero."""
+        def solve_tb(grid, marker):
+            rows, cols = len(grid), len(grid[0])
+            if rows % 2 != 0:
+                return None
+            h = rows // 2
+            result = [[0]*cols for _ in range(h)]
+            for r in range(h):
+                for c in range(cols):
+                    top = grid[r][c] != 0
+                    bot = grid[h+r][c] != 0
+                    if top != bot:  # XOR
+                        result[r][c] = marker
+            return result
+
+        def solve_lr(grid, marker):
+            rows, cols = len(grid), len(grid[0])
+            if cols % 2 != 0:
+                return None
+            w = cols // 2
+            result = [[0]*w for _ in range(rows)]
+            for r in range(rows):
+                for c in range(w):
+                    left = grid[r][c] != 0
+                    right = grid[r][w+c] != 0
+                    if left != right:
+                        result[r][c] = marker
+            return result
+
+        # Learn marker from output
+        out0 = train[0]['output']
+        marker = None
+        for row in out0:
+            for v in row:
+                if v != 0:
+                    marker = v; break
+            if marker: break
+        if marker is None:
+            return None
+
+        # Try top/bottom
+        ok = True
+        for ex in train:
+            r = solve_tb(ex['input'], marker)
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve_tb(test_input, marker)
+
+        # Try left/right
+        ok = True
+        for ex in train:
+            r = solve_lr(ex['input'], marker)
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve_lr(test_input, marker)
         return None
