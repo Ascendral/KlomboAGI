@@ -521,6 +521,15 @@ class SmartARCSolverV2(SmartARCSolver):
             except:
                 continue
 
+        # ── Phase 3.5: Lookup strategies (skip cross-validation) ─────────────
+        for s in [self._try_shape_pattern_to_value]:
+            try:
+                r = s(train, test_input)
+                if r is not None:
+                    return r
+            except:
+                pass
+
         # ── Phase 4: LLM refinement loop (verified) ───────────────────────────
         from klomboagi.reasoning.arc_llm_solver import solve_with_llm
         llm_result = solve_with_llm(train, test_input, max_attempts=5)
@@ -10207,4 +10216,30 @@ class SmartARCSolverV2(SmartARCSolver):
                     ok2 = False; break
             if ok2:
                 return solve_with_learned_complement(test_input, color_pair)
+        return None
+
+    # --- _try_shape_pattern_to_value (27a28665) ---
+    def _try_shape_pattern_to_value(self, train, test_input):
+        """Grid with 0/non-0 pattern -> 1x1 output. Map the 0/1 pattern to a specific value."""
+        # All outputs must be 1x1
+        for ex in train:
+            if len(ex['output']) != 1 or len(ex['output'][0]) != 1:
+                return None
+
+        # Build mapping: canonical pattern -> output value
+        pattern_map = {}
+        for ex in train:
+            inp = ex['input']
+            # Convert to 0/1 pattern
+            pattern = tuple(tuple(1 if v != 0 else 0 for v in row) for row in inp)
+            val = ex['output'][0][0]
+            if pattern in pattern_map:
+                if pattern_map[pattern] != val:
+                    return None
+            pattern_map[pattern] = val
+
+        # Look up test pattern
+        test_pattern = tuple(tuple(1 if v != 0 else 0 for v in row) for row in test_input)
+        if test_pattern in pattern_map:
+            return [[pattern_map[test_pattern]]]
         return None
