@@ -504,6 +504,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_color_bands_in_order,
             self._try_rotate_line_at_pivot,
             self._try_tile_along_uniform_edge,
+            self._try_rotate_180_around_pivot_color,
         ]
         for s in v2:
             try:
@@ -9778,3 +9779,55 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_rotate_180_around_pivot_color (90347967) ---
+    def _try_rotate_180_around_pivot_color(self, train, test_input):
+        """Non-zero pattern on 0-bg. One cell is a pivot color. Rotate all other cells 180 around it."""
+        def solve(grid, pivot_color):
+            rows, cols = len(grid), len(grid[0])
+            # Find pivot
+            pivot = None
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == pivot_color:
+                        pivot = (r, c)
+                        break
+                if pivot: break
+            if pivot is None:
+                return None
+            pr, pc = pivot
+            result = [[0]*cols for _ in range(rows)]
+            result[pr][pc] = pivot_color
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != 0 and v != pivot_color:
+                        nr, nc = 2*pr - r, 2*pc - c
+                        if 0 <= nr < rows and 0 <= nc < cols:
+                            result[nr][nc] = v
+                        else:
+                            return None
+            return result
+
+        # Learn pivot color: the color that appears exactly once in all training inputs
+        from collections import Counter
+        candidate_pivots = None
+        for ex in train:
+            freq = Counter(v for row in ex['input'] for v in row if v != 0)
+            singles = {c for c, n in freq.items() if n == 1}
+            if candidate_pivots is None:
+                candidate_pivots = singles
+            else:
+                candidate_pivots &= singles
+        if not candidate_pivots:
+            return None
+
+        for pivot_color in candidate_pivots:
+            ok = True
+            for ex in train:
+                r = solve(ex['input'], pivot_color)
+                if r != ex['output']:
+                    ok = False; break
+            if ok:
+                return solve(test_input, pivot_color)
+        return None
