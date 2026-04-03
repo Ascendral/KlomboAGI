@@ -506,6 +506,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_tile_along_uniform_edge,
             self._try_rotate_180_around_pivot_color,
             self._try_xor_halves,
+            self._try_nor_left_right_half,
         ]
         for s in v2:
             try:
@@ -9893,3 +9894,34 @@ class SmartARCSolverV2(SmartARCSolver):
         if ok:
             return solve_lr(test_input, marker)
         return None
+
+    # --- _try_nor_left_right_half (e345f17b) ---
+    def _try_nor_left_right_half(self, train, test_input):
+        """Grid split left/right. Output = NOR: marker where BOTH halves are 0."""
+        def solve(grid, marker):
+            rows, cols = len(grid), len(grid[0])
+            if cols % 2 != 0:
+                return None
+            w = cols // 2
+            result = [[0]*w for _ in range(rows)]
+            for r in range(rows):
+                for c in range(w):
+                    if grid[r][c] == 0 and grid[r][w+c] == 0:
+                        result[r][c] = marker
+            return result
+
+        out0 = train[0]['output']
+        marker = None
+        for row in out0:
+            for v in row:
+                if v != 0:
+                    marker = v; break
+            if marker: break
+        if marker is None:
+            return None
+
+        for ex in train:
+            r = solve(ex['input'], marker)
+            if r != ex['output']:
+                return None
+        return solve(test_input, marker)
