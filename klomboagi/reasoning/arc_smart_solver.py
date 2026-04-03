@@ -509,6 +509,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_nor_left_right_half,
             self._try_largest_rect_color_2x2,
             self._try_triangular_number_repeat,
+            self._try_reflect_shape_by_pointer,
         ]
         for s in v2:
             try:
@@ -9999,6 +10000,63 @@ class SmartARCSolverV2(SmartARCSolver):
                 pos += step
                 step += 1
             return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_reflect_shape_by_pointer (760b3cac) ---
+    def _try_reflect_shape_by_pointer(self, train, test_input):
+        """Two shapes (colors A and B). B has a 'tip' pointing left or right. A gets horizontally reflected in that direction."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            colors = set(v for row in grid for v in row if v != 0)
+            if len(colors) != 2:
+                return None
+            result = [list(row) for row in grid]
+            for reflect_color in colors:
+                pointer_color = (colors - {reflect_color}).pop()
+                # Get pointer cells
+                ptr_cells = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == pointer_color]
+                if not ptr_cells:
+                    continue
+                # Find the sparse row (row with only 1 pointer cell)
+                from collections import Counter
+                row_counts = Counter(r for r,c in ptr_cells)
+                sparse_rows = [r for r, cnt in row_counts.items() if cnt == 1]
+                if not sparse_rows:
+                    continue
+                tip_r = sparse_rows[0]
+                tip_c = [c for r,c in ptr_cells if r == tip_r][0]
+                center_c = sum(c for r,c in ptr_cells) / len(ptr_cells)
+                # Get reflect shape
+                ref_cells = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == reflect_color]
+                if not ref_cells:
+                    continue
+                min_c = min(c for r,c in ref_cells)
+                max_c = max(c for r,c in ref_cells)
+                width = max_c - min_c + 1
+                # Determine direction
+                if tip_c < center_c:
+                    # Reflect left
+                    new_min_c = min_c - width
+                    for r,c in ref_cells:
+                        nc = min_c - 1 - (c - min_c)  # mirror within span
+                        if 0 <= nc < cols:
+                            result[r][nc] = reflect_color
+                elif tip_c > center_c:
+                    # Reflect right
+                    for r,c in ref_cells:
+                        nc = max_c + 1 + (max_c - c)
+                        if 0 <= nc < cols:
+                            result[r][nc] = reflect_color
+                else:
+                    continue
+                # Verify this worked on training by returning and checking
+                return result
+            return None
 
         for ex in train:
             r = solve(ex['input'])
