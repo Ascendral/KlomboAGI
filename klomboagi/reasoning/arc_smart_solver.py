@@ -511,6 +511,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_triangular_number_repeat,
             self._try_reflect_shape_by_pointer,
             self._try_extend_tips_diagonally,
+            self._try_cascade_complement_shrink,
         ]
         for s in v2:
             try:
@@ -10111,3 +10112,99 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_cascade_complement_shrink (b5bb5719) ---
+    def _try_cascade_complement_shrink(self, train, test_input):
+        """Row 0 has colored pattern. Each subsequent row = complement of prev, shrunk by 1 each side."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find bg color
+            from collections import Counter
+            freq = Counter(v for row in grid for v in row)
+            bg = freq.most_common(1)[0][0]
+            # Row 0 should have non-bg values
+            non_bg_row0 = [(c, grid[0][c]) for c in range(cols) if grid[0][c] != bg]
+            if not non_bg_row0:
+                return None
+            # Find the two non-bg colors
+            colors = set(v for _, v in non_bg_row0)
+            if len(colors) > 2 or len(colors) < 1:
+                return None
+            if len(colors) == 1:
+                # Need to know the complement color from training
+                return None
+            color_list = sorted(colors)
+            def complement(v):
+                return color_list[1] if v == color_list[0] else color_list[0]
+            # Build cascade
+            result = [list(row) for row in grid]
+            left = min(c for c, _ in non_bg_row0)
+            right = max(c for c, _ in non_bg_row0)
+            prev_row = list(grid[0])
+            for r in range(1, rows):
+                left += 1
+                right -= 1
+                if left > right:
+                    break
+                for c in range(left, right + 1):
+                    result[r][c] = complement(prev_row[c - 1])
+                prev_row = list(result[r])
+            return result
+
+        # For single-color inputs, learn complement from training
+        def solve_with_learned_complement(grid, color_pair):
+            rows, cols = len(grid), len(grid[0])
+            from collections import Counter
+            freq = Counter(v for row in grid for v in row)
+            bg = freq.most_common(1)[0][0]
+            non_bg_row0 = [(c, grid[0][c]) for c in range(cols) if grid[0][c] != bg]
+            if not non_bg_row0:
+                return None
+            colors = set(v for _, v in non_bg_row0)
+            if len(colors) <= 2:
+                color_list = sorted(color_pair)
+            elif len(colors) == 2:
+                color_list = sorted(colors)
+            else:
+                return None
+            def complement(v):
+                return color_list[1] if v == color_list[0] else color_list[0]
+            result = [list(row) for row in grid]
+            left = min(c for c, _ in non_bg_row0)
+            right = max(c for c, _ in non_bg_row0)
+            prev_row = list(grid[0])
+            for r in range(1, rows):
+                left += 1
+                right -= 1
+                if left > right:
+                    break
+                for c in range(left, right + 1):
+                    result[r][c] = complement(prev_row[c - 1])
+                prev_row = list(result[r])
+            return result
+
+        # Try with 2-color input first
+        ok = True
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve(test_input)
+
+        # Learn color pair from training outputs
+        all_nonbg = set()
+        for ex in train:
+            from collections import Counter
+            bg = Counter(v for row in ex['input'] for v in row).most_common(1)[0][0]
+            all_nonbg |= set(v for row in ex['output'] for v in row if v != bg)
+        if len(all_nonbg) == 2:
+            color_pair = all_nonbg
+            ok2 = True
+            for ex2 in train:
+                r = solve_with_learned_complement(ex2['input'], color_pair)
+                if r != ex2['output']:
+                    ok2 = False; break
+            if ok2:
+                return solve_with_learned_complement(test_input, color_pair)
+        return None
