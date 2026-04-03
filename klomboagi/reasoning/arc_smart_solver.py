@@ -508,6 +508,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_xor_halves,
             self._try_nor_left_right_half,
             self._try_largest_rect_color_2x2,
+            self._try_triangular_number_repeat,
         ]
         for s in v2:
             try:
@@ -9952,6 +9953,52 @@ class SmartARCSolverV2(SmartARCSolver):
             if best_color is None:
                 return None
             return [[best_color, best_color], [best_color, best_color]]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_triangular_number_repeat (72207abc) ---
+    def _try_triangular_number_repeat(self, train, test_input):
+        """Colors in a row repeat cyclically at triangular number positions (0,1,3,6,10,15,21,28,...)."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find the row with non-zero values
+            active_row = None
+            for r in range(rows):
+                if any(grid[r][c] != 0 for c in range(cols)):
+                    if active_row is not None:
+                        return None  # multiple active rows
+                    active_row = r
+            if active_row is None:
+                return None
+            # Get initial colors at triangular positions until we hit a gap
+            colors = []
+            pos = 0
+            step = 1
+            while pos < cols:
+                v = grid[active_row][pos]
+                if v != 0:
+                    colors.append(v)
+                else:
+                    break
+                pos += step
+                step += 1
+            if not colors:
+                return None
+            # Generate triangular positions
+            result = [list(row) for row in grid]
+            pos = 0
+            step = 1
+            idx = 0
+            while pos < cols:
+                result[active_row][pos] = colors[idx % len(colors)]
+                idx += 1
+                pos += step
+                step += 1
+            return result
 
         for ex in train:
             r = solve(ex['input'])
