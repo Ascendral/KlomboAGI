@@ -507,6 +507,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_rotate_180_around_pivot_color,
             self._try_xor_halves,
             self._try_nor_left_right_half,
+            self._try_largest_rect_color_2x2,
         ]
         for s in v2:
             try:
@@ -9925,3 +9926,35 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, marker)
+
+    # --- _try_largest_rect_color_2x2 (445eab21) ---
+    def _try_largest_rect_color_2x2(self, train, test_input):
+        """Multiple colored rectangles on 0-bg. Output = 2x2 filled with the largest rectangle's color."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            colors = set(v for row in grid for v in row if v != 0)
+            if len(colors) < 2:
+                return None
+            best_color = None
+            best_area = -1
+            for color in colors:
+                cells = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == color]
+                if not cells:
+                    continue
+                min_r = min(r for r,c in cells)
+                max_r = max(r for r,c in cells)
+                min_c = min(c for r,c in cells)
+                max_c = max(c for r,c in cells)
+                area = (max_r - min_r + 1) * (max_c - min_c + 1)
+                if area > best_area:
+                    best_area = area
+                    best_color = color
+            if best_color is None:
+                return None
+            return [[best_color, best_color], [best_color, best_color]]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
