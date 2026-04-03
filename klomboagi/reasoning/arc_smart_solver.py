@@ -503,6 +503,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_checkerboard_from_rows,
             self._try_color_bands_in_order,
             self._try_rotate_line_at_pivot,
+            self._try_tile_along_uniform_edge,
         ]
         for s in v2:
             try:
@@ -9736,6 +9737,41 @@ class SmartARCSolverV2(SmartARCSolver):
                 if 0 <= nr < rows and 0 <= nc < cols:
                     result[nr][nc] = 2
             return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_tile_along_uniform_edge (15696249) ---
+    def _try_tile_along_uniform_edge(self, train, test_input):
+        """3x3 input with one uniform row/col. Tile 3x in that direction at the uniform position in a 9x9 grid."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows != 3 or cols != 3:
+                return None
+            result = [[0]*9 for _ in range(9)]
+            # Check rows for uniformity
+            for r in range(3):
+                if len(set(grid[r])) == 1:
+                    # Tile horizontally at row band r*3
+                    for dr in range(3):
+                        for rep in range(3):
+                            for dc in range(3):
+                                result[r*3+dr][rep*3+dc] = grid[dr][dc]
+                    return result
+            # Check cols for uniformity
+            for c in range(3):
+                col = [grid[r][c] for r in range(3)]
+                if len(set(col)) == 1:
+                    # Tile vertically at col band c*3
+                    for dc in range(3):
+                        for rep in range(3):
+                            for dr in range(3):
+                                result[rep*3+dr][c*3+dc] = grid[dr][dc]
+                    return result
+            return None
 
         for ex in train:
             r = solve(ex['input'])
