@@ -516,6 +516,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_stamp_template_per_dot,
             self._try_scale_with_block_sub,
             self._try_gravity_drop_in_columns,
+            self._try_extract_block_at_marker,
         ]
         for s in v2:
             try:
@@ -10390,3 +10391,59 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, bg)
+
+    # --- _try_extract_block_at_marker (48d8fb45) ---
+    def _try_extract_block_at_marker(self, train, test_input):
+        """Marker cell indicates where to extract a 3x3 block. Block at (marker_row+1, marker_col-1)."""
+        from collections import Counter
+
+        def solve(grid, marker_color, bh, bw, dr, dc):
+            rows, cols = len(grid), len(grid[0])
+            # Find marker
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == marker_color:
+                        sr, sc = r + dr, c + dc
+                        if 0 <= sr and sr + bh <= rows and 0 <= sc and sc + bw <= cols:
+                            return [[grid[sr+rr][sc+cc] for cc in range(bw)] for rr in range(bh)]
+            return None
+
+        # Learn marker color and offset from training
+        for ex in train:
+            inp, out = ex['input'], ex['output']
+            freq = Counter(v for row in inp for v in row if v != 0)
+            if len(freq) < 2:
+                return None
+
+        # Find marker: color appearing exactly once
+        inp0 = train[0]['input']
+        freq0 = Counter(v for row in inp0 for v in row if v != 0)
+        candidates = [c for c, n in freq0.items() if n == 1]
+        if not candidates:
+            return None
+
+        out0 = train[0]['output']
+        bh, bw = len(out0), len(out0[0])
+
+        for marker_color in candidates:
+            # Find marker position
+            mr = mc = None
+            for r in range(len(inp0)):
+                for c in range(len(inp0[0])):
+                    if inp0[r][c] == marker_color:
+                        mr, mc = r, c
+            # Find output position
+            for sr in range(len(inp0) - bh + 1):
+                for sc in range(len(inp0[0]) - bw + 1):
+                    sub = [[inp0[sr+r][sc+c] for c in range(bw)] for r in range(bh)]
+                    if sub == out0:
+                        dr, dc = sr - mr, sc - mc
+                        # Verify on all training
+                        ok = True
+                        for ex2 in train:
+                            r = solve(ex2['input'], marker_color, bh, bw, dr, dc)
+                            if r != ex2['output']:
+                                ok = False; break
+                        if ok:
+                            return solve(test_input, marker_color, bh, bw, dr, dc)
+        return None
