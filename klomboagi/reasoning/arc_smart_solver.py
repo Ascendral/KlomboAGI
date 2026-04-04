@@ -518,6 +518,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_gravity_drop_in_columns,
             self._try_extract_block_at_marker,
             self._try_border_extend_with_corners,
+            self._try_block_dominant_color_ignoring_marker,
         ]
         for s in v2:
             try:
@@ -10469,3 +10470,53 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_block_dominant_color_ignoring_marker (5614dbcf) ---
+    def _try_block_dominant_color_ignoring_marker(self, train, test_input):
+        """Grid divided into NxN blocks. Each block's dominant non-0 non-marker color → output cell."""
+        def solve(grid, out_rows, out_cols, marker):
+            rows, cols = len(grid), len(grid[0])
+            if rows % out_rows != 0 or cols % out_cols != 0:
+                return None
+            br = rows // out_rows
+            bc = cols // out_cols
+            result = [[0]*out_cols for _ in range(out_rows)]
+            for ri in range(out_rows):
+                for ci in range(out_cols):
+                    from collections import Counter
+                    freq = Counter()
+                    for r in range(ri*br, (ri+1)*br):
+                        for c in range(ci*bc, (ci+1)*bc):
+                            v = grid[r][c]
+                            if v != 0 and v != marker:
+                                freq[v] += 1
+                    if freq:
+                        result[ri][ci] = freq.most_common(1)[0][0]
+            return result
+
+        out0 = train[0]['output']
+        or_, oc = len(out0), len(out0[0])
+
+        # Try each possible marker color (appears in input but not as dominant in output)
+        inp0 = train[0]['input']
+        in_colors = set(v for row in inp0 for v in row if v != 0)
+        out_colors = set(v for row in out0 for v in row if v != 0)
+
+        for marker in in_colors - out_colors:
+            ok = True
+            for ex in train:
+                r = solve(ex['input'], or_, oc, marker)
+                if r != ex['output']:
+                    ok = False; break
+            if ok:
+                return solve(test_input, or_, oc, marker)
+
+        # Also try marker=None (no marker to ignore)
+        ok = True
+        for ex in train:
+            r = solve(ex['input'], or_, oc, -1)
+            if r != ex['output']:
+                ok = False; break
+        if ok:
+            return solve(test_input, or_, oc, -1)
+        return None
