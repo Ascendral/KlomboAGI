@@ -517,6 +517,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_scale_with_block_sub,
             self._try_gravity_drop_in_columns,
             self._try_extract_block_at_marker,
+            self._try_border_extend_with_corners,
         ]
         for s in v2:
             try:
@@ -10447,3 +10448,24 @@ class SmartARCSolverV2(SmartARCSolver):
                         if ok:
                             return solve(test_input, marker_color, bh, bw, dr, dc)
         return None
+
+    # --- _try_border_extend_with_corners (49d1d64f) ---
+    def _try_border_extend_with_corners(self, train, test_input):
+        """Expand grid by 1 on each side. Edge cells duplicate outward, corners get 0."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = []
+            # Top row: 0 + first row + 0
+            result.append([0] + list(grid[0]) + [0])
+            # Each input row: first_cell + row + last_cell
+            for r in range(rows):
+                result.append([grid[r][0]] + list(grid[r]) + [grid[r][-1]])
+            # Bottom row: 0 + last row + 0
+            result.append([0] + list(grid[-1]) + [0])
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
