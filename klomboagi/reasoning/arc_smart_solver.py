@@ -513,6 +513,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extend_tips_diagonally,
             self._try_cascade_complement_shrink,
             self._try_extract_corner_2x2_by_parity,
+            self._try_stamp_template_per_dot,
         ]
         for s in v2:
             try:
@@ -10256,6 +10257,59 @@ class SmartARCSolverV2(SmartARCSolver):
                 return [[grid[r][cols-2+c] for c in range(2)] for r in range(2)]
             else:
                 return [[grid[r][c] for c in range(2)] for r in range(2)]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_stamp_template_per_dot (12997ef3) ---
+    def _try_stamp_template_per_dot(self, train, test_input):
+        """1-colored template shape + colored dots. Output = template stamped per dot color, stacked vertically."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find 1-cells (template)
+            ones = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == 1]
+            if not ones:
+                return None
+            # Find colored dots (non-0, non-1)
+            dots = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols)
+                    if grid[r][c] not in (0, 1)]
+            if not dots:
+                return None
+            # Extract template bounding box
+            min_r = min(r for r, c in ones)
+            min_c = min(c for r, c in ones)
+            max_r = max(r for r, c in ones)
+            max_c = max(c for r, c in ones)
+            th = max_r - min_r + 1
+            tw = max_c - min_c + 1
+            template = [[0]*tw for _ in range(th)]
+            for r, c in ones:
+                template[r - min_r][c - min_c] = 1
+            # Sort dots by row then col
+            dots.sort()
+            # Determine stacking direction: same col → vertical, same row → horizontal
+            dot_rows = set(r for r, _, _ in dots)
+            dot_cols = set(c for _, c, _ in dots)
+            if len(dot_cols) == 1:
+                # Stack vertically
+                result = []
+                for _, _, color in dots:
+                    stamp = [[color if template[r][c] == 1 else 0 for c in range(tw)] for r in range(th)]
+                    result.extend(stamp)
+            elif len(dot_rows) == 1:
+                # Stack horizontally
+                result = [[0] * (tw * len(dots)) for _ in range(th)]
+                for di, (_, _, color) in enumerate(dots):
+                    for r in range(th):
+                        for c in range(tw):
+                            if template[r][c] == 1:
+                                result[r][di * tw + c] = color
+            else:
+                return None
+            return result
 
         for ex in train:
             r = solve(ex['input'])
