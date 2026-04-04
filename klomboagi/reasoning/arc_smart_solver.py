@@ -524,6 +524,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_concentric_frames_by_size,
             self._try_shift_objects_right_by_width,
             self._try_drop_objects_into_ground_gaps,
+            self._try_parity_fill_above_cell,
         ]
         for s in v2:
             try:
@@ -10751,6 +10752,34 @@ class SmartARCSolverV2(SmartARCSolver):
                         c = gap_start + dc
                         if 0 <= r < rows:
                             result[r][c] = color
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_parity_fill_above_cell (834ec97d) ---
+    def _try_parity_fill_above_cell(self, train, test_input):
+        """Single colored cell. Fill 4 at same-parity columns for all rows above. Cell shifts down 1."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find single non-zero cell
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 1:
+                return None
+            cr, cc, color = nz[0]
+            parity = cc % 2
+            result = [[0]*cols for _ in range(rows)]
+            # Fill rows 0 to cr with 4 at same-parity columns
+            for r in range(cr + 1):
+                for c in range(cols):
+                    if c % 2 == parity:
+                        result[r][c] = 4
+            # Place original color at cr+1
+            if cr + 1 < rows:
+                result[cr + 1][cc] = color
             return result
 
         for ex in train:
