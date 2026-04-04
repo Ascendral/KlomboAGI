@@ -515,6 +515,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extract_corner_2x2_by_parity,
             self._try_stamp_template_per_dot,
             self._try_scale_with_block_sub,
+            self._try_gravity_drop_in_columns,
         ]
         for s in v2:
             try:
@@ -10363,3 +10364,29 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_gravity_drop_in_columns (825aa9e9) ---
+    def _try_gravity_drop_in_columns(self, train, test_input):
+        """Non-bg values in each column drop down (gravity). Stack from bottom."""
+        from collections import Counter
+
+        def solve(grid, bg):
+            rows, cols = len(grid), len(grid[0])
+            result = [[bg]*cols for _ in range(rows)]
+            for c in range(cols):
+                # Collect non-bg values in this column
+                vals = [grid[r][c] for r in range(rows) if grid[r][c] != bg]
+                # Place them at the bottom
+                for i, v in enumerate(reversed(vals)):
+                    result[rows - 1 - i][c] = v
+            return result
+
+        # Determine bg
+        inp0 = train[0]['input']
+        bg = Counter(v for row in inp0 for v in row).most_common(1)[0][0]
+
+        for ex in train:
+            r = solve(ex['input'], bg)
+            if r != ex['output']:
+                return None
+        return solve(test_input, bg)
