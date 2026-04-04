@@ -520,6 +520,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_border_extend_with_corners,
             self._try_block_dominant_color_ignoring_marker,
             self._try_count_blocks_to_checkerboard,
+            self._try_max_count_colors_tiled,
         ]
         for s in v2:
             try:
@@ -10548,6 +10549,40 @@ class SmartARCSolverV2(SmartARCSolver):
                 r, c = CHECKER[i]
                 result[r][c] = 1
             return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_max_count_colors_tiled (a3325580) ---
+    def _try_max_count_colors_tiled(self, train, test_input):
+        """Find colors with max cell count. Output = max_count rows x N cols, each row = sorted colors."""
+        from collections import Counter
+
+        def solve(grid):
+            freq = Counter(v for row in grid for v in row if v != 0)
+            if not freq:
+                return None
+            max_count = max(freq.values())
+            max_colors = [c for c, n in freq.items() if n == max_count]
+            if not max_colors:
+                return None
+            # Sort by column of first appearance
+            first_col = {}
+            rows, cols = len(grid), len(grid[0])
+            for color in max_colors:
+                for r in range(rows):
+                    for c in range(cols):
+                        if grid[r][c] == color:
+                            first_col[color] = c
+                            break
+                    else:
+                        continue
+                    break
+            max_colors.sort(key=lambda x: first_col.get(x, 0))
+            return [list(max_colors) for _ in range(max_count)]
 
         for ex in train:
             r = solve(ex['input'])
