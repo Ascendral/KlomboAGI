@@ -521,6 +521,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_block_dominant_color_ignoring_marker,
             self._try_count_blocks_to_checkerboard,
             self._try_max_count_colors_tiled,
+            self._try_concentric_frames_by_size,
         ]
         for s in v2:
             try:
@@ -10583,6 +10584,53 @@ class SmartARCSolverV2(SmartARCSolver):
                     break
             max_colors.sort(key=lambda x: first_col.get(x, 0))
             return [list(max_colors) for _ in range(max_count)]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_concentric_frames_by_size (5587a8d0) ---
+    def _try_concentric_frames_by_size(self, train, test_input):
+        """Multiple shapes on bg. Build concentric square frames, largest shape outermost."""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            bg = Counter(v for row in grid for v in row).most_common(1)[0][0]
+            # Find colored shapes
+            colors = {}
+            for r in range(rows):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != bg:
+                        colors.setdefault(v, []).append((r, c))
+            if len(colors) < 2:
+                return None
+            # Sort by bounding box area descending, then cell count descending
+            def sort_key(item):
+                color, cells = item
+                min_r = min(r for r, c in cells)
+                max_r = max(r for r, c in cells)
+                min_c = min(c for r, c in cells)
+                max_c = max(c for r, c in cells)
+                bbox = (max_r - min_r + 1) * (max_c - min_c + 1)
+                return (-bbox, -len(cells))
+
+            ordered = sorted(colors.items(), key=sort_key)
+            n = len(ordered)
+            size = 2 * n - 1
+            result = [[0] * size for _ in range(size)]
+            for i, (color, _) in enumerate(ordered):
+                # Fill frame at depth i
+                for r in range(i, size - i):
+                    for c in range(i, size - i):
+                        if r == i or r == size - i - 1 or c == i or c == size - i - 1:
+                            result[r][c] = color
+                        elif i == n - 1:  # innermost = fill center
+                            result[r][c] = color
+            return result
 
         for ex in train:
             r = solve(ex['input'])
