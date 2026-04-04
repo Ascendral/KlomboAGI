@@ -519,6 +519,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extract_block_at_marker,
             self._try_border_extend_with_corners,
             self._try_block_dominant_color_ignoring_marker,
+            self._try_count_blocks_to_checkerboard,
         ]
         for s in v2:
             try:
@@ -10520,3 +10521,36 @@ class SmartARCSolverV2(SmartARCSolver):
         if ok:
             return solve(test_input, or_, oc, -1)
         return None
+
+    # --- _try_count_blocks_to_checkerboard (ff28f65a) ---
+    def _try_count_blocks_to_checkerboard(self, train, test_input):
+        """Count 2x2 non-zero blocks. Fill first N checkerboard positions in 3x3 output."""
+        CHECKER = [(0,0),(0,2),(1,1),(2,0),(2,2)]
+
+        def count_blocks(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = set()
+            count = 0
+            for r in range(rows - 1):
+                for c in range(cols - 1):
+                    if (r,c) not in visited and grid[r][c] != 0:
+                        if grid[r][c+1] != 0 and grid[r+1][c] != 0 and grid[r+1][c+1] != 0:
+                            count += 1
+                            visited.update([(r,c),(r,c+1),(r+1,c),(r+1,c+1)])
+            return count
+
+        def solve(grid):
+            n = count_blocks(grid)
+            if n < 1 or n > 5:
+                return None
+            result = [[0]*3 for _ in range(3)]
+            for i in range(n):
+                r, c = CHECKER[i]
+                result[r][c] = 1
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
