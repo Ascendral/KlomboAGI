@@ -514,6 +514,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_cascade_complement_shrink,
             self._try_extract_corner_2x2_by_parity,
             self._try_stamp_template_per_dot,
+            self._try_scale_with_block_sub,
         ]
         for s in v2:
             try:
@@ -10309,6 +10310,52 @@ class SmartARCSolverV2(SmartARCSolver):
                                 result[r][di * tw + c] = color
             else:
                 return None
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_scale_with_block_sub (2072aba6) ---
+    def _try_scale_with_block_sub(self, train, test_input):
+        """Each cell maps to a KxK block. Learn the block mapping from training."""
+        # Determine scale factor from output/input dimensions
+        inp0 = train[0]['input']
+        out0 = train[0]['output']
+        ir, ic = len(inp0), len(inp0[0])
+        or_, oc = len(out0), len(out0[0])
+        if or_ % ir != 0 or oc % ic != 0:
+            return None
+        kr, kc = or_ // ir, oc // ic
+        if kr != kc or kr < 2:
+            return None
+        k = kr
+
+        # Learn block mapping from first training example
+        block_map = {}
+        for r in range(ir):
+            for c in range(ic):
+                val = inp0[r][c]
+                block = tuple(tuple(out0[r*k+dr][c*k+dc] for dc in range(k)) for dr in range(k))
+                if val in block_map:
+                    if block_map[val] != block:
+                        return None
+                block_map[val] = block
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            result = [[0]*(cols*k) for _ in range(rows*k)]
+            for r in range(rows):
+                for c in range(cols):
+                    val = grid[r][c]
+                    if val not in block_map:
+                        return None
+                    block = block_map[val]
+                    for dr in range(k):
+                        for dc in range(k):
+                            result[r*k+dr][c*k+dc] = block[dr][dc]
             return result
 
         for ex in train:
