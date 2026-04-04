@@ -525,6 +525,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_shift_objects_right_by_width,
             self._try_drop_objects_into_ground_gaps,
             self._try_parity_fill_above_cell,
+            self._try_separator_below_above_ratio,
         ]
         for s in v2:
             try:
@@ -10781,6 +10782,51 @@ class SmartARCSolverV2(SmartARCSolver):
             if cr + 1 < rows:
                 result[cr + 1][cc] = color
             return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_separator_below_above_ratio (8597cfd7) ---
+    def _try_separator_below_above_ratio(self, train, test_input):
+        """Two colored lines + separator row. Winner = color with highest below/above ratio. Output = 2x2 of winner."""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            freq = Counter(v for row in grid for v in row if v != 0)
+            if len(freq) < 3:
+                return None
+            # Find separator: color that forms a full row
+            sep_color = None
+            sep_row = None
+            for r in range(rows):
+                row_vals = set(grid[r])
+                if len(row_vals) == 1 and grid[r][0] != 0:
+                    sep_color = grid[r][0]
+                    sep_row = r
+                    break
+            if sep_color is None:
+                return None
+            # Find the two non-sep non-0 colors
+            other_colors = [c for c in freq if c != sep_color]
+            if len(other_colors) != 2:
+                return None
+            # Count above and below separator for each color
+            best = None
+            best_ratio = -1
+            for color in other_colors:
+                above = sum(1 for r in range(sep_row) for c in range(cols) if grid[r][c] == color)
+                below = sum(1 for r in range(sep_row+1, rows) for c in range(cols) if grid[r][c] == color)
+                ratio = below / above if above > 0 else float('inf')
+                if ratio > best_ratio or (ratio == best_ratio and (best is None or color > best)):
+                    best_ratio = ratio
+                    best = color
+            if best is None:
+                return None
+            return [[best, best], [best, best]]
 
         for ex in train:
             r = solve(ex['input'])
