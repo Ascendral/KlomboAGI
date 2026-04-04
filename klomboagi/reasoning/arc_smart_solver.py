@@ -523,6 +523,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_max_count_colors_tiled,
             self._try_concentric_frames_by_size,
             self._try_shift_objects_right_by_width,
+            self._try_drop_objects_into_ground_gaps,
         ]
         for s in v2:
             try:
@@ -10667,6 +10668,89 @@ class SmartARCSolverV2(SmartARCSolver):
                                 result[cr][nc] = v
                             else:
                                 return None
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_drop_objects_into_ground_gaps (67c52801) ---
+    def _try_drop_objects_into_ground_gaps(self, train, test_input):
+        """Objects drop into gaps in the ground layer, reshaping to fit gap width."""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find ground: bottom row should be solid (one color)
+            ground_color = None
+            if len(set(grid[-1])) == 1 and grid[-1][0] != 0:
+                ground_color = grid[-1][0]
+            else:
+                return None
+            # Find gap row (row above ground that has ground_color with gaps)
+            gap_row = rows - 2
+            if gap_row < 0:
+                return None
+            gaps = []  # (start_col, width)
+            c = 0
+            while c < cols:
+                if grid[gap_row][c] == 0:
+                    start = c
+                    while c < cols and grid[gap_row][c] == 0:
+                        c += 1
+                    gaps.append((start, c - start))
+                else:
+                    c += 1
+            if not gaps:
+                return None
+            # Find floating objects (non-0 non-ground_color connected components)
+            visited = [[False]*cols for _ in range(rows)]
+            # Mark ground rows as visited
+            for c in range(cols):
+                visited[-1][c] = True
+                visited[gap_row][c] = True
+            objects = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and grid[r][c] != ground_color and not visited[r][c]:
+                        queue = [(r, c)]
+                        visited[r][c] = True
+                        cells = []
+                        color = grid[r][c]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            cells.append((cr, cc))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == color:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                        objects.append((len(cells), color, cells))
+            if not objects or len(objects) != len(gaps):
+                return None
+            # Match objects to gaps: sort both by size, smallest to smallest
+            objects.sort()
+            gaps.sort(key=lambda x: x[1])
+            # Build output: start with all 0, add ground, fill gaps
+            result = [[0]*cols for _ in range(rows)]
+            # Copy ground
+            result[-1] = list(grid[-1])
+            for c in range(cols):
+                if grid[gap_row][c] == ground_color:
+                    result[gap_row][c] = ground_color
+            # Fill each gap with its matched object
+            for (area, color, _), (gap_start, gap_width) in zip(objects, gaps):
+                if area % gap_width != 0:
+                    return None
+                height = area // gap_width
+                for dr in range(height):
+                    for dc in range(gap_width):
+                        r = gap_row - dr
+                        c = gap_start + dc
+                        if 0 <= r < rows:
+                            result[r][c] = color
             return result
 
         for ex in train:
