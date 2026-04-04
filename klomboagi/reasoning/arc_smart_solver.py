@@ -528,6 +528,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_separator_below_above_ratio,
             self._try_four_rotation_tiling,
             self._try_drop_shape_to_separator,
+            self._try_recolor_by_nearest_border,
         ]
         for s in v2:
             try:
@@ -10915,6 +10916,48 @@ class SmartARCSolverV2(SmartARCSolver):
             if 0 <= eight_row < rows:
                 for c in range(cols):
                     result[eight_row][c] = 8
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_recolor_by_nearest_border (2204b7a8) ---
+    def _try_recolor_by_nearest_border(self, train, test_input):
+        """Two border rows (top/bottom) of different colors. Scattered marker cells recolor to nearest border."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows < 3:
+                return None
+            # Check top and bottom rows are solid single colors
+            top_vals = set(grid[0])
+            bot_vals = set(grid[-1])
+            if len(top_vals) != 1 or len(bot_vals) != 1:
+                return None
+            top_color = grid[0][0]
+            bot_color = grid[-1][0]
+            if top_color == 0 or bot_color == 0 or top_color == bot_color:
+                return None
+            # Find marker color (the one that gets replaced)
+            marker_color = None
+            for r in range(1, rows-1):
+                for c in range(cols):
+                    v = grid[r][c]
+                    if v != 0 and v != top_color and v != bot_color:
+                        marker_color = v
+                        break
+                if marker_color: break
+            if marker_color is None:
+                return None
+            result = [list(row) for row in grid]
+            for r in range(1, rows-1):
+                for c in range(cols):
+                    if grid[r][c] == marker_color:
+                        dist_top = r
+                        dist_bot = rows - 1 - r
+                        result[r][c] = top_color if dist_top <= dist_bot else bot_color
             return result
 
         for ex in train:
