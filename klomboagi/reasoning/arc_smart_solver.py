@@ -527,6 +527,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_parity_fill_above_cell,
             self._try_separator_below_above_ratio,
             self._try_four_rotation_tiling,
+            self._try_drop_shape_to_separator,
         ]
         for s in v2:
             try:
@@ -10855,6 +10856,65 @@ class SmartARCSolverV2(SmartARCSolver):
             for r in range(rows):
                 row = list(r180[r]) + list(r90[r])
                 result.append(row)
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_drop_shape_to_separator (56dc2b01) ---
+    def _try_drop_shape_to_separator(self, train, test_input):
+        """Shape moves toward a full-row separator. 8-row appears on opposite side of moved shape."""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find colors
+            freq = Counter(v for row in grid for v in row if v != 0)
+            if len(freq) != 2:
+                return None
+            # Find separator: color that forms exactly one full row
+            sep_color = shape_color = None
+            sep_row = None
+            for color in freq:
+                full_rows = [r for r in range(rows) if all(grid[r][c] == color for c in range(cols))]
+                if len(full_rows) == 1:
+                    sep_color = color
+                    sep_row = full_rows[0]
+            if sep_color is None:
+                return None
+            shape_color = [c for c in freq if c != sep_color][0]
+            # Find shape cells
+            shape_cells = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == shape_color]
+            if not shape_cells:
+                return None
+            shape_min_r = min(r for r, c in shape_cells)
+            shape_max_r = max(r for r, c in shape_cells)
+            shape_h = shape_max_r - shape_min_r + 1
+            # Determine direction: shape moves toward separator
+            result = [[0]*cols for _ in range(rows)]
+            # Keep separator
+            for c in range(cols):
+                result[sep_row][c] = sep_color
+            if shape_min_r > sep_row:
+                # Shape is below sep → move up (shape goes just below sep)
+                new_start = sep_row + 1
+                eight_row = new_start + shape_h
+            else:
+                # Shape is above sep → move down (shape goes just above sep)
+                new_start = sep_row - shape_h
+                eight_row = new_start - 1
+            # Place shape at new position
+            for r, c in shape_cells:
+                nr = new_start + (r - shape_min_r)
+                if 0 <= nr < rows:
+                    result[nr][c] = shape_color
+            # Place 8-row
+            if 0 <= eight_row < rows:
+                for c in range(cols):
+                    result[eight_row][c] = 8
             return result
 
         for ex in train:
