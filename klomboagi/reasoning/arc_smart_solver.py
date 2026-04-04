@@ -522,6 +522,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_count_blocks_to_checkerboard,
             self._try_max_count_colors_tiled,
             self._try_concentric_frames_by_size,
+            self._try_shift_objects_right_by_width,
         ]
         for s in v2:
             try:
@@ -10630,6 +10631,42 @@ class SmartARCSolverV2(SmartARCSolver):
                             result[r][c] = color
                         elif i == n - 1:  # innermost = fill center
                             result[r][c] = color
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_shift_objects_right_by_width (64a7c07e) ---
+    def _try_shift_objects_right_by_width(self, train, test_input):
+        """Each connected object shifts right by its own width."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            result = [[0]*cols for _ in range(rows)]
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and not visited[r][c]:
+                        queue = [(r, c)]
+                        visited[r][c] = True
+                        cells = []
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            cells.append((cr, cc, grid[cr][cc]))
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc]!=0:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                        width = max(c for _, c, _ in cells) - min(c for _, c, _ in cells) + 1
+                        for cr, cc, v in cells:
+                            nc = cc + width
+                            if 0 <= nc < cols:
+                                result[cr][nc] = v
+                            else:
+                                return None
             return result
 
         for ex in train:
