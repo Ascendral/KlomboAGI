@@ -526,6 +526,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_drop_objects_into_ground_gaps,
             self._try_parity_fill_above_cell,
             self._try_separator_below_above_ratio,
+            self._try_four_rotation_tiling,
         ]
         for s in v2:
             try:
@@ -10827,6 +10828,34 @@ class SmartARCSolverV2(SmartARCSolver):
             if best is None:
                 return None
             return [[best, best], [best, best]]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_four_rotation_tiling (7953d61e) ---
+    def _try_four_rotation_tiling(self, train, test_input):
+        """Output = 2x2 tiling of [original, rot270; rot180, rot90]."""
+        def rot90cw(grid):
+            r, c = len(grid), len(grid[0])
+            return [[grid[r-1-j][i] for j in range(r)] for i in range(c)]
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            r90 = rot90cw(grid)
+            r180 = rot90cw(r90)
+            r270 = rot90cw(r180)
+            # Build 2x2 tiling: [orig, r270; r180, r90]
+            result = []
+            for r in range(rows):
+                row = list(grid[r]) + list(r270[r])
+                result.append(row)
+            for r in range(rows):
+                row = list(r180[r]) + list(r90[r])
+                result.append(row)
+            return result
 
         for ex in train:
             r = solve(ex['input'])
