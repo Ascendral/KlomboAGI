@@ -512,6 +512,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_reflect_shape_by_pointer,
             self._try_extend_tips_diagonally,
             self._try_cascade_complement_shrink,
+            self._try_extract_corner_2x2_by_parity,
         ]
         for s in v2:
             try:
@@ -10243,3 +10244,21 @@ class SmartARCSolverV2(SmartARCSolver):
         if test_pattern in pattern_map:
             return [[pattern_map[test_pattern]]]
         return None
+
+    # --- _try_extract_corner_2x2_by_parity (a6953f00) ---
+    def _try_extract_corner_2x2_by_parity(self, train, test_input):
+        """Extract top-left or top-right 2x2 based on grid column parity (even→TR, odd→TL)."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            if rows < 2 or cols < 2:
+                return None
+            if cols % 2 == 0:
+                return [[grid[r][cols-2+c] for c in range(2)] for r in range(2)]
+            else:
+                return [[grid[r][c] for c in range(2)] for r in range(2)]
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
