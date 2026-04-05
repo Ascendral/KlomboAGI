@@ -536,6 +536,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_or_halves_with_separator_col,
             self._try_draw_x_from_dot,
             self._try_draw_border_from_dot,
+            self._try_staircase_from_dot,
         ]
         for s in v2:
             try:
@@ -11221,3 +11222,54 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_staircase_from_dot (d06dbe63) ---
+    def _try_staircase_from_dot(self, train, test_input):
+        """Single dot. Staircase of 5s: vertical step + 3-cell horizontal bar alternating."""
+        def solve(grid, new_color):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 1:
+                return None
+            r, c, _ = nz[0]
+            result = [list(row) for row in grid]
+            # Going up-right
+            cur_r, cur_c = r-1, c
+            step = 0
+            while 0 <= cur_r < rows and 0 <= cur_c < cols:
+                result[cur_r][cur_c] = new_color
+                if step % 2 == 1:
+                    # horizontal bar of 3
+                    if cur_c+1 < cols: result[cur_r][cur_c+1] = new_color
+                    if cur_c+2 < cols: result[cur_r][cur_c+2] = new_color
+                    cur_c += 2
+                cur_r -= 1
+                step += 1
+            # Going down-left
+            cur_r, cur_c = r+1, c
+            step = 0
+            while 0 <= cur_r < rows and 0 <= cur_c < cols:
+                result[cur_r][cur_c] = new_color
+                if step % 2 == 1:
+                    # horizontal bar of 3 going left
+                    if cur_c-1 >= 0: result[cur_r][cur_c-1] = new_color
+                    if cur_c-2 >= 0: result[cur_r][cur_c-2] = new_color
+                    cur_c -= 2
+                cur_r += 1
+                step += 1
+            return result
+
+        # Learn new color from output
+        out0 = train[0]['output']
+        in_colors = set(v for row in train[0]['input'] for v in row)
+        out_colors = set(v for row in out0 for v in row)
+        new_colors = out_colors - in_colors
+        if not new_colors:
+            return None
+        new_color = new_colors.pop()
+
+        for ex in train:
+            r = solve(ex['input'], new_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, new_color)
