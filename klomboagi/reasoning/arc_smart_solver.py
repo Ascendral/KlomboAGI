@@ -540,6 +540,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_bouncing_path_from_dot,
             self._try_L_path_between_dots,
             self._try_alternating_cols_from_2dots,
+            self._try_count_8s_fill_matching_color,
         ]
         for s in v2:
             try:
@@ -11469,3 +11470,52 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve_auto(test_input)
+
+    # --- _try_count_8s_fill_matching_color (2685904e) ---
+    def _try_count_8s_fill_matching_color(self, train, test_input):
+        """Row 0 has N 8s. Find bottom row with color counts. Fill bars above separator at cols of the color with count N, height N."""
+        from collections import Counter
+
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            # Find separator row (all 5s)
+            sep_row = None
+            for r in range(rows):
+                if len(set(grid[r])) == 1 and grid[r][0] == 5:
+                    sep_row = r
+                    break
+            if sep_row is None:
+                return None
+            # Count 8s in row 0
+            n8 = sum(1 for c in range(cols) if grid[0][c] == 8)
+            if n8 == 0:
+                return None
+            # Find bottom colored row (below separator, first non-empty row)
+            bot_row = None
+            for r in range(sep_row+1, rows):
+                if any(v != 0 for v in grid[r]):
+                    bot_row = r
+                    break
+            if bot_row is None:
+                return None
+            # Count colors in bottom row
+            freq = Counter(grid[bot_row][c] for c in range(cols) if grid[bot_row][c] != 0)
+            # Find ALL colors with count == n8
+            targets = [color for color, count in freq.items() if count == n8]
+            if not targets:
+                return None
+            result = [list(row) for row in grid]
+            # Fill bars above separator with height n8 for each target color
+            for target in targets:
+                target_cols = [c for c in range(cols) if grid[bot_row][c] == target]
+                for c in target_cols:
+                    for r in range(sep_row - n8, sep_row):
+                        if r >= 0:
+                            result[r][c] = target
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
