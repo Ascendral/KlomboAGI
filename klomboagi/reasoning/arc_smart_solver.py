@@ -537,6 +537,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_draw_x_from_dot,
             self._try_draw_border_from_dot,
             self._try_staircase_from_dot,
+            self._try_bouncing_path_from_dot,
         ]
         for s in v2:
             try:
@@ -11273,3 +11274,44 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, new_color)
+
+    # --- _try_bouncing_path_from_dot (e179c5f4) ---
+    def _try_bouncing_path_from_dot(self, train, test_input):
+        """Single dot. Path bounces up diagonally between side walls. Rest filled with bg."""
+        def solve(grid, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 1:
+                return None
+            sr, sc, color = nz[0]
+            result = [[fill_color]*cols for _ in range(rows)]
+            # Trace path from dot
+            r, c = sr, sc
+            dc = 1 if sc == 0 else -1
+            result[r][c] = color
+            while r > 0:
+                r -= 1
+                c += dc
+                if c < 0:
+                    c = 1
+                    dc = 1
+                elif c >= cols:
+                    c = cols - 2
+                    dc = -1
+                result[r][c] = color
+            return result
+
+        # Learn fill color (the non-dot color in output)
+        inp0, out0 = train[0]['input'], train[0]['output']
+        nz_in = set(v for row in inp0 for v in row if v != 0)
+        all_out = set(v for row in out0 for v in row)
+        fill_candidates = all_out - nz_in
+        if not fill_candidates:
+            return None
+        fill_color = fill_candidates.pop()
+
+        for ex in train:
+            r = solve(ex['input'], fill_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, fill_color)
