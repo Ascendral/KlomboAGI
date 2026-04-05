@@ -533,6 +533,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_draw_diagonal_on_zeros,
             self._try_fill_enclosed_zero_regions,
             self._try_or_halves_recolor,
+            self._try_or_halves_with_separator_col,
         ]
         for s in v2:
             try:
@@ -11124,3 +11125,48 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, output_color)
+
+    # --- _try_or_halves_with_separator_col (195ba7dc) ---
+    def _try_or_halves_with_separator_col(self, train, test_input):
+        """Grid split by separator col (uniform non-0 color). OR left/right halves → marker color."""
+        def solve(grid, sep_col, marker):
+            rows = len(grid)
+            left = [grid[r][:sep_col] for r in range(rows)]
+            right = [grid[r][sep_col+1:] for r in range(rows)]
+            if len(left[0]) != len(right[0]):
+                return None
+            w = len(left[0])
+            result = [[0]*w for _ in range(rows)]
+            for r in range(rows):
+                for c in range(w):
+                    if left[r][c] != 0 or right[r][c] != 0:
+                        result[r][c] = marker
+            return result
+
+        # Find separator col
+        inp0 = train[0]['input']
+        rows, cols = len(inp0), len(inp0[0])
+        sep_col = None
+        for c in range(cols):
+            vals = set(inp0[r][c] for r in range(rows))
+            if len(vals) == 1 and 0 not in vals:
+                sep_col = c
+                break
+        if sep_col is None:
+            return None
+        # Find marker from output
+        out0 = train[0]['output']
+        marker = None
+        for row in out0:
+            for v in row:
+                if v != 0:
+                    marker = v; break
+            if marker: break
+        if marker is None:
+            marker = 1
+
+        for ex in train:
+            r = solve(ex['input'], sep_col, marker)
+            if r != ex['output']:
+                return None
+        return solve(test_input, sep_col, marker)
