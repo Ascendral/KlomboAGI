@@ -545,6 +545,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_extract_5border_with_padding,
             self._try_extract_unique_or_largest_component,
             self._try_shift_each_shape_by_width,
+            self._try_reverse_concentric_rings,
         ]
         for s in v2:
             try:
@@ -11723,3 +11724,44 @@ class SmartARCSolverV2(SmartARCSolver):
             if ok:
                 return solve(test_input, direction)
         return None
+
+    # --- _try_reverse_concentric_rings (85c4e7cd) ---
+    def _try_reverse_concentric_rings(self, train, test_input):
+        """Reverse the color order of concentric square rings."""
+        def get_rings(grid):
+            rows, cols = len(grid), len(grid[0])
+            rings = []
+            max_depth = min(rows, cols) // 2 + 1
+            for d in range(max_depth):
+                # Cells at depth d
+                ring_cells = set()
+                for r in range(d, rows - d):
+                    for c in range(d, cols - d):
+                        if r == d or r == rows - d - 1 or c == d or c == cols - d - 1:
+                            ring_cells.add((r, c))
+                if not ring_cells:
+                    break
+                colors = set(grid[r][c] for r, c in ring_cells)
+                if len(colors) != 1:
+                    return None
+                rings.append((ring_cells, next(iter(colors))))
+            return rings
+
+        def solve(grid):
+            rings = get_rings(grid)
+            if rings is None or len(rings) < 2:
+                return None
+            rows, cols = len(grid), len(grid[0])
+            out = [[0]*cols for _ in range(rows)]
+            colors = [c for _, c in rings]
+            reversed_colors = list(reversed(colors))
+            for i, (cells, _) in enumerate(rings):
+                new_color = reversed_colors[i]
+                for r, c in cells:
+                    out[r][c] = new_color
+            return out
+
+        for ex in train:
+            if solve(ex['input']) != ex['output']:
+                return None
+        return solve(test_input)
