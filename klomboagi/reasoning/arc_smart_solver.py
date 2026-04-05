@@ -541,6 +541,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_L_path_between_dots,
             self._try_alternating_cols_from_2dots,
             self._try_count_8s_fill_matching_color,
+            self._try_simple_tile_nxm,
         ]
         for s in v2:
             try:
@@ -11519,3 +11520,37 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_simple_tile_nxm (ccd554ac) ---
+    def _try_simple_tile_nxm(self, train, test_input):
+        """Output = input tiled in a k×k pattern (output dims = k*input dims)."""
+        def solve(grid):
+            ir, ic = len(grid), len(grid[0])
+            # Output size learned
+            return None
+
+        # Determine the scaling rule: output_dim = f(input_dim)
+        # Check: output dim = input_dim * input_dim (fractal-size)
+        inp0 = train[0]['input']
+        out0 = train[0]['output']
+        ir, ic = len(inp0), len(inp0[0])
+        or_, oc = len(out0), len(out0[0])
+        if or_ == ir * ir and oc == ic * ic:
+            # Scale by input size (per example)
+            def do_tile(grid):
+                i_rows, i_cols = len(grid), len(grid[0])
+                return [[grid[r % i_rows][c % i_cols] for c in range(i_cols * i_cols)] for r in range(i_rows * i_rows)]
+        else:
+            # Fixed scale
+            if ir == 0 or ic == 0 or or_ % ir != 0 or oc % ic != 0:
+                return None
+            kr, kc = or_ // ir, oc // ic
+            def do_tile(grid):
+                i_rows, i_cols = len(grid), len(grid[0])
+                return [[grid[r % i_rows][c % i_cols] for c in range(i_cols * kc)] for r in range(i_rows * kr)]
+
+        for ex in train:
+            r = do_tile(ex['input'])
+            if r != ex['output']:
+                return None
+        return do_tile(test_input)
