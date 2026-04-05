@@ -539,6 +539,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_staircase_from_dot,
             self._try_bouncing_path_from_dot,
             self._try_L_path_between_dots,
+            self._try_alternating_cols_from_2dots,
         ]
         for s in v2:
             try:
@@ -11371,3 +11372,100 @@ class SmartARCSolverV2(SmartARCSolver):
             if ok:
                 return solve(test_input, dotA, dotB, fill_color)
         return None
+
+    # --- _try_alternating_cols_from_2dots (0a938d79) ---
+    def _try_alternating_cols_from_2dots(self, train, test_input):
+        """Two dots at different cols. Fill vertical columns spaced by col-distance, alternating colors."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 2:
+                return None
+            (r1, c1, col1), (r2, c2, col2) = sorted(nz, key=lambda x: x[1])
+            if col1 == col2:
+                return None
+            step = c2 - c1
+            result = [[0]*cols for _ in range(rows)]
+            # Going right
+            c = c1
+            color_idx = 0
+            colors = [col1, col2]
+            while c < cols:
+                for r in range(rows):
+                    result[r][c] = colors[color_idx % 2]
+                c += step
+                color_idx += 1
+            # Also rows case — but for this task, assume col-direction works
+            return result
+
+        # Also need to handle row-direction case
+        def solve_rows(grid):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 2:
+                return None
+            (r1, c1, col1), (r2, c2, col2) = sorted(nz, key=lambda x: x[0])
+            if r1 == r2:
+                return None
+            step = r2 - r1
+            result = [[0]*cols for _ in range(rows)]
+            r = r1
+            color_idx = 0
+            colors = [col1, col2]
+            while r < rows:
+                for c in range(cols):
+                    result[r][c] = colors[color_idx % 2]
+                r += step
+                color_idx += 1
+            return result
+
+        # Use the axis with SMALLER distance as spacing
+        def solve_auto(grid):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 2:
+                return None
+            (r1, c1, col1), (r2, c2, col2) = nz
+            dr = abs(r2 - r1)
+            dc = abs(c2 - c1)
+            if dr == 0 and dc == 0:
+                return None
+            if dc == 0:
+                dr_use = True
+            elif dr == 0:
+                dr_use = False
+            else:
+                dr_use = dr <= dc
+            if dr_use:
+                # Spacing along rows, fill horizontal lines
+                (r1, c1, col1), (r2, c2, col2) = sorted(nz, key=lambda x: x[0])
+                step = r2 - r1
+                result = [[0]*cols for _ in range(rows)]
+                r = r1
+                color_idx = 0
+                colors = [col1, col2]
+                while r < rows:
+                    for c in range(cols):
+                        result[r][c] = colors[color_idx % 2]
+                    r += step
+                    color_idx += 1
+                return result
+            else:
+                (r1, c1, col1), (r2, c2, col2) = sorted(nz, key=lambda x: x[1])
+                step = c2 - c1
+                result = [[0]*cols for _ in range(rows)]
+                c = c1
+                color_idx = 0
+                colors = [col1, col2]
+                while c < cols:
+                    for r in range(rows):
+                        result[r][c] = colors[color_idx % 2]
+                    c += step
+                    color_idx += 1
+                return result
+
+        for ex in train:
+            r = solve_auto(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve_auto(test_input)
