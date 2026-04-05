@@ -543,6 +543,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_count_8s_fill_matching_color,
             self._try_simple_tile_nxm,
             self._try_extract_5border_with_padding,
+            self._try_extract_unique_or_largest_component,
+            self._try_shift_each_shape_by_width,
         ]
         for s in v2:
             try:
@@ -11587,4 +11589,137 @@ class SmartARCSolverV2(SmartARCSolver):
                             ok = False; break
                     if ok:
                         return solve(test_input, marker, pr, pc)
+        return None
+
+    # --- _try_extract_unique_or_largest_component (7bb29440) ---
+    def _try_extract_unique_or_largest_component(self, train, test_input):
+        """Find multiple connected components (same color). Extract the one with unique size or largest bounding box."""
+        from collections import Counter
+
+        def get_components(grid, target_color):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            comps = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == target_color and not visited[r][c]:
+                        queue = [(r, c)]
+                        visited[r][c] = True
+                        cells = [(r, c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == target_color:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                                    cells.append((nr, nc))
+                        comps.append(cells)
+            return comps
+
+        def extract_bbox(grid, cells):
+            rows, cols = len(grid), len(grid[0])
+            min_r = min(r for r,c in cells); max_r = max(r for r,c in cells)
+            min_c = min(c for r,c in cells); max_c = max(c for r,c in cells)
+            return [[grid[r][c] for c in range(min_c, max_c+1)] for r in range(min_r, max_r+1)]
+
+        def solve(grid, target_color, selector):
+            comps = get_components(grid, target_color)
+            if not comps:
+                return None
+            if selector == 'largest':
+                bbox_sizes = []
+                for cells in comps:
+                    min_r = min(r for r,c in cells); max_r = max(r for r,c in cells)
+                    min_c = min(c for r,c in cells); max_c = max(c for r,c in cells)
+                    bbox_sizes.append((max_r-min_r+1) * (max_c-min_c+1))
+                idx = bbox_sizes.index(max(bbox_sizes))
+                return extract_bbox(grid, comps[idx])
+            elif selector == 'smallest':
+                bbox_sizes = []
+                for cells in comps:
+                    min_r = min(r for r,c in cells); max_r = max(r for r,c in cells)
+                    min_c = min(c for r,c in cells); max_c = max(c for r,c in cells)
+                    bbox_sizes.append((max_r-min_r+1) * (max_c-min_c+1))
+                idx = bbox_sizes.index(min(bbox_sizes))
+                return extract_bbox(grid, comps[idx])
+            return None
+
+        # Learn target color (appears multiple times in distinct components)
+        inp0 = train[0]['input']
+        colors = set(v for row in inp0 for v in row if v != 0)
+        for target_color in colors:
+            for selector in ['largest', 'smallest']:
+                ok = True
+                for ex in train:
+                    r = solve(ex['input'], target_color, selector)
+                    if r != ex['output']:
+                        ok = False; break
+                if ok:
+                    return solve(test_input, target_color, selector)
+        return None
+
+    # --- _try_shift_each_shape_by_width (64a7c07e) ---
+    def _try_shift_each_shape_by_width(self, train, test_input):
+        """Each connected component shifts horizontally by its own bbox width."""
+        def get_components(grid):
+            rows, cols = len(grid), len(grid[0])
+            visited = [[False]*cols for _ in range(rows)]
+            comps = []
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] != 0 and not visited[r][c]:
+                        color = grid[r][c]
+                        queue = [(r, c)]
+                        visited[r][c] = True
+                        cells = [(r, c)]
+                        while queue:
+                            cr, cc = queue.pop(0)
+                            for dr, dc in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)]:
+                                nr, nc = cr+dr, cc+dc
+                                if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] != 0:
+                                    visited[nr][nc] = True
+                                    queue.append((nr, nc))
+                                    cells.append((nr, nc))
+                        comps.append((color, cells))
+            return comps
+
+        def solve(grid, direction):
+            rows, cols = len(grid), len(grid[0])
+            out = [[0]*cols for _ in range(rows)]
+            comps = get_components(grid)
+            for color, cells in comps:
+                min_r = min(r for r,c in cells); max_r = max(r for r,c in cells)
+                min_c = min(c for r,c in cells); max_c = max(c for r,c in cells)
+                w = max_c - min_c + 1
+                h = max_r - min_r + 1
+                if direction == 'right':
+                    dr, dc = 0, w
+                elif direction == 'left':
+                    dr, dc = 0, -w
+                elif direction == 'down':
+                    dr, dc = h, 0
+                elif direction == 'up':
+                    dr, dc = -h, 0
+                else:
+                    return None
+                for r, c in cells:
+                    nr, nc = r+dr, c+dc
+                    if not (0 <= nr < rows and 0 <= nc < cols):
+                        return None
+                    # Need to preserve interior 0s (shape cells stored by pos, but real color)
+                    out[nr][nc] = grid[r][c]
+                # Also preserve original 0-cells inside bbox that are part of shape region
+                # Actually cells only contains non-0 cells. For shapes with 0 interior (like hollow box),
+                # we need to copy the whole bbox rectangle's non-0 cells only. That's what we do.
+            return out
+
+        for direction in ['right', 'left', 'down', 'up']:
+            ok = True
+            for ex in train:
+                if solve(ex['input'], direction) != ex['output']:
+                    ok = False
+                    break
+            if ok:
+                return solve(test_input, direction)
         return None
