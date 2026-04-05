@@ -538,6 +538,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_draw_border_from_dot,
             self._try_staircase_from_dot,
             self._try_bouncing_path_from_dot,
+            self._try_L_path_between_dots,
         ]
         for s in v2:
             try:
@@ -11315,3 +11316,58 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, fill_color)
+
+    # --- _try_L_path_between_dots (a2fd1cf0) ---
+    def _try_L_path_between_dots(self, train, test_input):
+        """Two colored dots. Draw L-path between them with a fill color. Corner is fixed relative to dot colors."""
+        def solve(grid, dotA, dotB, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            pa = pb = None
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == dotA: pa = (r, c)
+                    elif grid[r][c] == dotB: pb = (r, c)
+            if pa is None or pb is None:
+                return None
+            ar, ac = pa
+            br, bc = pb
+            # Corner at (A's row, B's col)
+            cr, cc = ar, bc
+            result = [list(row) for row in grid]
+            # Path from A to corner (horizontal at row ar) INCLUDING corner
+            if ac != bc:
+                step = 1 if bc > ac else -1
+                c = ac + step
+                while c != bc + step:
+                    result[ar][c] = fill_color
+                    c += step
+            # Path from corner to B (vertical at col bc) EXCLUDING corner (already painted)
+            if ar != br:
+                step = 1 if br > ar else -1
+                r = ar + step
+                while r != br:
+                    result[r][bc] = fill_color
+                    r += step
+            return result
+
+        # Learn dot colors (which is A, which is B) and fill color
+        inp0, out0 = train[0]['input'], train[0]['output']
+        nz_in = [(r,c,inp0[r][c]) for r in range(len(inp0)) for c in range(len(inp0[0])) if inp0[r][c] != 0]
+        if len(nz_in) != 2:
+            return None
+        in_colors = {v for _,_,v in nz_in}
+        out_colors = set(v for row in out0 for v in row) - {0}
+        fill_cands = out_colors - in_colors
+        if not fill_cands:
+            return None
+        fill_color = fill_cands.pop()
+        # Try both orderings
+        for dotA, dotB in [(nz_in[0][2], nz_in[1][2]), (nz_in[1][2], nz_in[0][2])]:
+            ok = True
+            for ex in train:
+                r = solve(ex['input'], dotA, dotB, fill_color)
+                if r != ex['output']:
+                    ok = False; break
+            if ok:
+                return solve(test_input, dotA, dotB, fill_color)
+        return None
