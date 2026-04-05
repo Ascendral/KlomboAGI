@@ -535,6 +535,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_or_halves_recolor,
             self._try_or_halves_with_separator_col,
             self._try_draw_x_from_dot,
+            self._try_draw_border_from_dot,
         ]
         for s in v2:
             try:
@@ -11189,6 +11190,30 @@ class SmartARCSolverV2(SmartARCSolver):
                     result[nr][nc] = color
                     nr += dr
                     nc += dc
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
+
+    # --- _try_draw_border_from_dot (fc754716) ---
+    def _try_draw_border_from_dot(self, train, test_input):
+        """Single dot. Draw grid border using dot's color."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 1:
+                return None
+            _, _, color = nz[0]
+            result = [[0]*cols for _ in range(rows)]
+            for c in range(cols):
+                result[0][c] = color
+                result[rows-1][c] = color
+            for r in range(rows):
+                result[r][0] = color
+                result[r][cols-1] = color
             return result
 
         for ex in train:
