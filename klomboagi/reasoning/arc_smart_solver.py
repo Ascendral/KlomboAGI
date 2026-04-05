@@ -531,6 +531,8 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_recolor_by_nearest_border,
             self._try_crosshairs_fill_rect,
             self._try_draw_diagonal_on_zeros,
+            self._try_fill_enclosed_zero_regions,
+            self._try_or_halves_recolor,
         ]
         for s in v2:
             try:
@@ -11043,3 +11045,82 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, new_color)
+
+    # --- _try_fill_enclosed_zero_regions (6cf79266) ---
+    def _try_fill_enclosed_zero_regions(self, train, test_input):
+        """Fill 0-regions that are fully enclosed by non-zero cells with a new color."""
+        def solve(grid, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            # Find 0-regions not connected to the border
+            visited = [[False]*cols for _ in range(rows)]
+            # BFS from all border 0-cells to mark "exterior" 0s
+            queue = []
+            for r in range(rows):
+                for c in range(cols):
+                    if (r == 0 or r == rows-1 or c == 0 or c == cols-1) and grid[r][c] == 0:
+                        if not visited[r][c]:
+                            visited[r][c] = True
+                            queue.append((r, c))
+            while queue:
+                cr, cc = queue.pop(0)
+                for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
+                    nr, nc = cr+dr, cc+dc
+                    if 0<=nr<rows and 0<=nc<cols and not visited[nr][nc] and grid[nr][nc] == 0:
+                        visited[nr][nc] = True
+                        queue.append((nr, nc))
+            # Any unvisited 0-cell is enclosed
+            result = [list(row) for row in grid]
+            filled = False
+            for r in range(rows):
+                for c in range(cols):
+                    if grid[r][c] == 0 and not visited[r][c]:
+                        result[r][c] = fill_color
+                        filled = True
+            return result if filled else None
+
+        # Learn fill color
+        inp0, out0 = train[0]['input'], train[0]['output']
+        in_colors = set(v for row in inp0 for v in row)
+        out_colors = set(v for row in out0 for v in row)
+        new_colors = out_colors - in_colors
+        if not new_colors:
+            return None
+        fill_color = new_colors.pop()
+
+        for ex in train:
+            r = solve(ex['input'], fill_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, fill_color)
+
+    # --- _try_or_halves_recolor (d19f7514) ---
+    def _try_or_halves_recolor(self, train, test_input):
+        """Two halves (top/bottom). OR them: any non-zero → output_color, else 0."""
+        def solve(grid, output_color):
+            rows, cols = len(grid), len(grid[0])
+            if rows % 2 != 0:
+                return None
+            h = rows // 2
+            result = [[0]*cols for _ in range(h)]
+            for r in range(h):
+                for c in range(cols):
+                    if grid[r][c] != 0 or grid[h+r][c] != 0:
+                        result[r][c] = output_color
+            return result
+
+        # Learn output color from first training example
+        out0 = train[0]['output']
+        output_color = None
+        for row in out0:
+            for v in row:
+                if v != 0:
+                    output_color = v; break
+            if output_color: break
+        if output_color is None:
+            return None
+
+        for ex in train:
+            r = solve(ex['input'], output_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, output_color)
