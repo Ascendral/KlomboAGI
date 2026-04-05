@@ -529,6 +529,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_four_rotation_tiling,
             self._try_drop_shape_to_separator,
             self._try_recolor_by_nearest_border,
+            self._try_crosshairs_fill_rect,
         ]
         for s in v2:
             try:
@@ -10965,3 +10966,50 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input)
+
+    # --- _try_crosshairs_fill_rect (21f83797) ---
+    def _try_crosshairs_fill_rect(self, train, test_input):
+        """Two dots on 0-bg. Draw cross through each (full row + col). Fill enclosed rectangle with new color."""
+        def solve(grid, dot_color, fill_color):
+            rows, cols = len(grid), len(grid[0])
+            dots = [(r, c) for r in range(rows) for c in range(cols) if grid[r][c] == dot_color]
+            if len(dots) != 2:
+                return None
+            (r1, c1), (r2, c2) = dots
+            result = [[0]*cols for _ in range(rows)]
+            # Draw crosshairs
+            for c in range(cols):
+                result[r1][c] = dot_color
+                result[r2][c] = dot_color
+            for r in range(rows):
+                result[r][c1] = dot_color
+                result[r][c2] = dot_color
+            # Fill rectangle between the two crosshairs
+            min_r, max_r = min(r1, r2) + 1, max(r1, r2)
+            min_c, max_c = min(c1, c2) + 1, max(c1, c2)
+            for r in range(min_r, max_r):
+                for c in range(min_c, max_c):
+                    result[r][c] = fill_color
+            return result
+
+        # Learn colors from training
+        inp0, out0 = train[0]['input'], train[0]['output']
+        dot_color = None
+        for r in range(len(inp0)):
+            for c in range(len(inp0[0])):
+                if inp0[r][c] != 0:
+                    dot_color = inp0[r][c]; break
+            if dot_color: break
+        if dot_color is None:
+            return None
+        # Find fill color from output (new color not in input)
+        in_colors = set(v for row in inp0 for v in row)
+        out_colors = set(v for row in out0 for v in row)
+        new_colors = out_colors - in_colors
+        fill_color = new_colors.pop() if new_colors else 1
+
+        for ex in train:
+            r = solve(ex['input'], dot_color, fill_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, dot_color, fill_color)
