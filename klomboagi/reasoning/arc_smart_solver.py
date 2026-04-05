@@ -542,6 +542,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_alternating_cols_from_2dots,
             self._try_count_8s_fill_matching_color,
             self._try_simple_tile_nxm,
+            self._try_extract_5border_with_padding,
         ]
         for s in v2:
             try:
@@ -11554,3 +11555,36 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return do_tile(test_input)
+
+    # --- _try_extract_5border_with_padding (3f7978a0) ---
+    def _try_extract_5border_with_padding(self, train, test_input):
+        """Find bounding box of 5-cells (or any non-bg border color), extract with padding."""
+        def solve(grid, marker, pad_r, pad_c):
+            rows, cols = len(grid), len(grid[0])
+            cells = [(r,c) for r in range(rows) for c in range(cols) if grid[r][c] == marker]
+            if not cells:
+                return None
+            min_r = min(r for r,c in cells)
+            max_r = max(r for r,c in cells)
+            min_c = min(c for r,c in cells)
+            max_c = max(c for r,c in cells)
+            r0 = max(0, min_r - pad_r)
+            r1 = min(rows, max_r + 1 + pad_r)
+            c0 = max(0, min_c - pad_c)
+            c1 = min(cols, max_c + 1 + pad_c)
+            return [[grid[r][c] for c in range(c0, c1)] for r in range(r0, r1)]
+
+        inp0 = train[0]['input']
+        from collections import Counter
+        colors = set(v for row in inp0 for v in row if v != 0)
+        for marker in colors:
+            for pr in range(4):
+                for pc in range(4):
+                    ok = True
+                    for ex in train:
+                        r = solve(ex['input'], marker, pr, pc)
+                        if r != ex['output']:
+                            ok = False; break
+                    if ok:
+                        return solve(test_input, marker, pr, pc)
+        return None
