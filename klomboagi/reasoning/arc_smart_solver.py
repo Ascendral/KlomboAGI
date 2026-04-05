@@ -534,6 +534,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_fill_enclosed_zero_regions,
             self._try_or_halves_recolor,
             self._try_or_halves_with_separator_col,
+            self._try_draw_x_from_dot,
         ]
         for s in v2:
             try:
@@ -11170,3 +11171,28 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, sep_col, marker)
+
+    # --- _try_draw_x_from_dot (623ea044) ---
+    def _try_draw_x_from_dot(self, train, test_input):
+        """Single dot on 0-bg. Draw X (4 diagonals) extending to grid edges."""
+        def solve(grid):
+            rows, cols = len(grid), len(grid[0])
+            nz = [(r, c, grid[r][c]) for r in range(rows) for c in range(cols) if grid[r][c] != 0]
+            if len(nz) != 1:
+                return None
+            r, c, color = nz[0]
+            result = [[0]*cols for _ in range(rows)]
+            result[r][c] = color
+            for dr, dc in [(-1,-1),(-1,1),(1,-1),(1,1)]:
+                nr, nc = r + dr, c + dc
+                while 0 <= nr < rows and 0 <= nc < cols:
+                    result[nr][nc] = color
+                    nr += dr
+                    nc += dc
+            return result
+
+        for ex in train:
+            r = solve(ex['input'])
+            if r != ex['output']:
+                return None
+        return solve(test_input)
