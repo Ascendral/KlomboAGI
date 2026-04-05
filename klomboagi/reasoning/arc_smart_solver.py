@@ -530,6 +530,7 @@ class SmartARCSolverV2(SmartARCSolver):
             self._try_drop_shape_to_separator,
             self._try_recolor_by_nearest_border,
             self._try_crosshairs_fill_rect,
+            self._try_draw_diagonal_on_zeros,
         ]
         for s in v2:
             try:
@@ -11013,3 +11014,32 @@ class SmartARCSolverV2(SmartARCSolver):
             if r != ex['output']:
                 return None
         return solve(test_input, dot_color, fill_color)
+
+    # --- _try_draw_diagonal_on_zeros (aa300dc3) ---
+    def _try_draw_diagonal_on_zeros(self, train, test_input):
+        """Draw main diagonal line with a new color on 0-cells only."""
+        def solve(grid, new_color):
+            rows, cols = len(grid), len(grid[0])
+            result = [list(row) for row in grid]
+            for i in range(min(rows, cols)):
+                if grid[i][i] == 0:
+                    result[i][i] = new_color
+            return result
+
+        # Learn new color
+        inp0, out0 = train[0]['input'], train[0]['output']
+        new_color = None
+        in_colors = set(v for row in inp0 for v in row)
+        for r in range(len(out0)):
+            for c in range(len(out0[0])):
+                if out0[r][c] not in in_colors:
+                    new_color = out0[r][c]; break
+            if new_color: break
+        if new_color is None:
+            return None
+
+        for ex in train:
+            r = solve(ex['input'], new_color)
+            if r != ex['output']:
+                return None
+        return solve(test_input, new_color)
