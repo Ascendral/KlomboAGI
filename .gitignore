@@ -13,3 +13,8 @@ build/
 .venv/
 venv/
 brain_core/target/
+
+# Capture data — regenerable via `python -m klomboagi.evals.arc_eval --capture`
+klomboagi/data/*.jsonl
+# Baseline run logs are large but useful — track only the dated ones explicitly
+baselines/*.tmp.txt

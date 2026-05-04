@@ -91,7 +91,8 @@ class ArcEvalReport:
 
 
 def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
-                 on_progress=None) -> ArcEvalReport:
+                 on_progress=None, capture: bool = False,
+                 capture_path=None) -> ArcEvalReport:
     """
     Run ARC-AGI-1 evaluation.
 
@@ -99,10 +100,17 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
         max_tasks: 0 = all tasks, >0 = limit
         dataset: "training" (400 tasks) or "evaluation" (400 tasks)
         on_progress: callback(task_idx, total, task_id, correct)
+        capture: if True, append every solve attempt to the JSONL capture.
+                 The capture is the input to the consolidation loop
+                 (rule abstraction + library — Week 2+).
+        capture_path: override default capture path (klomboagi/data/solved_tasks.jsonl)
     """
     import arckit
     import numpy as np
     from klomboagi.reasoning.arc_smart_solver import SmartARCSolverV2 as SmartARCSolver
+    if capture:
+        from klomboagi.reasoning.solve_capture import record_solve, reset_capture
+        reset_capture(capture_path)
 
     train_set, eval_set = arckit.load_data()
     tasks = train_set if dataset == "training" else eval_set
@@ -117,10 +125,12 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
     for idx, task in enumerate(tasks):
         task_start = time.time()
         result = ArcEvalResult(task_id=task.id)
+        # Initialize outside try so capture can see them even if conversion errors.
+        train_examples: list[dict] = []
+        test_input: list[list[int]] = []
 
         try:
             # Convert arckit format to solver format
-            train_examples = []
             for ex in task.train:
                 inp = np.array(ex[0]).tolist()
                 out = np.array(ex[1]).tolist()
@@ -145,6 +155,25 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
             result.correct = False
 
         result.time_ms = (time.time() - task_start) * 1000
+
+        if capture:
+            # Capture every attempt — solved AND failed AND errored.
+            # Failed/errored rows are useful for Week 2 diff analysis
+            # (which task types still escape the rule library?).
+            record_solve(
+                task_id=result.task_id,
+                dataset=dataset,
+                train=train_examples,
+                test_input=test_input,
+                predicted=result.predicted,
+                expected=result.expected,
+                correct=result.correct,
+                error=result.error,
+                time_ms=result.time_ms,
+                solver_class=type(solver).__name__,
+                capture_path=capture_path,
+            )
+
         report.results.append(result)
         report.total += 1
         if result.correct:
@@ -166,6 +195,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run ARC-AGI-1 evaluation")
     parser.add_argument("--max", type=int, default=0, help="Max tasks (0=all)")
     parser.add_argument("--dataset", default="training", choices=["training", "evaluation"])
+    parser.add_argument("--capture", action="store_true",
+                        help="Append every solve to klomboagi/data/solved_tasks.jsonl")
+    parser.add_argument("--capture-path", default=None,
+                        help="Override capture file path")
     args = parser.parse_args()
 
     def progress(idx, total, task_id, correct):
@@ -176,5 +209,9 @@ if __name__ == "__main__":
     print(f"\n  ARC-AGI-1 Evaluation ({args.dataset} set)")
     print(f"  ═══════════════════════════════════════")
 
-    report = run_arc_eval(max_tasks=args.max, dataset=args.dataset, on_progress=progress)
+    from pathlib import Path as _Path
+    cap_path = _Path(args.capture_path) if args.capture_path else None
+    report = run_arc_eval(max_tasks=args.max, dataset=args.dataset,
+                          on_progress=progress, capture=args.capture,
+                          capture_path=cap_path)
     print(f"\n\n{report.summary()}")
