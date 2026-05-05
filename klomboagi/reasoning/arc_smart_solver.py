@@ -151,8 +151,15 @@ class SmartARCSolverV2(SmartARCSolver):
     @staticmethod
     def _try_learner(learn_fn, train, test_input, loo=True):
         """
-        Try a learner: learn rule from train, optionally LOO validate,
-        apply to test_input. Returns result or None.
+        Try a learner: learn rule from train, fits-train validate,
+        optionally LOO validate, apply to test_input. Returns result or None.
+
+        Validation order (cheapest → strictest):
+          1. fits-train: rule must reproduce every training example.
+             Always runs. Catches buggy learners that return rules not
+             actually fitting their own training data — free, ~0.1ms.
+          2. LOO: leave-one-out cross-validation. Runs when loo=True
+             and len(train) >= 3. Catches overfitting.
         """
         try:
             rule = learn_fn(train)
@@ -161,6 +168,19 @@ class SmartARCSolverV2(SmartARCSolver):
             result = rule(test_input)
             if result is None:
                 return None
+
+            # Fits-train check (always runs). If the learned rule does
+            # not reproduce its own training data, it's a buggy rule
+            # and should not be applied to test_input.
+            for ex in train:
+                try:
+                    out = rule(ex["input"])
+                except Exception:
+                    return None
+                if out != ex["output"]:
+                    return None
+
+            # LOO: held-out validation when we have enough examples.
             if loo and len(train) >= 3:
                 if not SmartARCSolverV2._loo_validate(learn_fn, train):
                     return None
@@ -251,24 +271,24 @@ class SmartARCSolverV2(SmartARCSolver):
         from klomboagi.reasoning.arc_compose import learn_compose_rule
         from klomboagi.reasoning.arc_multiobj import learn_multiobj_rule
 
-        # Order: fast → slow, specific → general
-        # LOO=True only for pattern_match which is prone to overfitting
-        #
-        # Family name mapping for classifier-guided reordering
+        # Order: fast → slow, specific → general.
+        # All families now LOO-validated (was loo=False before 2026-05-04;
+        # phase-trace baseline showed 49/102 fires returned wrong answers
+        # that would have failed LOO. Fixed in commit ddfa048+1).
         family_learner_map = {
-            "cell_rule": (learn_cell_rule, False),
-            "region": (learn_region_rule, False),
-            "context": (learn_context_rule, False),
-            "ranking": (learn_ranking_rule, False),
-            "legend": (learn_legend_rule, False),
-            "compose": (learn_compose_rule, False),
-            "gravity": (learn_gravity_rule, False),
-            "tiling": (learn_tiling_rule, False),
-            "object_rule": (learn_object_rule, False),
-            "multiobj": (learn_multiobj_rule, False),
-            "extraction": (learn_extraction_rule, False),
-            "grid_ops": (learn_grid_rule, False),
-            "advanced": (learn_advanced_rule, False),
+            "cell_rule": (learn_cell_rule, True),
+            "region": (learn_region_rule, True),
+            "context": (learn_context_rule, True),
+            "ranking": (learn_ranking_rule, True),
+            "legend": (learn_legend_rule, True),
+            "compose": (learn_compose_rule, True),
+            "gravity": (learn_gravity_rule, True),
+            "tiling": (learn_tiling_rule, True),
+            "object_rule": (learn_object_rule, True),
+            "multiobj": (learn_multiobj_rule, True),
+            "extraction": (learn_extraction_rule, True),
+            "grid_ops": (learn_grid_rule, True),
+            "advanced": (learn_advanced_rule, True),
             "pattern": (learn_pattern_rule, True),
         }
 
@@ -299,13 +319,14 @@ class SmartARCSolverV2(SmartARCSolver):
         except Exception:
             ordered = default_order
 
-        # Also include span_fill variants in the loop
+        # Also include span_fill variants in the loop. All LOO-validated
+        # (was loo=False; same fix as family_learner_map above).
         extra_learners = [
-            (learn_span_fill_rule, False),
-            (learn_color_key_swap, False),
-            (learn_template_row_stamp, False),
-            (learn_grid_gap_fill, False),
-            (learn_single_cell_paint, False),
+            (learn_span_fill_rule, True),
+            (learn_color_key_swap, True),
+            (learn_template_row_stamp, True),
+            (learn_grid_gap_fill, True),
+            (learn_single_cell_paint, True),
         ]
 
         # Try extra learners first (fast, specific)
