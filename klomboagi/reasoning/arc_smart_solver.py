@@ -169,7 +169,14 @@ class SmartARCSolverV2(SmartARCSolver):
             return None
 
     def solve(self, train, test_input):
+        # Reset phase trace for this solve attempt. The eval harness reads
+        # `current_phase()` from solve_capture after solve() returns to learn
+        # which phase produced the result.
+        from klomboagi.reasoning.solve_capture import set_phase, reset_phase
+        reset_phase()
+
         # ── Pre-phase lookup strategies (self-validating, skip CV) ──
+        set_phase("pre_lookup")
         for lookup_fn in [self._try_key_shape_recolors_main, self._try_block_pattern_lookup]:
             try:
                 result = lookup_fn(train, test_input)
@@ -179,6 +186,7 @@ class SmartARCSolverV2(SmartARCSolver):
                 continue
 
         # ── Pre-phase: high-precision v2 strategies (cross-validated) ──
+        set_phase("pre_v2_high_precision")
         for pre_fn in [self._try_bordered_rect_center, self._try_rect_corner_edge_interior,
                        self._try_convert_isolated_cells, self._try_fill_zero_rect_interior,
                        self._try_connect_pairs_with_8,
@@ -198,6 +206,7 @@ class SmartARCSolverV2(SmartARCSolver):
                 continue
 
         # ── Phase 0: High-confidence specific learners (before hand-coded) ─────
+        set_phase("phase_0_specific_learners")
         from klomboagi.reasoning.arc_cell_rules import (
             learn_span_fill_rule, learn_color_key_swap, learn_template_row_stamp,
             learn_grid_gap_fill, learn_single_cell_paint, learn_connect_dot_pairs,
@@ -217,11 +226,13 @@ class SmartARCSolverV2(SmartARCSolver):
                 return result
 
         # ── Phase 1: 106 hand-coded strategies (cross-validated) ──────────────
+        set_phase("phase_1_handcoded_v18")
         result = super().solve(train, test_input)
         if result is not None:
             return result
 
         # ── Phase 2: Learned rule families (LOO validated) ────────────────────
+        set_phase("phase_2_learner_families")
         from klomboagi.reasoning.arc_cell_rules import (
             learn_cell_rule, learn_span_fill_rule, learn_color_key_swap,
             learn_template_row_stamp, learn_grid_gap_fill, learn_single_cell_paint
@@ -311,32 +322,25 @@ class SmartARCSolverV2(SmartARCSolver):
                 return result
 
         # DSL program synthesis (composable primitives, depth 1-3)
+        set_phase("phase_2a_dsl_synthesis")
         from klomboagi.reasoning.arc_dsl_v2 import synthesize
         synth_result = synthesize(train, test_input, max_depth=3, timeout_ms=2000)
         if synth_result is not None:
             return synth_result
 
-        # ── Phase 2b: Object-level compositional solver ──────────────────────
-        try:
-            from klomboagi.reasoning.arc_object_solver import CompositionalObjectSolver
-            obj_solver = CompositionalObjectSolver()
-            obj_result = obj_solver.solve(train, test_input)
-            if obj_result is not None:
-                return obj_result
-        except Exception:
-            pass
-
-        # ── Phase 2c: Reasoning-driven solver ────────────────────────────────
-        try:
-            from klomboagi.reasoning.arc_reasoner import ARCReasoner
-            reasoner = ARCReasoner()
-            reason_result = reasoner.solve(train, test_input)
-            if reason_result is not None:
-                return reason_result
-        except Exception:
-            pass
+        # ── Phases 2b/2c REMOVED 2026-05-04 ───────────────────────────────────
+        # phase_2b (CompositionalObjectSolver) and phase_2c (ARCReasoner) were
+        # confirmed dead by phase-tracing on the full 1000-task training set:
+        # both fired 0 times across all tasks. Run in isolation, ARCReasoner
+        # solves 1/200 tasks (overlap with upstream) and CompositionalObjectSolver
+        # 4/200 (all overlap). Net contribution to the 348-baseline: 0.
+        # Removed per CLAUDE.md "infrastructure exists when it's dead code".
+        # Source files arc_reasoner.py + arc_object_solver.py also deleted
+        # (1,341 LOC). See commit message for evidence.
+        # ──────────────────────────────────────────────────────────────────────
 
         # ── Phase 3: V2 hand-coded strategies (cross-validated) ───────────────
+        set_phase("phase_3_handcoded_v2")
         v2 = [
             self._try_slide_object_to_anchor,
             self._try_tile_complement,
@@ -593,6 +597,7 @@ class SmartARCSolverV2(SmartARCSolver):
                 continue
 
         # ── Phase 3.5: Lookup strategies (skip cross-validation) ─────────────
+        set_phase("phase_3_5_lookup")
         for s in [self._try_shape_pattern_to_value]:
             try:
                 r = s(train, test_input)
@@ -602,6 +607,7 @@ class SmartARCSolverV2(SmartARCSolver):
                 pass
 
         # ── Phase 4: LLM refinement loop (verified) ───────────────────────────
+        set_phase("phase_4_llm")
         from klomboagi.reasoning.arc_llm_solver import solve_with_llm
         llm_result = solve_with_llm(train, test_input, max_attempts=5)
         if llm_result is not None:
@@ -610,6 +616,7 @@ class SmartARCSolverV2(SmartARCSolver):
         # ── Phase 5: Disabled — unvalidated fallback produces too many wrong
         # results (pattern_rule alone fires 176 times incorrectly without LOO).
         # Return None to avoid polluting results.
+        set_phase("unsolved")
         return None
 
     def _try_paint_shape_with_color(self, train, test_input):

@@ -109,7 +109,9 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
     import numpy as np
     from klomboagi.reasoning.arc_smart_solver import SmartARCSolverV2 as SmartARCSolver
     if capture:
-        from klomboagi.reasoning.solve_capture import record_solve, reset_capture
+        from klomboagi.reasoning.solve_capture import (
+            record_solve, reset_capture, current_phase,
+        )
         reset_capture(capture_path)
 
     train_set, eval_set = arckit.load_data()
@@ -171,6 +173,7 @@ def run_arc_eval(max_tasks: int = 0, dataset: str = "training",
                 error=result.error,
                 time_ms=result.time_ms,
                 solver_class=type(solver).__name__,
+                primitive_trace=[current_phase()] if current_phase() else [],
                 capture_path=capture_path,
             )
 

@@ -23,9 +23,35 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
+
+# ── Phase trace ─────────────────────────────────────────────────────────────
+# The solver advertises which phase is currently executing by calling
+# `set_phase("phase_2_learners")` at the start of each phase block in
+# SmartARCSolverV2.solve(). After solve() returns, the eval harness reads
+# `current_phase()` to learn which phase produced the result.
+#
+# Thread-local so concurrent solves don't clobber each other.
+
+_TLS = threading.local()
+
+
+def set_phase(name: str) -> None:
+    """Solver calls this at the top of each phase block."""
+    _TLS.phase = name
+
+
+def current_phase() -> str:
+    """Harness reads this after solve() returns. Empty string if unset."""
+    return getattr(_TLS, "phase", "")
+
+
+def reset_phase() -> None:
+    """Call before each new solve to clear stale state."""
+    _TLS.phase = ""
 
 # Default capture file. Override via env var KLOMBOAGI_CAPTURE_PATH.
 DEFAULT_CAPTURE_PATH = (
