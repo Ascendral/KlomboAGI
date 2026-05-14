@@ -1,182 +1,75 @@
 # KlomboAGI
 
-[![CI](https://github.com/Ascendral/klomboagi/actions/workflows/ci.yml/badge.svg)](https://github.com/Ascendral/klomboagi/actions/workflows/ci.yml)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+> **PROJECT STATUS (2026-05-13): OVERFITTED ARC SOLVER. Not a runtime. Not an agent. Not autonomous cognition. See [STATUS](#status) below.**
+
 [![License: BSL 1.1](https://img.shields.io/badge/license-BSL%201.1-orange.svg)](LICENSE)
 
-KlomboAGI is an experimental autonomous cognition runtime for persistent agent research in digital workspaces.
+## Status
 
-It is not AGI. It is a serious, test-backed system for exploring whether an agent can become more useful over time through persistent memory, world modeling, planning, verification, reflection, scheduling, guarded execution, and longitudinal evaluation.
+This repository was originally framed as "an experimental autonomous cognition runtime." That framing **does not match the code**. A measurement-driven audit on 2026-05-13 found:
 
-## What Works Today
+- The "runtime" CLI (`python3 -m klomboagi init/status/run/doctor/mission/task`) **does not exist** — there is no `__main__.py`. None of the README's prior commands work.
+- The package contents are: `config/`, `data/`, `evals/`, `llm/`, `reasoning/`, `static/`. There is **no** mission/memory/planner/world-model/scheduler/executor module.
+- The test suite is 21 tests, **all in `test_arc_solver.py`**. There are no tests for any of the "tested" runtime behaviors the old README listed.
+- The only thing this repository actually contains is an ARC-AGI-1 pattern solver (`klomboagi/reasoning/arc_smart_solver.py`, 13,277 lines, 260 `_try_*` methods).
 
-The current runtime is real and exercised by tests:
-- persistent mission, task, world-state, queue, memory, and eval storage
-- working, semantic, and procedural memory
-- world entities, relations, and snapshot history
-- planner, verifier, critic, and reflection loop
-- guarded multi-step execution with cycle traces
-- scheduler-backed mission queue selection
-- real workspace actions:
-  - read/write/append files
-  - list directories
-  - safe command execution
-  - repo search
-  - patch application
-- policy checks for command execution
-- repeatable repo eval fixtures
-- CLI commands for runtime control, diagnostics, and repo evals
+What the solver actually scores (measured 2026-05-13, HEAD `15c4353`):
 
-## What Is Tested
+| Split                | Score        | Notes                                      |
+|----------------------|--------------|--------------------------------------------|
+| ARC-AGI-1 training   | **342/1000 (34.2%)** | Hand-coded against these tasks.    |
+| ARC-AGI-1 evaluation | **0/120 (0.0%)**    | **Zero transfer to held-out tasks.** |
 
-The test suite currently covers:
-- runtime initialization and persistence
-- mission/task creation and status tracking
-- working memory, plans, critiques, reflections, semantic facts, and procedures
-- world-model updates and dependency relations
-- guarded command policy
-- real file, command, search, and patch execution in a workspace root
-- multi-step cycle execution and stop conditions
-- repo fixture evaluation
-
-Run it locally:
+Reproduce:
 
 ```bash
-python3 -m pip install --user .
-python3 -m pytest tests/ -v
+python3 -m klomboagi.evals.arc_eval --dataset training
+python3 -m klomboagi.evals.arc_eval --dataset evaluation
 ```
 
-## Quick Start
+Baseline files are in `baselines/`.
 
-### 1. Configure storage and workspace roots
+## What This Means
+
+The 34.2% training score was earned by writing 260 pattern-specific `_try_*` methods, each targeting a particular family of training puzzles. That approach is explicitly prohibited by this project's own `CLAUDE.md`:
+
+> Prohibited: Writing _try_* functions or pattern-specific solvers.
+> The whole point of this project is that it works on things it has never seen.
+
+The 0/120 on the evaluation set is the proof that the prohibition was justified.
+
+The aspirational docs (`TRUTH.md`, `ARCHITECTURE.md`, `V0.md`, `ASSESSMENT_REPORT.md`) describe a system that was **never implemented**. They are kept in-tree as a record of intent, but the layers they describe (Executive / Memory / World Model / Reasoning / Action / Learning / Safety / Evaluation) do not exist in the code.
+
+## What Is Real
+
+- An ARC-AGI-1 solver in `klomboagi/reasoning/` that overfits the training set.
+- A small ARC eval harness in `klomboagi/evals/arc_eval.py`.
+- A classifier (`arc_classifier.py`) and various pattern modules.
+- An `llm/` directory and `config/` directory.
+- The `solve_capture` JSONL recording wired by commit `c7ec901`.
+
+Nothing else claimed by prior docs has been verified to exist or run.
+
+## Recommended Disposition
+
+Per the 2026-05-13 audit, the recommended next step is to **stop work on this repository**. If you want to pursue autonomous-agent research, do it in a new repo with the autonomous-cognition claims removed from day 1 and a real eval harness in place before any code is written.
+
+If you want to pursue ARC-AGI seriously, you would need to delete the 260 `_try_*` methods, start from a real induction/search system, accept that the new score starts near 0, and only count gains that show up on the **evaluation** split.
+
+## Audit Reproduction
+
+To verify the audit claims yourself:
 
 ```bash
-cp .env.example .env
-export KLOMBOAGI_RUNTIME_ROOT="$HOME/KlomboAGI/runtime"
-export KLOMBOAGI_LONG_TERM_ROOT="$HOME/KlomboAGI/long-term"
-export KLOMBOAGI_WORKSPACE_ROOT="$HOME/KlomboAGI/workspace"
+# Confirm the runtime CLI is fiction
+python3 -m klomboagi --help          # ImportError: no __main__
+
+# Confirm tests are only ARC tests
+ls tests/
+
+# Confirm prohibited pattern count (260 pattern-specific methods)
+grep -cE '^\s+def[[:space:]]+_t''ry_' klomboagi/reasoning/arc_smart_solver.py
+
+# Reproduce the eval-split zero
+python3 -m klomboagi.evals.arc_eval --dataset evaluation
 ```
-
-If you want long-term memory on the external 4TB drive, override it explicitly:
-
-```bash
-export KLOMBOAGI_LONG_TERM_ROOT="/Volumes/KlomboAGI-4TB/KlomboAGI"
-```
-
-### 2. Run diagnostics
-
-```bash
-python3 -m pip install --user .
-python3 -m klomboagi doctor
-```
-
-### 3. Initialize and inspect the runtime
-
-```bash
-python3 -m klomboagi init
-python3 -m klomboagi status
-```
-
-### 4. Create and run missions
-
-```bash
-python3 -m klomboagi mission create "search repo for deploy_app and inspect deployment code"
-python3 -m klomboagi run
-```
-
-### 5. Run repeatable repo eval fixtures
-
-```bash
-python3 -m klomboagi eval repo --fixture repo_search
-python3 -m klomboagi eval repo --fixture repo_patch
-```
-
-## CLI Surface
-
-Supported commands:
-- `python3 -m klomboagi init`
-- `python3 -m klomboagi status`
-- `python3 -m klomboagi run`
-- `python3 -m klomboagi doctor`
-- `python3 -m klomboagi mission create "..." [--priority N]`
-- `python3 -m klomboagi mission list`
-- `python3 -m klomboagi task create <mission_id> "..." [--action-kind ...]`
-- `python3 -m klomboagi task list`
-- `python3 -m klomboagi eval repo --fixture repo_search|repo_patch`
-
-## LLM Configuration
-
-KlomboAGI supports optional LLM integration for smarter planning, safety critique, and reflection. It works with **any OpenAI-compatible API** — Ollama, OpenAI, Groq, DeepSeek, and others. No external Python packages are required; all HTTP calls use the standard library.
-
-When the LLM is unavailable, the system automatically falls back to its built-in keyword and rule-based heuristics.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `KLOMBOAGI_LLM_ENABLED` | `0` | Set to `1` to enable LLM calls |
-| `KLOMBOAGI_LLM_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
-| `KLOMBOAGI_LLM_MODEL` | `qwen3:14b` | Model name |
-| `KLOMBOAGI_LLM_API_KEY` | *(empty)* | API key (not needed for Ollama) |
-
-### Examples
-
-**Ollama (default, no API key needed):**
-```bash
-ollama pull qwen3:14b
-export KLOMBOAGI_LLM_ENABLED=1
-export KLOMBOAGI_LLM_BASE_URL=http://localhost:11434/v1
-python3 -m klomboagi run
-```
-
-**OpenAI:**
-```bash
-export KLOMBOAGI_LLM_ENABLED=1
-export KLOMBOAGI_LLM_BASE_URL=https://api.openai.com/v1
-export KLOMBOAGI_LLM_MODEL=gpt-4o-mini
-export KLOMBOAGI_LLM_API_KEY=sk-...
-python3 -m klomboagi run
-```
-
-**Groq:**
-```bash
-export KLOMBOAGI_LLM_ENABLED=1
-export KLOMBOAGI_LLM_BASE_URL=https://api.groq.com/openai/v1
-export KLOMBOAGI_LLM_MODEL=llama-3.3-70b-versatile
-export KLOMBOAGI_LLM_API_KEY=gsk_...
-python3 -m klomboagi run
-```
-
-## Safety Model
-
-Command execution is intentionally restricted.
-
-Currently allowed command families are limited to a safe set:
-- `pwd`
-- `ls`
-- `cat`
-- `echo`
-- `rg`
-- `find`
-- `python3` without arbitrary flags
-
-Commands containing dangerous tokens or shell metacharacters are blocked by policy and fail the task.
-
-## Truth Boundary
-
-KlomboAGI does not currently claim:
-- human-level intelligence
-- AGI
-- open-ended autonomy
-- unrestricted shell control
-- production reliability in hostile or high-risk environments
-
-It does claim, honestly, that the current repo contains a working autonomous-agent research runtime with real execution, real persistence, real evaluation hooks, and real safety constraints.
-
-## Foundation Documents
-
-- [TRUTH.md](./TRUTH.md)
-- [ARCHITECTURE.md](./ARCHITECTURE.md)
-- [EVALS.md](./EVALS.md)
-- [V0.md](./V0.md)
-- [STORAGE.md](./STORAGE.md)

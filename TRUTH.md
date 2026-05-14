@@ -1,5 +1,7 @@
 # TRUTH.md
 
+> **STATUS (2026-05-13):** This document describes the *standard* KlomboAGI set for itself. By that standard, **the project failed.** Measured ARC-AGI-1 score: 342/1000 on training, **0/120 on held-out evaluation** — zero transfer. The "Failure Conditions" section below ("UI theater", "pattern enumeration disguised as cognition", "memory storage without behavioral effect") describes what the project actually became. Kept in-tree as a record of what was attempted and how it should have been judged. See [README.md](./README.md) for current reality.
+
 ## What KlomboAGI Is
 
 KlomboAGI is an experimental autonomous cognition system.

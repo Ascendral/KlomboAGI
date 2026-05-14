@@ -1,6 +1,14 @@
 # KlomboAGI — Full Assessment Report
 ## From Current State to AGI: What's Done, What's Left, Step by Step
 
+> **STATUS (2026-05-13): OUTDATED AND PARTIALLY FICTIONAL.** Verified against current code:
+> - Claimed "213 Python files" → actual **31**
+> - Claimed "49,006 lines" → actual **30,819**
+> - Claimed "464 tests (100% passing)" → actual **21 tests**, all in `test_arc_solver.py`
+> - Claimed "50+ cognitive subsystems", "10-phase cognition loop" → **do not exist in code**
+>
+> The report was written 2026-03-29; large portions of the system it describes were deleted in commit `ddfa048` (refactor, -1,341 LOC) and prior cleanups. See [README.md](./README.md) for the audited current reality.
+
 **Date**: 2026-03-29
 **Author**: Claude (automated audit + AGI research synthesis)
 **Codebase**: 213 Python files, 49,006 lines, 464 tests (100% passing)

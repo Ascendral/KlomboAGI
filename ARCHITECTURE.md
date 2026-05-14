@@ -1,5 +1,7 @@
 # ARCHITECTURE.md
 
+> **STATUS (2026-05-13): ASPIRATIONAL — NOT IMPLEMENTED.** The 8 layers described below (Executive / Memory / World Model / Reasoning / Action / Learning / Safety / Evaluation) **do not exist in the code**. The actual package contains only `config/data/evals/llm/reasoning/static`. See [README.md](./README.md) for the audited reality.
+
 ## Purpose
 
 KlomboAGI is an experimental autonomous cognition system.
