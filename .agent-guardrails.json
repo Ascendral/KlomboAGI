@@ -1,0 +1,18 @@
+{
+  "requireCommitTags": true,
+  "allowedCommitTags": [
+    "FIX",
+    "REFACTOR",
+    "LEARN",
+    "EVAL",
+    "INFRA",
+    "DOCS",
+    "TEST",
+    "SECURITY",
+    "SOLVE"
+  ],
+  "scoreRequiredTags": ["SOLVE"],
+  "requireVerificationCommand": true,
+  "verificationCommand": "python3 -m pytest tests/test_arc_solver.py -q",
+  "forbiddenAddedPatterns": ["def _try_"]
+}
